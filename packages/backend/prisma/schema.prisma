@@ -1,0 +1,328 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id               String    @id @default(cuid())
+  name             String?
+  email            String    @unique
+  passwordHash     String?   @map("password_hash")
+  avatar           String?
+  role             String    @default("user")
+  subscriptionPlan String?   @default("free") @map("subscription_plan")
+  provider         String?
+  providerId       String?   @unique @map("provider_id")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  projects         Project[]
+  uploads          Upload[]
+  folders          Folder[]
+  teamsOwned       Team[]       @relation("TeamOwner")
+  teamMemberships  TeamMember[]
+  comments         Comment[]
+  notifications    Notification[]
+  favorites        Favorite[]
+  recentActivities RecentActivity[]
+  userPreferences  UserPreferences?
+  collaboratorOn   Collaborator[]
+  projectShares    ProjectShare[]
+
+  @@map("users")
+}
+
+model Project {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  title       String?
+  thumbnail   String?
+  canvasData  Json?    @map("canvas_data")
+  status      String   @default("draft")
+  ownerId     String   @map("owner_id")
+  isPublic    Boolean  @default(false) @map("is_public")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  owner          User            @relation(fields: [ownerId], references: [id])
+  pages          Page[]
+  comments       Comment[]
+  versions       Version[]
+  shares         ProjectShare[]
+  collaborators  Collaborator[]
+  shareLinks     ShareLink[]
+  exportHistory  ExportHistory[]
+  favorites      Favorite[]
+
+  @@map("projects")
+}
+
+model Page {
+  id         String   @id @default(cuid())
+  name       String   @default("Page")
+  pageNumber Int?     @map("page_number")
+  pageData   Json?    @map("page_data")
+  projectId  String   @map("project_id")
+  index      Int      @default(0)
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  project  Project   @relation(fields: [projectId], references: [id])
+  elements Element[]
+
+  @@map("pages")
+}
+
+model Element {
+  id        String   @id @default(cuid())
+  type      String
+  data      Json
+  pageId    String   @map("page_id")
+  locked    Boolean  @default(false)
+  hidden    Boolean  @default(false)
+  index     Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  page Page @relation(fields: [pageId], references: [id])
+
+  @@map("elements")
+}
+
+model Folder {
+  id        String   @id @default(cuid())
+  name      String
+  ownerId   String   @map("owner_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  owner User @relation(fields: [ownerId], references: [id])
+
+  @@map("folders")
+}
+
+model Template {
+  id          String   @id @default(cuid())
+  name        String
+  category    String
+  subcategory String?
+  thumbnail   String
+  templateData Json?  @map("template_data")
+  data        Json?
+  tags        Json
+  isPremium   Boolean  @default(false) @map("is_premium")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  favorites Favorite[]
+
+  @@map("templates")
+}
+
+model Category {
+  id        String @id @default(cuid())
+  name      String
+  icon      String?
+  sortOrder Int    @default(0) @map("sort_order")
+
+  @@map("categories")
+}
+
+model Upload {
+  id        String   @id @default(cuid())
+  fileName  String   @map("file_name")
+  fileUrl   String   @map("file_url")
+  fileType  String   @map("file_type")
+  url       String?
+  size      Int?
+  ownerId   String   @map("owner_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  owner User @relation(fields: [ownerId], references: [id])
+
+  @@map("uploads")
+}
+
+model Team {
+  id        String   @id @default(cuid())
+  name      String
+  ownerId   String   @map("owner_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  owner    User          @relation("TeamOwner", fields: [ownerId], references: [id])
+  members  TeamMember[]
+  brandAssets BrandAsset[]
+
+  @@map("teams")
+}
+
+model TeamMember {
+  id       String   @id @default(cuid())
+  teamId   String   @map("team_id")
+  userId   String   @map("user_id")
+  role     String   @default("member")
+  joinedAt DateTime @default(now()) @map("joined_at")
+
+  team Team @relation(fields: [teamId], references: [id])
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([teamId, userId])
+  @@map("team_members")
+}
+
+model Collaborator {
+  id          String   @id @default(cuid())
+  projectId   String   @map("project_id")
+  userId      String   @map("user_id")
+  permission  String   @default("view")
+  invitedBy   String?  @map("invited_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  project Project @relation(fields: [projectId], references: [id])
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@unique([projectId, userId])
+  @@map("collaborators")
+}
+
+model ShareLink {
+  id          String    @id @default(cuid())
+  projectId   String    @map("project_id")
+  token       String    @unique
+  accessLevel String    @default("view") @map("access_level")
+  expiresAt   DateTime? @map("expires_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  project Project @relation(fields: [projectId], references: [id])
+
+  @@map("share_links")
+}
+
+model Comment {
+  id          String   @id @default(cuid())
+  content     String   @map("comment_text")
+  projectId   String?  @map("project_id")
+  userId      String   @map("user_id")
+  elementId   String?  @map("element_id")
+  x           Float?
+  y           Float?
+  resolved    Boolean  @default(false)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  project Project? @relation(fields: [projectId], references: [id])
+  user    User     @relation(fields: [userId], references: [id])
+
+  @@map("comments")
+}
+
+model Version {
+  id            String   @id @default(cuid())
+  projectId     String   @map("project_id")
+  versionNumber Int      @default(1) @map("version_number")
+  data          Json?
+  canvasSnapshot Json?  @map("canvas_snapshot")
+  createdById   String?  @map("created_by_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  project Project @relation(fields: [projectId], references: [id])
+
+  @@map("versions")
+}
+
+model ProjectShare {
+  id         String   @id @default(cuid())
+  projectId  String   @map("project_id")
+  userId     String   @map("user_id")
+  permission String   @default("view")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  project Project @relation(fields: [projectId], references: [id])
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@map("project_shares")
+}
+
+model Favorite {
+  id         String   @id @default(cuid())
+  projectId  String?  @map("project_id")
+  templateId String?  @map("template_id")
+  userId     String   @map("user_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  project  Project?  @relation(fields: [projectId], references: [id])
+  template Template? @relation(fields: [templateId], references: [id])
+  user     User      @relation(fields: [userId], references: [id])
+
+  @@unique([projectId, userId])
+  @@unique([templateId, userId])
+  @@map("favorites")
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  type      String
+  message   String
+  isRead    Boolean  @default(false) @map("is_read")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("notifications")
+}
+
+model BrandAsset {
+  id        String   @id @default(cuid())
+  teamId    String   @map("team_id")
+  assetType String   @map("asset_type")
+  assetUrl  String   @map("asset_url")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  team Team @relation(fields: [teamId], references: [id])
+
+  @@map("brand_assets")
+}
+
+model RecentActivity {
+  id           String   @id @default(cuid())
+  userId       String   @map("user_id")
+  activityType String   @map("activity_type")
+  referenceId  String?  @map("reference_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("recent_activity")
+}
+
+model ExportHistory {
+  id         String   @id @default(cuid())
+  projectId  String   @map("project_id")
+  exportType String   @map("export_type")
+  fileUrl    String?  @map("file_url")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  project Project @relation(fields: [projectId], references: [id])
+
+  @@map("export_history")
+}
+
+model UserPreferences {
+  id                String   @id @default(cuid())
+  userId            String   @unique @map("user_id")
+  theme             String   @default("light")
+  language          String   @default("en")
+  autosaveInterval  Int      @default(30) @map("autosave_interval")
+  editorPreferences Json?    @map("editor_preferences")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("user_preferences")
+}

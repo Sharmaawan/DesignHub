@@ -1,0 +1,128 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  html, body, #root {
+    min-height: 100vh;
+    overflow-y: auto;
+  }
+
+  body {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #c1c1c1;
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #a1a1a1;
+  }
+
+  .dark ::-webkit-scrollbar-thumb {
+    background: #4a4a6a;
+  }
+
+  .dark ::-webkit-scrollbar-thumb:hover {
+    background: #5a5a7a;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply px-4 py-2 bg-canva-purple text-white rounded-lg font-medium
+      hover:bg-canva-purple-dark transition-all duration-200
+      active:scale-95 focus:outline-none focus:ring-2 focus:ring-canva-purple/50;
+  }
+
+  .btn-secondary {
+    @apply px-4 py-2 bg-white dark:bg-canva-dark-surface border border-gray-200
+      dark:border-canva-dark-border text-gray-700 dark:text-canva-dark-text
+      rounded-lg font-medium hover:bg-gray-50 dark:hover:bg-gray-700
+      transition-all duration-200 active:scale-95;
+  }
+
+  .btn-ghost {
+    @apply px-3 py-1.5 text-gray-600 dark:text-gray-300 rounded-lg
+      hover:bg-gray-100 dark:hover:bg-gray-700 transition-all duration-200;
+  }
+
+  .sidebar-item {
+    @apply flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer
+      text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/50
+      transition-all duration-150 text-sm font-medium;
+  }
+
+  .sidebar-item.active {
+    @apply bg-canva-purple/10 text-canva-purple dark:bg-canva-purple/20;
+  }
+
+  .input-field {
+    @apply w-full px-3 py-2 bg-white dark:bg-canva-dark-surface
+      border border-gray-200 dark:border-canva-dark-border
+      rounded-lg text-sm text-gray-900 dark:text-white
+      placeholder-gray-400 dark:placeholder-gray-500
+      focus:outline-none focus:ring-2 focus:ring-canva-purple/30 focus:border-canva-purple
+      transition-all duration-200;
+  }
+
+  .card {
+    @apply bg-white dark:bg-canva-dark-surface rounded-xl
+      border border-gray-100 dark:border-canva-dark-border
+      shadow-canva hover:shadow-canva-lg transition-all duration-200;
+  }
+
+  .tooltip {
+    @apply absolute z-50 px-2 py-1 text-xs font-medium text-white
+      bg-gray-900 rounded-md shadow-lg pointer-events-none
+      opacity-0 group-hover:opacity-100 transition-opacity duration-150;
+  }
+
+  .glass {
+    @apply bg-white/80 dark:bg-canva-dark-surface/80 backdrop-blur-xl;
+  }
+
+  .editor-panel {
+    @apply bg-white dark:bg-canva-dark-surface border-r border-gray-200
+      dark:border-canva-dark-border overflow-y-auto;
+  }
+
+  .toolbar-btn {
+    @apply p-2 rounded-lg text-gray-600 dark:text-gray-300
+      hover:bg-gray-100 dark:hover:bg-gray-700
+      active:scale-95 transition-all duration-150;
+  }
+
+  .toolbar-btn.active {
+    @apply bg-canva-purple/10 text-canva-purple;
+  }
+}
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
