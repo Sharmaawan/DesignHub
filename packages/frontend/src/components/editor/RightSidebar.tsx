@@ -1,12 +1,16 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useEditorStore } from '../../stores/editorStore';
-import { CanvasElement, TextData, ImageData, ShapeData } from '../../types';
-import { COLORS_PALETTE, FONT_FAMILIES, GRADIENT_PRESETS } from '../../utils/cn';
+import { CanvasElement, TextData, ImageData, ShapeData, TableData, ChartData } from '../../types';
+import { COLORS_PALETTE, FONT_FAMILIES, FONT_WEIGHT_MAP, FONT_WEIGHT_LABELS, GRADIENT_PRESETS } from '../../utils/cn';
 import {
   HiOutlineX, HiOutlineTrash, HiOutlineDuplicate, HiOutlineLockClosed,
   HiOutlineLockOpen, HiOutlineEye, HiOutlineEyeOff,
-  HiOutlineArrowUp, HiOutlineArrowDown,
+  HiOutlineArrowUp, HiOutlineArrowDown, HiOutlinePlus, HiOutlineMinus,
+  HiOutlinePhotograph, HiOutlineAdjustments,
+  HiOutlineArrowLeft, HiOutlineArrowRight,
+  HiOutlineTemplate, HiOutlineCog,
 } from 'react-icons/hi';
+import toast from 'react-hot-toast';
 
 export default function RightSidebar() {
   const {
@@ -47,6 +51,7 @@ export default function RightSidebar() {
     updateElement(element.id, {
       data: { ...element.data, ...data } as any,
     });
+    pushHistory();
   };
 
   return (
@@ -95,8 +100,8 @@ export default function RightSidebar() {
           <div className="grid grid-cols-2 gap-2">
             <NumberInput label="X" value={Math.round(element.x)} onChange={(v) => handleUpdate({ x: v })} />
             <NumberInput label="Y" value={Math.round(element.y)} onChange={(v) => handleUpdate({ y: v })} />
-            <NumberInput label="W" value={Math.round(element.width)} onChange={(v) => handleUpdate({ width: v })} min={10} />
-            <NumberInput label="H" value={Math.round(element.height)} onChange={(v) => handleUpdate({ height: v })} min={10} />
+            <NumberInput label="W" value={Math.round(element.width)} onChange={(v) => handleUpdate({ width: Math.max(20, v) })} min={20} />
+            <NumberInput label="H" value={Math.round(element.height)} onChange={(v) => handleUpdate({ height: Math.max(20, v) })} min={20} />
           </div>
           <div className="grid grid-cols-2 gap-2 mt-2">
             <NumberInput label="Rotate" value={Math.round(element.rotation)} onChange={(v) => handleUpdate({ rotation: v })} min={0} max={360} />
@@ -126,30 +131,38 @@ export default function RightSidebar() {
         {/* Shape Properties */}
         {element.type === 'shape' && <ShapeProperties element={element} handleDataUpdate={handleDataUpdate} />}
 
-        {/* Shadow */}
-        <Section title="Shadow">
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={!!element.shadow}
-              onChange={(e) => handleUpdate({
-                shadow: e.target.checked ? { color: '#000000', blur: 8, offsetX: 2, offsetY: 2, opacity: 0.3 } : undefined,
-              })}
-              className="w-4 h-4 rounded border-gray-300 text-canva-purple focus:ring-canva-purple"
-            />
-            <span className="text-sm text-gray-700 dark:text-gray-300">Drop shadow</span>
-          </label>
-          {element.shadow && (
-            <div className="space-y-2 mt-3 ml-6">
-              <ColorPicker value={element.shadow.color} onChange={(v) => handleUpdate({ shadow: { ...element.shadow!, color: v } })} />
-              <Slider label="Blur" value={element.shadow.blur} onChange={(v) => handleUpdate({ shadow: { ...element.shadow!, blur: v } })} min={0} max={100} />
-              <div className="grid grid-cols-2 gap-2">
-                <NumberInput label="X" value={element.shadow.offsetX} onChange={(v) => handleUpdate({ shadow: { ...element.shadow!, offsetX: v } })} min={-50} max={50} />
-                <NumberInput label="Y" value={element.shadow.offsetY} onChange={(v) => handleUpdate({ shadow: { ...element.shadow!, offsetY: v } })} min={-50} max={50} />
+        {/* Table Properties */}
+        {element.type === 'table' && <TableProperties element={element} handleDataUpdate={handleDataUpdate} />}
+
+        {/* Chart Properties */}
+        {element.type === 'chart' && <ChartProperties element={element} handleDataUpdate={handleDataUpdate} />}
+
+        {/* Shadow — general (hidden for text, handled in TextProperties) */}
+        {element.type !== 'text' && (
+          <Section title="Shadow">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={!!element.shadow}
+                onChange={(e) => handleUpdate({
+                  shadow: e.target.checked ? { color: '#000000', blur: 8, offsetX: 2, offsetY: 2, opacity: 0.3 } : undefined,
+                })}
+                className="w-4 h-4 rounded border-gray-300 text-canva-purple focus:ring-canva-purple"
+              />
+              <span className="text-sm text-gray-700 dark:text-gray-300">Drop shadow</span>
+            </label>
+            {element.shadow && (
+              <div className="space-y-2 mt-3 ml-6">
+                <ColorPicker value={element.shadow.color} onChange={(v) => handleUpdate({ shadow: { ...element.shadow!, color: v } })} />
+                <Slider label="Blur" value={element.shadow.blur} onChange={(v) => handleUpdate({ shadow: { ...element.shadow!, blur: v } })} min={0} max={100} />
+                <div className="grid grid-cols-2 gap-2">
+                  <NumberInput label="X" value={element.shadow.offsetX} onChange={(v) => handleUpdate({ shadow: { ...element.shadow!, offsetX: v } })} min={-50} max={50} />
+                  <NumberInput label="Y" value={element.shadow.offsetY} onChange={(v) => handleUpdate({ shadow: { ...element.shadow!, offsetY: v } })} min={-50} max={50} />
+                </div>
               </div>
-            </div>
-          )}
-        </Section>
+            )}
+          </Section>
+        )}
 
         {/* Layer Name */}
         <Section title="Layer">
@@ -167,6 +180,9 @@ export default function RightSidebar() {
 
 function TextProperties({ element, handleDataUpdate }: { element: CanvasElement; handleDataUpdate: (data: Record<string, unknown>) => void }) {
   const data = element.data as TextData;
+  const availableWeights = FONT_WEIGHT_MAP[data.fontFamily] || [400, 700];
+  const weightOptions = [300, 400, 500, 600, 700, 800, 900];
+
   return (
     <>
       <Section title="Text">
@@ -181,14 +197,23 @@ function TextProperties({ element, handleDataUpdate }: { element: CanvasElement;
         </select>
         <div className="grid grid-cols-2 gap-2">
           <NumberInput label="Size" value={data.fontSize} onChange={(v) => handleDataUpdate({ fontSize: v })} min={8} max={400} />
-          <select value={data.fontWeight} onChange={(e) => handleDataUpdate({ fontWeight: Number(e.target.value) })} className="input-field">
-            <option value={300}>Light</option>
-            <option value={400}>Regular</option>
-            <option value={500}>Medium</option>
-            <option value={600}>Semi Bold</option>
-            <option value={700}>Bold</option>
-            <option value={800}>Extra Bold</option>
-          </select>
+          <div>
+            <label className="text-xs text-gray-500 mb-1 block">Weight</label>
+            <select
+              value={data.fontWeight}
+              onChange={(e) => handleDataUpdate({ fontWeight: Number(e.target.value) })}
+              className="input-field"
+            >
+              {weightOptions.map((w) => {
+                const supported = availableWeights.includes(w);
+                return (
+                  <option key={w} value={w} disabled={!supported}>
+                    {FONT_WEIGHT_LABELS[w] || w}{!supported ? ' (unsupported)' : ''}
+                  </option>
+                );
+              })}
+            </select>
+          </div>
         </div>
         <div className="flex items-center gap-1 mt-2">
           <button
@@ -228,32 +253,254 @@ function TextProperties({ element, handleDataUpdate }: { element: CanvasElement;
       <Section title="Text Color">
         <ColorPicker value={data.color} onChange={(v) => handleDataUpdate({ color: v })} />
       </Section>
+      <Section title="Text Shadow">
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={!!element.shadow}
+            onChange={(e) => {
+              if (e.target.checked) {
+                useEditorStore.getState().updateElement(element.id, {
+                  shadow: { color: '#000000', blur: 4, offsetX: 2, offsetY: 2, opacity: 0.5 },
+                });
+              } else {
+                useEditorStore.getState().updateElement(element.id, { shadow: undefined });
+              }
+              useEditorStore.getState().pushHistory();
+            }}
+            className="w-4 h-4 rounded border-gray-300 text-canva-purple focus:ring-canva-purple"
+          />
+          <span className="text-sm text-gray-700 dark:text-gray-300">Enable shadow</span>
+        </label>
+        {element.shadow && (
+          <div className="space-y-2 mt-3 ml-6">
+            <ColorPicker
+              label="Color"
+              value={element.shadow.color}
+              onChange={(v) => {
+                useEditorStore.getState().updateElement(element.id, { shadow: { ...element.shadow!, color: v } });
+                useEditorStore.getState().pushHistory();
+              }}
+            />
+            <Slider
+              label="Blur"
+              value={element.shadow.blur}
+              onChange={(v) => {
+                useEditorStore.getState().updateElement(element.id, { shadow: { ...element.shadow!, blur: v } });
+                useEditorStore.getState().pushHistory();
+              }}
+              min={0} max={100}
+            />
+            <Slider
+              label="Opacity"
+              value={element.shadow.opacity ?? 0.5}
+              onChange={(v) => {
+                useEditorStore.getState().updateElement(element.id, { shadow: { ...element.shadow!, opacity: v } });
+                useEditorStore.getState().pushHistory();
+              }}
+              min={0} max={1} step={0.05}
+            />
+            <div className="grid grid-cols-2 gap-2">
+              <NumberInput
+                label="X"
+                value={element.shadow.offsetX}
+                onChange={(v) => {
+                  useEditorStore.getState().updateElement(element.id, { shadow: { ...element.shadow!, offsetX: v } });
+                  useEditorStore.getState().pushHistory();
+                }}
+                min={-50} max={50}
+              />
+              <NumberInput
+                label="Y"
+                value={element.shadow.offsetY}
+                onChange={(v) => {
+                  useEditorStore.getState().updateElement(element.id, { shadow: { ...element.shadow!, offsetY: v } });
+                  useEditorStore.getState().pushHistory();
+                }}
+                min={-50} max={50}
+              />
+            </div>
+          </div>
+        )}
+      </Section>
     </>
   );
 }
 
 function ImageProperties({ element, handleDataUpdate }: { element: CanvasElement; handleDataUpdate: (data: Record<string, unknown>) => void }) {
   const data = element.data as ImageData;
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const flipH = !!(element.data as any).flipH;
+  const flipV = !!(element.data as any).flipV;
+
+  const aspectRatios = [
+    { label: 'Free', ratio: null },
+    { label: '1:1', ratio: 1 },
+    { label: '4:3', ratio: 4 / 3 },
+    { label: '16:9', ratio: 16 / 9 },
+    { label: '3:2', ratio: 3 / 2 },
+    { label: '9:16', ratio: 9 / 16 },
+  ];
+
+  const roundedCorners = [
+    { label: '0px', value: 0 },
+    { label: '4px', value: 4 },
+    { label: '8px', value: 8 },
+    { label: '12px', value: 12 },
+    { label: '16px', value: 16 },
+    { label: '24px', value: 24 },
+    { label: 'Circle', value: 9999 },
+  ];
+
+  const handleReplaceImage = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const src = ev.target?.result as string;
+      handleDataUpdate({ src });
+      toast.success('Image replaced!');
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
   return (
-    <Section title="Image Adjustments">
-      <Slider label="Brightness" value={data.brightness} onChange={(v) => handleDataUpdate({ brightness: v })} min={0} max={200} />
-      <Slider label="Contrast" value={data.contrast} onChange={(v) => handleDataUpdate({ contrast: v })} min={0} max={200} />
-      <Slider label="Saturation" value={data.saturation} onChange={(v) => handleDataUpdate({ saturation: v })} min={0} max={200} />
-      <Slider label="Hue" value={data.hue} onChange={(v) => handleDataUpdate({ hue: v })} min={0} max={360} />
-      <Slider label="Blur" value={data.blur} onChange={(v) => handleDataUpdate({ blur: v })} min={0} max={20} />
-      <NumberInput label="Radius" value={data.borderRadius} onChange={(v) => handleDataUpdate({ borderRadius: v })} min={0} max={500} />
-      <div className="grid grid-cols-4 gap-1 mt-2">
-        {[0, 8, 16, 999].map((r) => (
+    <>
+      <Section title="Image Adjustments">
+        <Slider label="Brightness" value={data.brightness} onChange={(v) => handleDataUpdate({ brightness: v })} min={0} max={200} />
+        <Slider label="Contrast" value={data.contrast} onChange={(v) => handleDataUpdate({ contrast: v })} min={0} max={200} />
+        <Slider label="Saturation" value={data.saturation} onChange={(v) => handleDataUpdate({ saturation: v })} min={0} max={200} />
+        <Slider label="Hue" value={data.hue} onChange={(v) => handleDataUpdate({ hue: v })} min={0} max={360} />
+        <Slider label="Blur" value={data.blur} onChange={(v) => handleDataUpdate({ blur: v })} min={0} max={20} />
+        <NumberInput label="Radius" value={data.borderRadius} onChange={(v) => handleDataUpdate({ borderRadius: v })} min={0} max={500} />
+        <div className="grid grid-cols-4 gap-1 mt-2">
+          {[0, 8, 16, 999].map((r) => (
+            <button
+              key={r}
+              onClick={() => handleDataUpdate({ borderRadius: r })}
+              className={`h-8 rounded-lg border flex items-center justify-center ${data.borderRadius === r ? 'border-canva-purple bg-canva-purple/10' : 'border-gray-200 dark:border-gray-700'}`}
+            >
+              <div className="w-4 h-4 bg-gray-400" style={{ borderRadius: r }} />
+            </button>
+          ))}
+        </div>
+      </Section>
+
+      {/* Image Editing */}
+      <div className="h-px bg-gray-200 dark:bg-gray-700 my-4" />
+
+      <Section title="Image Editing">
+        {/* Flip Controls */}
+        <div className="flex items-center gap-2 mb-3">
+          <span className="text-xs text-gray-500 w-14 flex-shrink-0">Flip</span>
           <button
-            key={r}
-            onClick={() => handleDataUpdate({ borderRadius: r })}
-            className={`h-8 rounded-lg border flex items-center justify-center ${data.borderRadius === r ? 'border-canva-purple bg-canva-purple/10' : 'border-gray-200 dark:border-gray-700'}`}
+            onClick={() => handleDataUpdate({ flipH: !flipH })}
+            className={`flex-1 h-8 rounded-lg border flex items-center justify-center gap-1 text-xs font-medium transition-colors ${
+              flipH
+                ? 'border-canva-purple bg-canva-purple/10 text-canva-purple'
+                : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
+            }`}
+            title="Flip Horizontal"
           >
-            <div className="w-4 h-4 bg-gray-400" style={{ borderRadius: r }} />
+            <HiOutlineArrowRight size={14} /> H
           </button>
-        ))}
-      </div>
-    </Section>
+          <button
+            onClick={() => handleDataUpdate({ flipV: !flipV })}
+            className={`flex-1 h-8 rounded-lg border flex items-center justify-center gap-1 text-xs font-medium transition-colors ${
+              flipV
+                ? 'border-canva-purple bg-canva-purple/10 text-canva-purple'
+                : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
+            }`}
+            title="Flip Vertical"
+          >
+            <HiOutlineArrowDown size={14} /> V
+          </button>
+        </div>
+
+        {/* Aspect Ratio */}
+        <div className="mb-3">
+          <label className="text-xs text-gray-500 mb-1 block">Aspect Ratio</label>
+          <div className="grid grid-cols-6 gap-1">
+            {aspectRatios.map((ar) => (
+              <button
+                key={ar.label}
+                onClick={() => {
+                  if (ar.ratio === null) return;
+                  const maxDim = Math.max(element.width, element.height);
+                  let newW: number;
+                  let newH: number;
+                  if (ar.ratio >= 1) {
+                    newW = maxDim;
+                    newH = Math.round(maxDim / ar.ratio);
+                  } else {
+                    newH = maxDim;
+                    newW = Math.round(maxDim * ar.ratio);
+                  }
+                  useEditorStore.getState().updateElement(element.id, { width: newW, height: newH });
+                  useEditorStore.getState().pushHistory();
+                }}
+                className={`h-8 rounded-lg border flex items-center justify-center text-[10px] font-medium transition-colors ${
+                  ar.ratio === null
+                    ? 'border-canva-purple bg-canva-purple/10 text-canva-purple'
+                    : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
+                }`}
+              >
+                {ar.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Replace Image */}
+        <div className="mb-3">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            onChange={handleReplaceImage}
+            className="hidden"
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="w-full h-9 rounded-lg border border-gray-200 dark:border-gray-700 flex items-center justify-center gap-2 text-xs font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+          >
+            <HiOutlinePhotograph size={14} /> Replace Image
+          </button>
+        </div>
+
+        {/* Crop */}
+        <div className="mb-3">
+          <button
+            onClick={() => toast('Crop mode - use transform handles to adjust')}
+            className="w-full h-9 rounded-lg border border-gray-200 dark:border-gray-700 flex items-center justify-center gap-2 text-xs font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+          >
+            <HiOutlineAdjustments size={14} /> Crop
+          </button>
+        </div>
+
+        {/* Rounded Corners */}
+        <div>
+          <label className="text-xs text-gray-500 mb-1 block">Rounded Corners</label>
+          <div className="grid grid-cols-7 gap-1">
+            {roundedCorners.map((rc) => (
+              <button
+                key={rc.label}
+                onClick={() => handleDataUpdate({ borderRadius: rc.value })}
+                className={`h-8 rounded-lg border flex items-center justify-center text-[10px] font-medium transition-colors ${
+                  data.borderRadius === rc.value
+                    ? 'border-canva-purple bg-canva-purple/10 text-canva-purple'
+                    : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
+                }`}
+              >
+                {rc.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </Section>
+    </>
   );
 }
 
@@ -268,6 +515,196 @@ function ShapeProperties({ element, handleDataUpdate }: { element: CanvasElement
       <NumberInput label="Stroke W" value={data.strokeWidth} onChange={(v) => handleDataUpdate({ strokeWidth: v })} min={0} max={50} />
       <NumberInput label="Corner R" value={data.cornerRadius} onChange={(v) => handleDataUpdate({ cornerRadius: v })} min={0} max={500} />
     </Section>
+  );
+}
+
+function TableProperties({ element, handleDataUpdate }: { element: CanvasElement; handleDataUpdate: (data: Record<string, unknown>) => void }) {
+  const data = element.data as TableData;
+  const { rows, cols, cells } = data;
+
+  const updateCell = (row: number, col: number, value: string) => {
+    const newCells = cells.map((r) => [...r]);
+    while (newCells.length <= row) newCells.push(Array(cols).fill(''));
+    while (newCells[row].length <= col) newCells[row].push('');
+    newCells[row][col] = value;
+    handleDataUpdate({ cells: newCells });
+  };
+
+  const addRow = () => {
+    const newCells = [...cells, Array(cols).fill('')];
+    handleDataUpdate({ cells: newCells, rows: rows + 1 });
+  };
+
+  const removeRow = () => {
+    if (rows <= 1) return;
+    const newCells = cells.slice(0, -1);
+    handleDataUpdate({ cells: newCells, rows: rows - 1 });
+  };
+
+  const addCol = () => {
+    const newCells = cells.map((r) => [...r, '']);
+    handleDataUpdate({ cells: newCells, cols: cols + 1 });
+  };
+
+  const removeCol = () => {
+    if (cols <= 1) return;
+    const newCells = cells.map((r) => r.slice(0, -1));
+    handleDataUpdate({ cells: newCells, cols: cols - 1 });
+  };
+
+  return (
+    <>
+      <Section title="Table Structure">
+        <div className="flex items-center gap-2 mb-3">
+          <div className="flex items-center gap-1 flex-1">
+            <span className="text-xs text-gray-500 w-12">Rows</span>
+            <button onClick={removeRow} className="w-7 h-7 rounded-lg border border-gray-200 dark:border-gray-700 flex items-center justify-center hover:bg-gray-50 dark:hover:bg-gray-700"><HiOutlineMinus size={12} /></button>
+            <span className="text-sm font-medium text-gray-900 dark:text-white w-6 text-center">{rows}</span>
+            <button onClick={addRow} className="w-7 h-7 rounded-lg border border-gray-200 dark:border-gray-700 flex items-center justify-center hover:bg-gray-50 dark:hover:bg-gray-700"><HiOutlinePlus size={12} /></button>
+          </div>
+          <div className="flex items-center gap-1 flex-1">
+            <span className="text-xs text-gray-500 w-12">Cols</span>
+            <button onClick={removeCol} className="w-7 h-7 rounded-lg border border-gray-200 dark:border-gray-700 flex items-center justify-center hover:bg-gray-50 dark:hover:bg-gray-700"><HiOutlineMinus size={12} /></button>
+            <span className="text-sm font-medium text-gray-900 dark:text-white w-6 text-center">{cols}</span>
+            <button onClick={addCol} className="w-7 h-7 rounded-lg border border-gray-200 dark:border-gray-700 flex items-center justify-center hover:bg-gray-50 dark:hover:bg-gray-700"><HiOutlinePlus size={12} /></button>
+          </div>
+        </div>
+      </Section>
+
+      <Section title="Cell Content">
+        <div className="max-h-48 overflow-y-auto space-y-1">
+          {cells.map((row, ri) =>
+            row.map((cell, ci) => (
+              <div key={`${ri}-${ci}`} className="flex items-center gap-1">
+                <span className="text-[10px] text-gray-400 w-10 flex-shrink-0">R{ri + 1}C{ci + 1}</span>
+                <input
+                  type="text"
+                  value={cell}
+                  onChange={(e) => updateCell(ri, ci, e.target.value)}
+                  className="flex-1 px-2 py-1 text-xs bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-1 focus:ring-canva-purple/30 text-gray-900 dark:text-white"
+                />
+              </div>
+            ))
+          )}
+        </div>
+      </Section>
+
+      <Section title="Table Style">
+        <label className="flex items-center gap-2 cursor-pointer mb-3">
+          <input
+            type="checkbox"
+            checked={!!data.headerRow}
+            onChange={(e) => handleDataUpdate({ headerRow: e.target.checked })}
+            className="w-4 h-4 rounded border-gray-300 text-canva-purple focus:ring-canva-purple"
+          />
+          <span className="text-sm text-gray-700 dark:text-gray-300">Header row</span>
+        </label>
+        <ColorPicker label="Header BG" value={data.headerBgColor} onChange={(v) => handleDataUpdate({ headerBgColor: v })} />
+        <div className="mt-2"><ColorPicker label="Header Text" value={data.headerTextColor} onChange={(v) => handleDataUpdate({ headerTextColor: v })} /></div>
+        <div className="mt-2"><ColorPicker label="Cell Text" value={data.cellTextColor} onChange={(v) => handleDataUpdate({ cellTextColor: v })} /></div>
+        <div className="mt-2"><ColorPicker label="Border" value={data.borderColor} onChange={(v) => handleDataUpdate({ borderColor: v })} /></div>
+      </Section>
+    </>
+  );
+}
+
+function ChartProperties({ element, handleDataUpdate }: { element: CanvasElement; handleDataUpdate: (data: Record<string, unknown>) => void }) {
+  const chartData = element.data as ChartData;
+  const { chartType, data: items, showLabels, showLegend } = chartData;
+
+  const updateItem = (index: number, field: string, value: string | number) => {
+    const newItems = items.map((item: { label: string; value: number; color: string }, i: number) => i === index ? { ...item, [field]: value } : item);
+    handleDataUpdate({ data: newItems });
+  };
+
+  const addItem = () => {
+    const colors = ['#7B2FBE', '#00C4CC', '#FF6B9D', '#FF8A00', '#4CAF50', '#2196F3'];
+    const newItems = [...items, { label: `Item ${items.length + 1}`, value: 30, color: colors[items.length % colors.length] }];
+    handleDataUpdate({ data: newItems });
+  };
+
+  const removeItem = (index: number) => {
+    if (items.length <= 1) return;
+    const newItems = items.filter((_: { label: string; value: number; color: string }, i: number) => i !== index);
+    handleDataUpdate({ data: newItems });
+  };
+
+  return (
+    <>
+      <Section title="Chart Type">
+        <div className="grid grid-cols-2 gap-1">
+          {(['bar', 'line', 'pie', 'doughnut'] as const).map((type) => (
+            <button
+              key={type}
+              onClick={() => handleDataUpdate({ chartType: type })}
+              className={`px-3 py-2 rounded-lg text-xs font-medium capitalize transition-colors ${
+                chartType === type
+                  ? 'bg-canva-purple text-white'
+                  : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+              }`}
+            >
+              {type}
+            </button>
+          ))}
+        </div>
+      </Section>
+
+      <Section title="Data">
+        <div className="space-y-2 max-h-48 overflow-y-auto">
+          {items.map((item: { label: string; value: number; color: string }, i: number) => (
+            <div key={i} className="flex items-center gap-1">
+              <input
+                type="color"
+                value={item.color}
+                onChange={(e) => updateItem(i, 'color', e.target.value)}
+                className="w-6 h-6 rounded border-0 cursor-pointer flex-shrink-0"
+              />
+              <input
+                type="text"
+                value={item.label}
+                onChange={(e) => updateItem(i, 'label', e.target.value)}
+                className="w-16 px-1.5 py-1 text-xs bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded focus:outline-none focus:ring-1 focus:ring-canva-purple/30 text-gray-900 dark:text-white"
+                placeholder="Label"
+              />
+              <input
+                type="number"
+                value={item.value}
+                onChange={(e) => updateItem(i, 'value', Number(e.target.value))}
+                className="w-14 px-1.5 py-1 text-xs bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded focus:outline-none focus:ring-1 focus:ring-canva-purple/30 text-gray-900 dark:text-white"
+                min={0}
+              />
+              <button onClick={() => removeItem(i)} className="w-6 h-6 rounded flex items-center justify-center text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 flex-shrink-0">
+                <HiOutlineMinus size={12} />
+              </button>
+            </div>
+          ))}
+        </div>
+        <button onClick={addItem} className="mt-2 w-full py-1.5 text-xs font-medium text-canva-purple bg-canva-purple/10 rounded-lg hover:bg-canva-purple/20 transition-colors flex items-center justify-center gap-1">
+          <HiOutlinePlus size={12} /> Add data point
+        </button>
+      </Section>
+
+      <Section title="Options">
+        <label className="flex items-center gap-2 cursor-pointer mb-2">
+          <input
+            type="checkbox"
+            checked={!!showLabels}
+            onChange={(e) => handleDataUpdate({ showLabels: e.target.checked })}
+            className="w-4 h-4 rounded border-gray-300 text-canva-purple focus:ring-canva-purple"
+          />
+          <span className="text-sm text-gray-700 dark:text-gray-300">Show labels</span>
+        </label>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={!!showLegend}
+            onChange={(e) => handleDataUpdate({ showLegend: e.target.checked })}
+            className="w-4 h-4 rounded border-gray-300 text-canva-purple focus:ring-canva-purple"
+          />
+          <span className="text-sm text-gray-700 dark:text-gray-300">Show legend</span>
+        </label>
+      </Section>
+    </>
   );
 }
 

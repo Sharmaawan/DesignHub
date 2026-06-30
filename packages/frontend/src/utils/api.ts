@@ -29,7 +29,7 @@ api.interceptors.response.use(
 export const authAPI = {
   register: (data: { name: string; email: string; password: string }) => api.post('/auth/register', data),
   login: (data: { email: string; password: string }) => api.post('/auth/login', data),
-  googleLogin: (data: { email: string; name: string; avatar?: string }) => api.post('/auth/google', data),
+  googleLoginWithCredential: (credential: string) => api.post('/auth/google', { credential }),
   getMe: () => api.get('/auth/me'),
 };
 
@@ -96,8 +96,17 @@ export const favoriteAPI = {
 export const teamAPI = {
   list: () => api.get('/teams'),
   create: (data: { name: string }) => api.post('/teams', data),
+  getMembers: (teamId: string) => api.get(`/teams/${teamId}/members`),
   addMember: (teamId: string, data: { email: string; role?: string }) => api.post(`/teams/${teamId}/members`, data),
   removeMember: (teamId: string, memberId: string) => api.delete(`/teams/${teamId}/members/${memberId}`),
+  updateMemberRole: (teamId: string, memberId: string, role: string) => api.put(`/teams/${teamId}/members/${memberId}`, { role }),
+  getInvites: (teamId: string) => api.get(`/teams/${teamId}/invites`),
+  sendInvite: (teamId: string, data: { email: string; role?: string }) => api.post(`/teams/${teamId}/invites`, data),
+  acceptInvite: (inviteId: string) => api.put(`/teams/invites/${inviteId}/accept`),
+  rejectInvite: (inviteId: string) => api.put(`/teams/invites/${inviteId}/reject`),
+  resendInvite: (inviteId: string) => api.put(`/teams/invites/${inviteId}/resend`),
+  revokeInvite: (inviteId: string) => api.delete(`/teams/invites/${inviteId}`),
+  getUserInvites: () => api.get('/teams/user/invites'),
 };
 
 export const collaboratorAPI = {
@@ -126,6 +135,37 @@ export const activityAPI = {
 export const exportAPI = {
   create: (data: { format: string; projectId: string }) => api.post('/export', data),
   get: (id: string) => api.get(`/export/${id}`),
+};
+
+export const productUpdateAPI = {
+  list: () => api.get('/product-updates'),
+  create: (data: any) => api.post('/product-updates', data),
+  update: (id: string, data: any) => api.put(`/product-updates/${id}`, data),
+  delete: (id: string) => api.delete(`/product-updates/${id}`),
+};
+
+export const aiAPI = {
+  generate: (data: { provider: string; prompt: string; type: string }) => api.post('/ai/generate', data),
+  history: () => api.get('/ai/history'),
+  stats: () => api.get('/ai/stats'),
+};
+
+export const backgroundRemovalAPI = {
+  remove: (file: File) => {
+    const formData = new FormData();
+    formData.append('image', file);
+    return api.post('/background-removal/remove', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+  },
+  list: () => api.get('/background-removal'),
+  delete: (id: string) => api.delete(`/background-removal/${id}`),
+};
+
+export const emailSettingsAPI = {
+  get: () => api.get('/email-settings'),
+  connect: (data: { email: string; appPassword: string; host?: string; port?: number }) =>
+    api.post('/email-settings/connect', data),
+  disconnect: () => api.post('/email-settings/disconnect'),
+  test: () => api.post('/email-settings/test'),
 };
 
 export default api;

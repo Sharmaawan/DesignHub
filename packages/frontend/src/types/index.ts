@@ -3,6 +3,8 @@ export interface User {
   email: string;
   name: string;
   avatar?: string;
+  provider?: string;
+  subscriptionPlan?: string;
   createdAt: string;
 }
 
@@ -298,4 +300,33 @@ export interface DesignType {
   height: number;
   category: string;
   description?: string;
+}
+
+export type PageTransitionType = 'none' | 'fade' | 'slide' | 'wipe' | 'dissolve' | 'pan' | 'rise' | 'flow' | 'matchAndMove';
+
+export interface PageTransition {
+  type: PageTransitionType;
+  duration: number;
+  delay: number;
+  direction?: 'left' | 'right' | 'up' | 'down';
+}
+
+export type ElementAnimationType = 'none' | 'fadeIn' | 'pop' | 'bounce' | 'slide' | 'rise' | 'zoom' | 'rotate' | 'typewriter' | 'pulse';
+
+export interface ElementAnimation {
+  type: ElementAnimationType;
+  duration: number;
+  delay: number;
+  direction?: 'left' | 'right' | 'up' | 'down';
+}
+
+export interface LayerItem {
+  id: string;
+  name: string;
+  type: string;
+  visible: boolean;
+  locked: boolean;
+  opacity: number;
+  children?: string[];
+  parentId?: string;
 }

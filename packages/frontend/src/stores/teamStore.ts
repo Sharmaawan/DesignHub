@@ -1,27 +1,60 @@
 import { create } from 'zustand';
-import { TeamInvite, Workspace } from '../types';
 import { teamAPI } from '../utils/api';
+
+export interface TeamInvite {
+  id: string;
+  email: string;
+  role: string;
+  status: 'pending' | 'accepted' | 'rejected';
+  expiresAt: string;
+  token: string;
+  createdAt: string;
+  invitedBy?: { id: string; name: string; email: string; avatar?: string };
+  team?: { id: string; name: string };
+}
+
+export interface TeamMember {
+  id: string;
+  userId: string;
+  role: string;
+  joinedAt: string;
+  user: { id: string; name: string; email: string; avatar?: string };
+}
+
+export interface Workspace {
+  id: string;
+  name: string;
+  ownerId: string;
+  plan: string;
+  memberCount: number;
+  createdAt: string;
+  members?: TeamMember[];
+  invites?: TeamInvite[];
+}
 
 interface TeamState {
   invites: TeamInvite[];
   workspaces: Workspace[];
   currentWorkspace: Workspace | null;
+  userInvites: TeamInvite[];
   isLoading: boolean;
   loadTeams: () => Promise<void>;
-  addInvite: (invite: Omit<TeamInvite, 'id' | 'inviteToken' | 'createdAt'>) => void;
-  acceptInvite: (id: string) => void;
-  rejectInvite: (id: string) => void;
-  resendInvite: (id: string) => void;
-  revokeInvite: (id: string) => void;
-  copyInviteLink: (id: string) => string;
+  loadUserInvites: () => Promise<void>;
+  createTeam: (name: string) => Promise<void>;
+  sendInvite: (teamId: string, email: string, role?: string) => Promise<void>;
+  acceptInvite: (inviteId: string) => Promise<void>;
+  rejectInvite: (inviteId: string) => Promise<void>;
+  resendInvite: (inviteId: string) => Promise<void>;
+  revokeInvite: (inviteId: string) => Promise<void>;
+  removeMember: (teamId: string, memberId: string) => Promise<void>;
   setCurrentWorkspace: (ws: Workspace) => void;
-  getPendingInvites: () => TeamInvite[];
 }
 
 export const useTeamStore = create<TeamState>((set, get) => ({
   invites: [],
   workspaces: [],
   currentWorkspace: null,
+  userInvites: [],
   isLoading: false,
 
   loadTeams: async () => {
@@ -35,6 +68,8 @@ export const useTeamStore = create<TeamState>((set, get) => ({
         plan: 'free',
         memberCount: t.members?.length || 0,
         createdAt: t.createdAt,
+        members: t.members || [],
+        invites: t.invites || [],
       }));
       set({ workspaces, currentWorkspace: workspaces[0] || null, isLoading: false });
     } catch {
@@ -42,49 +77,77 @@ export const useTeamStore = create<TeamState>((set, get) => ({
     }
   },
 
-  addInvite: (invite) => {
-    set((state) => ({
-      invites: [
-        {
-          ...invite,
-          id: `inv-${Date.now()}`,
-          inviteToken: `tok-${Math.random().toString(36).substring(2, 10)}`,
-          createdAt: new Date().toISOString(),
-        },
-        ...state.invites,
-      ],
-    }));
+  loadUserInvites: async () => {
+    try {
+      const { data } = await teamAPI.getUserInvites();
+      set({ userInvites: data });
+    } catch {
+      set({ userInvites: [] });
+    }
   },
 
-  acceptInvite: (id) =>
-    set((state) => ({
-      invites: state.invites.map((inv) => (inv.id === id ? { ...inv, status: 'accepted' as const } : inv)),
-    })),
+  createTeam: async (name: string) => {
+    try {
+      await teamAPI.create({ name });
+      await get().loadTeams();
+    } catch (err: any) {
+      throw new Error(err.response?.data?.error || 'Failed to create team');
+    }
+  },
 
-  rejectInvite: (id) =>
-    set((state) => ({
-      invites: state.invites.map((inv) => (inv.id === id ? { ...inv, status: 'rejected' as const } : inv)),
-    })),
+  sendInvite: async (teamId: string, email: string, role?: string) => {
+    try {
+      await teamAPI.sendInvite(teamId, { email, role });
+      await get().loadTeams();
+    } catch (err: any) {
+      throw new Error(err.response?.data?.error || 'Failed to send invite');
+    }
+  },
 
-  resendInvite: (id) =>
-    set((state) => ({
-      invites: state.invites.map((inv) =>
-        inv.id === id
-          ? { ...inv, status: 'pending' as const, expiresAt: new Date(Date.now() + 86400000 * 7).toISOString() }
-          : inv
-      ),
-    })),
+  acceptInvite: async (inviteId: string) => {
+    try {
+      await teamAPI.acceptInvite(inviteId);
+      await get().loadTeams();
+      await get().loadUserInvites();
+    } catch (err: any) {
+      throw new Error(err.response?.data?.error || 'Failed to accept invite');
+    }
+  },
 
-  revokeInvite: (id) =>
-    set((state) => ({
-      invites: state.invites.filter((inv) => inv.id !== id),
-    })),
+  rejectInvite: async (inviteId: string) => {
+    try {
+      await teamAPI.rejectInvite(inviteId);
+      await get().loadUserInvites();
+    } catch (err: any) {
+      throw new Error(err.response?.data?.error || 'Failed to reject invite');
+    }
+  },
 
-  copyInviteLink: (id) => {
-    const invite = get().invites.find((i) => i.id === id);
-    return invite ? `https://designhub.app/invite/${invite.inviteToken}` : '';
+  resendInvite: async (inviteId: string) => {
+    try {
+      await teamAPI.resendInvite(inviteId);
+    } catch (err: any) {
+      throw new Error(err.response?.data?.error || 'Failed to resend invite');
+    }
+  },
+
+  revokeInvite: async (inviteId: string) => {
+    try {
+      await teamAPI.revokeInvite(inviteId);
+      await get().loadTeams();
+    } catch (err: any) {
+      throw new Error(err.response?.data?.error || 'Failed to revoke invite');
+    }
+  },
+
+  removeMember: async (teamId: string, memberId: string) => {
+    try {
+      await teamAPI.removeMember(teamId, memberId);
+      await get().loadTeams();
+    } catch (err: any) {
+      throw new Error(err.response?.data?.error || 'Failed to remove member');
+    }
   },
 
   setCurrentWorkspace: (ws) => set({ currentWorkspace: ws }),
-  getPendingInvites: () => get().invites.filter((i) => i.status === 'pending'),
 }));

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { CanvasElement, Page, Project } from '../types';
+import { CanvasElement, Page, Project, PageTransition, ElementAnimation } from '../types';
 import { generateId } from '../utils/cn';
 
 interface HistoryEntry {
@@ -34,6 +34,11 @@ interface EditorState {
   collaborators: { id: string; name: string; avatar: string; cursor?: { x: number; y: number } }[];
   commentsOpen: boolean;
   versionsOpen: boolean;
+  viewportCenter: { x: number; y: number };
+  layersOpen: boolean;
+  pageTransitions: PageTransition[];
+  elementAnimations: Record<string, ElementAnimation>;
+  elementNames: Record<string, string>;
 
   setProject: (project: Project) => void;
   addPage: () => void;
@@ -84,8 +89,15 @@ interface EditorState {
 
   setSidePanelTab: (tab: string) => void;
   setRightPanelOpen: (open: boolean) => void;
+  rightPanelSection: string;
+  setRightPanelSection: (section: string) => void;
   setCommentsOpen: (open: boolean) => void;
   setVersionsOpen: (open: boolean) => void;
+  setLayersOpen: (open: boolean) => void;
+  updatePageTransition: (pageIndex: number, transition: PageTransition) => void;
+  setElementAnimation: (elementId: string, animation: ElementAnimation) => void;
+  renameElement: (elementId: string, name: string) => void;
+  setPageBackgroundColor: (pageIndex: number, color: string) => void;
 
   setSaving: (saving: boolean) => void;
   setLastSaved: (time: string) => void;
@@ -94,6 +106,7 @@ interface EditorState {
   copy: () => void;
   paste: () => void;
   cut: () => void;
+  setViewportCenter: (x: number, y: number) => void;
 
   get currentPage(): Page | null;
   get selectedElements(): CanvasElement[];
@@ -130,11 +143,17 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   historyIndex: -1,
   sidePanelTab: 'templates',
   rightPanelOpen: true,
+  rightPanelSection: 'properties',
   isSaving: false,
   lastSaved: null,
   collaborators: [],
   commentsOpen: false,
   versionsOpen: false,
+  viewportCenter: { x: 960, y: 540 },
+  layersOpen: false,
+  pageTransitions: [{ type: 'none', duration: 0.5, delay: 0 }],
+  elementAnimations: {},
+  elementNames: {},
 
   setProject: (project) => {
     set({
@@ -218,11 +237,24 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   addElement: (elementData) => {
-    const { pages, currentPageIndex } = get();
+    const { pages, currentPageIndex, viewportCenter } = get();
     const page = pages[currentPageIndex];
     const maxZ = page.elements.length > 0
       ? Math.max(...page.elements.map((e) => e.zIndex))
       : -1;
+
+    const shapeDefaults: Record<string, { w: number; h: number }> = {
+      rectangle: { w: 200, h: 120 },
+      circle: { w: 120, h: 120 },
+      triangle: { w: 150, h: 130 },
+      star: { w: 120, h: 120 },
+      pentagon: { w: 120, h: 120 },
+      hexagon: { w: 120, h: 120 },
+      diamond: { w: 120, h: 120 },
+      arrow: { w: 200, h: 50 },
+      line: { w: 250, h: 4 },
+      heart: { w: 120, h: 120 },
+    };
 
     const defaults: Record<string, unknown> = {
       text: {
@@ -275,9 +307,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       chart: {
         chartType: 'bar',
         data: [
-          { label: 'A', value: 30, color: '#7B2FBE' },
-          { label: 'B', value: 50, color: '#00C4CC' },
-          { label: 'C', value: 20, color: '#FF6B9D' },
+          { label: 'Q1', value: 25, color: '#7B2FBE' },
+          { label: 'Q2', value: 40, color: '#00C4CC' },
+          { label: 'Q3', value: 35, color: '#FF6B9D' },
+          { label: 'Q4', value: 50, color: '#FF8A00' },
         ],
         showLabels: true,
         showLegend: true,
@@ -302,13 +335,40 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       },
     };
 
+    // Determine default dimensions per type
+    let defaultWidth: number;
+    let defaultHeight: number;
+
+    if (elementData.type === 'text') {
+      defaultWidth = 400;
+      defaultHeight = 60;
+    } else if (elementData.type === 'shape') {
+      const shapeType = (elementData.data as any)?.shapeType || 'rectangle';
+      const sd = shapeDefaults[shapeType] || { w: 200, h: 120 };
+      defaultWidth = sd.w;
+      defaultHeight = sd.h;
+    } else if (elementData.type === 'chart') {
+      defaultWidth = 400;
+      defaultHeight = 300;
+    } else if (elementData.type === 'table') {
+      defaultWidth = 500;
+      defaultHeight = 250;
+    } else {
+      defaultWidth = 300;
+      defaultHeight = 300;
+    }
+
+    // Center of the page (always center new elements on the visible page)
+    const centerX = page.width / 2 - defaultWidth / 2;
+    const centerY = page.height / 2 - defaultHeight / 2;
+
     const element: CanvasElement = {
       id: generateId(),
       type: elementData.type,
-      x: elementData.x ?? 100,
-      y: elementData.y ?? 100,
-      width: elementData.width ?? (elementData.type === 'text' ? 400 : elementData.type === 'shape' ? 200 : 300),
-      height: elementData.height ?? (elementData.type === 'text' ? 60 : elementData.type === 'shape' ? 200 : 300),
+      x: elementData.x ?? centerX,
+      y: elementData.y ?? centerY,
+      width: elementData.width ?? defaultWidth,
+      height: elementData.height ?? defaultHeight,
       rotation: elementData.rotation ?? 0,
       opacity: elementData.opacity ?? 1,
       visible: elementData.visible ?? true,
@@ -570,6 +630,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   setSidePanelTab: (tab) => set({ sidePanelTab: tab }),
   setRightPanelOpen: (open) => set({ rightPanelOpen: open }),
+  setRightPanelSection: (section) => set({ rightPanelSection: section }),
   setCommentsOpen: (open) => set({ commentsOpen: open, versionsOpen: false }),
   setVersionsOpen: (open) => set({ versionsOpen: open, commentsOpen: false }),
   setSaving: (saving) => set({ isSaving: saving }),
@@ -611,6 +672,39 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   cut: () => {
     get().copy();
     get().removeElements(get().selectedElementIds);
+  },
+
+  setViewportCenter: (x, y) => set({ viewportCenter: { x, y } }),
+
+  setLayersOpen: (open) => set({ layersOpen: open }),
+
+  updatePageTransition: (pageIndex, transition) => {
+    const { pageTransitions } = get();
+    const newTransitions = [...pageTransitions];
+    while (newTransitions.length <= pageIndex) {
+      newTransitions.push({ type: 'none', duration: 0.5, delay: 0 });
+    }
+    newTransitions[pageIndex] = transition;
+    set({ pageTransitions: newTransitions });
+  },
+
+  setElementAnimation: (elementId, animation) => {
+    set((state) => ({
+      elementAnimations: { ...state.elementAnimations, [elementId]: animation },
+    }));
+  },
+
+  renameElement: (elementId, name) => {
+    set((state) => ({
+      elementNames: { ...state.elementNames, [elementId]: name },
+    }));
+  },
+
+  setPageBackgroundColor: (pageIndex, color) => {
+    const { pages } = get();
+    const newPages = [...pages];
+    newPages[pageIndex] = { ...newPages[pageIndex], backgroundColor: color };
+    set({ pages: newPages });
   },
 
   get currentPage() {

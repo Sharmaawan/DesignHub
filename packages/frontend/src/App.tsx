@@ -5,7 +5,11 @@ import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import DashboardPage from './pages/DashboardPage';
 import TemplatesPage from './pages/TemplatesPage';
+import BrandHubPage from './pages/BrandHubPage';
 import EditorPage from './pages/EditorPage';
+import ProfileSettingsPage from './pages/ProfileSettingsPage';
+import SubscriptionBillingPage from './pages/SubscriptionBillingPage';
+import WorkspaceSettingsPage from './pages/WorkspaceSettingsPage';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -44,16 +48,16 @@ export default function App() {
           <ProtectedRoute><TemplatesPage /></ProtectedRoute>
         } />
         <Route path="/brand" element={
-          <ProtectedRoute><DashboardPage initialSection="brand" /></ProtectedRoute>
+          <ProtectedRoute><BrandHubPage /></ProtectedRoute>
         } />
-        <Route path="/ai" element={
-          <ProtectedRoute><DashboardPage initialSection="ai" /></ProtectedRoute>
+        <Route path="/settings/profile" element={
+          <ProtectedRoute><ProfileSettingsPage /></ProtectedRoute>
         } />
-        <Route path="/teams" element={
-          <ProtectedRoute><DashboardPage initialSection="teams" /></ProtectedRoute>
+        <Route path="/settings/subscription" element={
+          <ProtectedRoute><SubscriptionBillingPage /></ProtectedRoute>
         } />
-        <Route path="/settings" element={
-          <ProtectedRoute><DashboardPage initialSection="settings" /></ProtectedRoute>
+        <Route path="/settings/workspace" element={
+          <ProtectedRoute><WorkspaceSettingsPage /></ProtectedRoute>
         } />
         <Route path="/" element={
           <ProtectedRoute><DashboardPage /></ProtectedRoute>

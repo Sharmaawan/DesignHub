@@ -4,6 +4,7 @@ import { useAuthStore } from '../stores/authStore';
 import { useProjectStore } from '../stores/projectStore';
 import { useNotificationStore } from '../stores/notificationStore';
 import { useEditorStore } from '../stores/editorStore';
+import { useTeamStore } from '../stores/teamStore';
 import DashboardSidebar from '../components/dashboard/DashboardSidebar';
 import CreateButton from '../components/dashboard/CreateButton';
 import HeroSearch from '../components/dashboard/HeroSearch';
@@ -25,7 +26,9 @@ export default function DashboardPage({ initialSection }: { initialSection?: str
   const { user } = useAuthStore();
   const { projects, templates, folders, loadTemplates, loadProjects, toggleFavorite, deleteProject, searchQuery, setSearchQuery } = useProjectStore();
   const { setProject } = useEditorStore();
-  const { isOpen: notifOpen, setIsOpen: setNotifOpen, unreadCount } = useNotificationStore();
+  const { isOpen: notifOpen, setIsOpen: setNotifOpen, unreadCount, loadNotifications } = useNotificationStore();
+  const { loadUserInvites, loadTeams } = useTeamStore();
+  const { logout } = useAuthStore();
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     return localStorage.getItem('designhub-sidebar-collapsed') === 'true';
@@ -39,6 +42,17 @@ export default function DashboardPage({ initialSection }: { initialSection?: str
   useEffect(() => {
     loadTemplates();
     loadProjects();
+    loadNotifications();
+    loadUserInvites();
+    loadTeams();
+  }, []);
+
+  // Auto-logout on 401
+  useEffect(() => {
+    const token = localStorage.getItem('designhub-token');
+    if (!token) {
+      navigate('/login');
+    }
   }, []);
 
   useEffect(() => {

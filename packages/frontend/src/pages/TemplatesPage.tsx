@@ -12,6 +12,9 @@ import toast from 'react-hot-toast';
 const CATEGORIES = [
   'All', 'Social Media', 'Presentations', 'Posters', 'Resume',
   'Certificates', 'Business Cards', 'Flyers', 'Video', 'Marketing',
+  'Brochures', 'Invitations', 'Birthday Cards', 'Wedding Cards',
+  'Menus', 'Banners', 'Advertisements', 'Logos', 'Email Templates',
+  'Websites', 'Mobile App UI', 'CV Templates', 'LinkedIn', 'YouTube',
 ];
 
 export default function TemplatesPage() {

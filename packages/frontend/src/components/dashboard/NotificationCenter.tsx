@@ -1,12 +1,14 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useNotificationStore } from '../../stores/notificationStore';
+import { useTeamStore } from '../../stores/teamStore';
 import {
   HiOutlineX, HiOutlineCheck, HiOutlineBell, HiOutlineTrash,
   HiOutlineChatAlt, HiOutlineShare, HiOutlineChat, HiOutlineUserGroup,
   HiOutlineDownload, HiOutlineCog,
 } from 'react-icons/hi';
 import { Notification } from '../../types';
+import toast from 'react-hot-toast';
 
 const TYPE_ICONS: Record<string, any> = {
   comment: HiOutlineChatAlt,
@@ -31,6 +33,7 @@ const TYPE_COLORS: Record<string, string> = {
 export default function NotificationCenter() {
   const navigate = useNavigate();
   const { notifications, unreadCount, isOpen, setIsOpen, markAsRead, markAllAsRead, deleteNotification } = useNotificationStore();
+  const { userInvites, loadUserInvites, acceptInvite, rejectInvite } = useTeamStore();
   const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -45,9 +48,34 @@ export default function NotificationCenter() {
 
   const handleNotificationClick = (n: Notification) => {
     markAsRead(n.id);
-    if (n.actionUrl) {
+    if (n.type === 'team_invite') {
+      navigate('/');
+      setIsOpen(false);
+    } else if (n.actionUrl) {
       navigate(n.actionUrl);
       setIsOpen(false);
+    }
+  };
+
+  const handleAcceptInvite = async (inviteId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await acceptInvite(inviteId);
+      toast.success('Invitation accepted! You are now a team member.');
+      loadUserInvites();
+    } catch (err: any) {
+      toast.error(err.message);
+    }
+  };
+
+  const handleRejectInvite = async (inviteId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await rejectInvite(inviteId);
+      toast('Invitation declined', { icon: '👋' });
+      loadUserInvites();
+    } catch (err: any) {
+      toast.error(err.message);
     }
   };
 
@@ -86,13 +114,51 @@ export default function NotificationCenter() {
 
       {/* Notifications list */}
       <div className="flex-1 overflow-y-auto">
-        {notifications.length === 0 ? (
+        {notifications.length === 0 && userInvites.length === 0 ? (
           <div className="text-center py-16">
             <HiOutlineBell size={48} className="mx-auto text-gray-200 dark:text-gray-700 mb-3" />
             <p className="text-sm text-gray-400">No notifications yet</p>
           </div>
         ) : (
           <div className="divide-y divide-gray-50 dark:divide-gray-800">
+            {/* Pending team invites at the top */}
+            {userInvites.filter((i) => i.status === 'pending').map((invite) => (
+              <div
+                key={`invite-${invite.id}`}
+                className="px-5 py-3.5 bg-green-50/50 dark:bg-green-900/10"
+              >
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center flex-shrink-0">
+                    <HiOutlineUserGroup size={18} className="text-green-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900 dark:text-white">Team Invitation</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                      Join <strong>{invite.team?.name || 'Team'}</strong> as <strong>{invite.role}</strong>
+                    </p>
+                    <p className="text-[10px] text-gray-400 mt-1">
+                      From {invite.invitedBy?.name || invite.invitedBy?.email || 'Someone'}
+                    </p>
+                    <div className="flex gap-2 mt-2">
+                      <button
+                        onClick={(e) => handleAcceptInvite(invite.id, e)}
+                        className="px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs font-medium hover:bg-green-700 transition-colors"
+                      >
+                        Accept
+                      </button>
+                      <button
+                        onClick={(e) => handleRejectInvite(invite.id, e)}
+                        className="px-3 py-1.5 bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-lg text-xs font-medium hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+                      >
+                        Decline
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+
+            {/* Regular notifications */}
             {notifications.map((n) => {
               const Icon = TYPE_ICONS[n.type] || HiOutlineBell;
               return (
@@ -105,15 +171,8 @@ export default function NotificationCenter() {
                 >
                   <div className="flex items-start gap-3">
                     <div className="relative flex-shrink-0">
-                      {n.actorAvatar ? (
-                        <img src={n.actorAvatar} alt="" className="w-10 h-10 rounded-full bg-gray-200" />
-                      ) : (
-                        <div className={`w-10 h-10 rounded-full flex items-center justify-center ${TYPE_COLORS[n.type]}`}>
-                          <Icon size={18} />
-                        </div>
-                      )}
-                      <div className={`absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full flex items-center justify-center ${TYPE_COLORS[n.type]}`}>
-                        <Icon size={10} />
+                      <div className={`w-10 h-10 rounded-full flex items-center justify-center ${TYPE_COLORS[n.type]}`}>
+                        <Icon size={18} />
                       </div>
                     </div>
                     <div className="flex-1 min-w-0">
@@ -124,7 +183,7 @@ export default function NotificationCenter() {
                       <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-2">{n.message}</p>
                       <p className="text-[10px] text-gray-400 mt-1">{formatTime(n.createdAt)}</p>
                     </div>
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
+                    <div className="flex items-center gap-1">
                       {!n.read && (
                         <button
                           onClick={(e) => { e.stopPropagation(); markAsRead(n.id); }}
@@ -152,7 +211,10 @@ export default function NotificationCenter() {
 
       {/* Footer */}
       <div className="px-5 py-3 border-t border-gray-100 dark:border-gray-800 flex-shrink-0">
-        <button className="w-full py-2 text-sm font-medium text-[#7B2FBE] hover:bg-[#7B2FBE]/5 rounded-lg transition-colors">
+        <button
+          onClick={() => { navigate('/'); setIsOpen(false); }}
+          className="w-full py-2 text-sm font-medium text-[#7B2FBE] hover:bg-[#7B2FBE]/5 rounded-lg transition-colors"
+        >
           View all notifications
         </button>
       </div>

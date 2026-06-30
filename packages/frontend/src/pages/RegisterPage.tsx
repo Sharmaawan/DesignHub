@@ -1,8 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
-import { FcGoogle } from 'react-icons/fc';
-import { FaGithub } from 'react-icons/fa';
+import GoogleSignIn from '../components/auth/GoogleSignIn';
 import { HiEye, HiEyeOff } from 'react-icons/hi';
 import toast from 'react-hot-toast';
 
@@ -11,7 +10,7 @@ export default function RegisterPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const { register, loginWithGoogle, isLoading } = useAuthStore();
+  const { register, isLoading } = useAuthStore();
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -55,7 +54,7 @@ export default function RegisterPage() {
             Create professional designs in minutes. No design experience needed.
           </p>
           <div className="mt-12 space-y-4">
-            {['Drag-and-drop editor', 'Thousands of templates', 'AI-powered tools'].map((feature) => (
+            {['Drag-and-drop editor', 'Professional templates', 'AI-powered tools'].map((feature) => (
               <div key={feature} className="flex items-center gap-3">
                 <div className="w-6 h-6 bg-white/20 rounded-full flex items-center justify-center">
                   <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
@@ -83,21 +82,9 @@ export default function RegisterPage() {
             Free forever. No credit card required.
           </p>
 
-          <div className="grid grid-cols-2 gap-3 mb-6">
-            <button
-              onClick={() => { loginWithGoogle(); navigate('/'); }}
-              className="flex items-center justify-center gap-2 px-4 py-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl hover:bg-gray-50 transition-all duration-200 font-medium text-sm"
-            >
-              <FcGoogle className="text-lg" />
-              Google
-            </button>
-            <button
-              onClick={() => { loginWithGoogle(); navigate('/'); }}
-              className="flex items-center justify-center gap-2 px-4 py-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl hover:bg-gray-50 transition-all duration-200 font-medium text-sm"
-            >
-              <FaGithub className="text-lg" />
-              GitHub
-            </button>
+          {/* Google Sign-In */}
+          <div className="mb-6">
+            <GoogleSignIn text="signup_with" theme="outline" size="large" />
           </div>
 
           <div className="relative my-6">

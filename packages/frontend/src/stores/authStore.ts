@@ -9,7 +9,7 @@ interface AuthState {
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
   register: (name: string, email: string, password: string) => Promise<void>;
-  loginWithGoogle: () => void;
+  loginWithGoogleCredential: (credential: string) => Promise<void>;
   loginWithSocial: (provider: string) => void;
   logout: () => void;
   setUser: (user: User) => void;
@@ -49,32 +49,32 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
   },
 
-  loginWithGoogle: async () => {
+  // Google Identity Services: send the credential JWT to our backend
+  loginWithGoogleCredential: async (credential: string) => {
+    set({ isLoading: true });
     try {
-      const { data } = await authAPI.googleLogin({ email: 'user@gmail.com', name: 'Google User' });
+      const { data } = await authAPI.googleLoginWithCredential(credential);
       localStorage.setItem('designhub-token', data.token);
       localStorage.setItem('designhub-user', JSON.stringify(data.user));
-      set({ user: data.user, token: data.token, isAuthenticated: true });
-    } catch {
-      throw new Error('Google login failed');
+      set({ user: data.user, token: data.token, isAuthenticated: true, isLoading: false });
+    } catch (error: any) {
+      set({ isLoading: false });
+      throw new Error(error.response?.data?.error || 'Google sign-in failed');
     }
   },
 
-  loginWithSocial: async (provider: string) => {
-    try {
-      const { data } = await authAPI.googleLogin({ email: `user@${provider}.com`, name: `${provider} User` });
-      localStorage.setItem('designhub-token', data.token);
-      localStorage.setItem('designhub-user', JSON.stringify(data.user));
-      set({ user: data.user, token: data.token, isAuthenticated: true });
-    } catch {
-      throw new Error(`${provider} login failed`);
-    }
+  // Legacy social login (fallback)
+  loginWithSocial: (provider: string) => {
+    toast(`Sign in with ${provider} coming soon`, { icon: '🔗' });
   },
 
   logout: () => {
     localStorage.removeItem('designhub-token');
     localStorage.removeItem('designhub-user');
     set({ user: null, token: null, isAuthenticated: false });
+    // Reset Google session
+    // Note: Google Identity Services doesn't provide a direct logout method
+    // The token will expire naturally; local state is cleared above
   },
 
   setUser: (user) => set({ user }),
@@ -94,3 +94,6 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
   },
 }));
+
+// Import toast for loginWithSocial
+import toast from 'react-hot-toast';

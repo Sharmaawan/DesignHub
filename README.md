@@ -1,51 +1,66 @@
-# Canva Clone
+# DesignHub
 
-A professional drag-and-drop design editor with real-time collaboration.
+A complete Canva clone with real collaboration, authentication, templates, templates libraries, and libraries for:
+- All the templates you need
+- Animated graphics, GIFs, AI videos, Stock videos, Stock photos
+- Company, startup, restaurant, educational, technology, healthcare, sports logo templates
+- Searchable icon and element library
+- Font combinations, text presets
+- AI content generation
+- Photo collage creation
 
 ## Features
 
-- User authentication (email, Google OAuth)
-- Dashboard with recent projects
-- Drag-and-drop canvas editor
-- Text, image, shape, icon, sticker, chart, table, video elements
-- Layer management
-- Undo/redo history
-- Zoom controls
-- Multi-page designs
-- Real-time collaboration
-- Comments and version history
-- Export to PNG, JPG, SVG, PDF, PPTX, MP4
-- Dark/light mode
-- Responsive design
+- **User Authentication** (email, Google OAuth)
+- **Dashboard** with recent projects
+- **Drag-and-drop canvas editor** with real-time collaboration
+- **Text, image, shape, icon, sticker, chart, table, video elements**
+- **Layer management**
+- **Undo/redo history**
+- **Zoom controls**
+- **Multi-page designs**
+- **Real-time collaboration**
+- **Comments and version history**
+- **Export to PNG, JPG, SVG, PDF, PPTX, MP4**
+- **Dark/light mode**
+- **Responsive design**
 
-## Project Structure
+## Built-in Libraries
 
-```
-packages/
-  backend/     # Express.js API with Prisma
-  frontend/    # React + TypeScript + Vite
-```
+### Templates
+- **Posters**, **Presentations**, **Instagram Posts**, **Instagram Stories**
+- **Facebook Posts**, **LinkedIn Posts**, **YouTube Thumbnails**
+- **Business Cards**, **Flyers**, **Brochures**, **Invitations**
+- **Birthday Cards**, **Wedding Cards**, **Certificates**, **Resumes**
+- **Menus**, **Banners**, **Advertisements**, **Logos**
+- **Email Templates**, **Websites**, **Mobile App UI**, **CV Templates**
 
-## Setup
+### Media Library
+- **Animated graphics**, **GIF images**, **AI videos**, **Stock videos**
+- **Stock photos**, **Animated stickers**, **Animated icons**
+- **Transparent PNG assets**, **Background images**, **Mockups**, **Frames**
 
-### Backend
+**Categories**: Business, Education, Marketing, Birthday, Wedding, Festival, Technology, Fashion, Food, Travel
 
-1. Navigate to `packages/backend`
-2. Install dependencies: `npm install`
-3. Set up PostgreSQL database
-4. Copy `.env.example` to `.env` and configure
-5. Run migrations: `npx prisma migrate dev`
-6. Start server: `npm run dev`
+### Logo Library
+- **Company logos**, **Startup logos**, **Restaurant logos**
+- **Educational logos**, **Technology logos**, **Healthcare logos**, **Sports logos**
 
-### Frontend
+### Elements Library
+- **Search any icon by keyword**
+- **Shapes**, **Arrows**, **Lines**, **Illustrations**
+- **Stickers**, **Frames**, **Grids**, **Badges**, **Buttons**
+- **Decorative elements**, any searched icon auto-appears in the asset library
 
-1. Navigate to `packages/frontend`
-2. Install dependencies: `npm install`
-3. Start dev server: `npm run dev`
+### Text Library
+- **Font Combinations**: Modern Sans, Elegant Serif, Minimal, Corporate, Luxury, Creative
+- **Text Presets**: Headings, Subheadings, Captions, Quotes, Buttons, Labels, CTAs, Testimonials
+- **Utilities**: Automatic page numbers, Dynamic dates, Dynamic usernames, Footer text, Watermarks
 
-## Tech Stack
+### AI Content
+- **Image generation**, **Video generation**, **Logo creation**
+- **Advertisement creation**, **Social media posts**, **Captions**, **Posters**, **Presentations**
+- Everything editable after generation
 
-- **Frontend**: React, TypeScript, Vite, Tailwind CSS, Konva.js, Zustand, Socket.io
-- **Backend**: Express.js, TypeScript, Prisma, PostgreSQL, Sharp, Socket.io
-- **Real-time**: Socket.io with Redis adapter
-- **Storage**: AWS S3 or local uploads
+### Photo Collage
+- Create photo collages with automatic layout, templates, and customization

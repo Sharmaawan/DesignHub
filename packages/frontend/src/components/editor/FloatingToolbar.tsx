@@ -3,6 +3,9 @@ import {
   HiOutlineTrash, HiOutlineDuplicate, HiOutlineLockClosed, HiOutlineLockOpen,
   HiOutlineEye, HiOutlineEyeOff, HiOutlineArrowUp, HiOutlineArrowDown,
   HiOutlineArrowSmUp, HiOutlineArrowSmDown,
+  HiOutlineClipboard, HiOutlineDocumentDownload, HiOutlineTemplate,
+  HiOutlinePhotograph, HiOutlineChat, HiOutlineLink, HiOutlineClock,
+  HiOutlineInformationCircle,
 } from 'react-icons/hi';
 
 export default function FloatingToolbar() {
@@ -10,6 +13,7 @@ export default function FloatingToolbar() {
     pages, currentPageIndex, selectedElementIds,
     removeElements, duplicateElements, bringForward, sendBackward,
     bringToFront, sendToBack, lockElement, unlockElement, hideElement, showElement,
+    copy, paste, updateElement, commentsOpen, setCommentsOpen,
   } = useEditorStore();
 
   const page = pages[currentPageIndex];
@@ -17,10 +21,62 @@ export default function FloatingToolbar() {
 
   if (!element || selectedElementIds.length === 0) return null;
 
+  const handleAlignCenter = () => {
+    if (!page) return;
+    const x = (page.width - element.width) / 2;
+    const y = (page.height - element.height) / 2;
+    updateElement(element.id, { x, y });
+  };
+
+  const handleSetAsBackground = () => {
+    if (!page || element.type !== 'image') return;
+    updateElement(element.id, {
+      x: 0,
+      y: 0,
+      width: page.width,
+      height: page.height,
+    });
+  };
+
+  const handleImageInfo = () => {
+    if (element.type === 'image') {
+      alert(`Image: ${element.width}x${element.height} at (${element.x}, ${element.y})`);
+    }
+  };
+
   const buttons = [
+    {
+      icon: HiOutlineClipboard, label: 'Copy', action: () => copy(),
+      shortcut: 'Ctrl+C',
+    },
+    {
+      icon: HiOutlineDocumentDownload, label: 'Paste', action: () => paste(),
+      shortcut: 'Ctrl+V',
+    },
+    { type: 'divider' },
     {
       icon: HiOutlineDuplicate, label: 'Duplicate', action: () => duplicateElements([element.id]),
       shortcut: 'Ctrl+D',
+    },
+    { type: 'divider' },
+    {
+      icon: HiOutlineTemplate, label: 'Align Center', action: handleAlignCenter,
+    },
+    ...(element.type === 'image' ? [{
+      icon: HiOutlinePhotograph, label: 'Set as Background', action: handleSetAsBackground,
+    }] : []),
+    { type: 'divider' },
+    {
+      icon: HiOutlineArrowSmUp, label: 'Forward', action: () => bringForward(element.id),
+    },
+    {
+      icon: HiOutlineArrowUp, label: 'Front', action: () => bringToFront(element.id),
+    },
+    {
+      icon: HiOutlineArrowSmDown, label: 'Backward', action: () => sendBackward(element.id),
+    },
+    {
+      icon: HiOutlineArrowDown, label: 'Back', action: () => sendToBack(element.id),
     },
     { type: 'divider' },
     {
@@ -37,17 +93,18 @@ export default function FloatingToolbar() {
     },
     { type: 'divider' },
     {
-      icon: HiOutlineArrowSmUp, label: 'Forward', action: () => bringForward(element.id),
+      icon: HiOutlineChat, label: 'Comment', action: () => setCommentsOpen(!commentsOpen),
+      active: commentsOpen,
     },
     {
-      icon: HiOutlineArrowUp, label: 'Front', action: () => bringToFront(element.id),
+      icon: HiOutlineLink, label: 'Link', action: () => alert('Link feature - coming soon'),
     },
     {
-      icon: HiOutlineArrowSmDown, label: 'Backward', action: () => sendBackward(element.id),
+      icon: HiOutlineClock, label: 'Timings', action: () => alert('Timings feature - coming soon'),
     },
-    {
-      icon: HiOutlineArrowDown, label: 'Back', action: () => sendToBack(element.id),
-    },
+    ...(element.type === 'image' ? [{
+      icon: HiOutlineInformationCircle, label: 'Image Info', action: handleImageInfo,
+    }] : []),
     { type: 'divider' },
     {
       icon: HiOutlineTrash, label: 'Delete', action: () => removeElements([element.id]),

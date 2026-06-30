@@ -5,10 +5,9 @@ import { useAuthStore } from '../../stores/authStore';
 import { useNotificationStore } from '../../stores/notificationStore';
 import {
   HiOutlineHome, HiOutlineFolder, HiOutlineTemplate, HiOutlineCollection,
-  HiOutlineSparkles, HiOutlineUserGroup, HiOutlineBell, HiOutlineCog,
-  HiOutlineDotsHorizontal, HiOutlineChevronLeft, HiOutlineChevronRight,
-  HiOutlineSearch, HiOutlinePlus, HiOutlineSun, HiOutlineMoon,
-  HiOutlineLogout, HiOutlineUser, HiOutlineCreditCard, HiOutlineGlobe,
+  HiOutlineBell, HiOutlineDotsHorizontal, HiOutlineChevronLeft, HiOutlineChevronRight,
+  HiOutlineSearch, HiOutlineSun, HiOutlineMoon,
+  HiOutlineLogout, HiOutlineUser, HiOutlineGlobe,
 } from 'react-icons/hi';
 
 interface NavItem {
@@ -41,16 +40,10 @@ export default function DashboardSidebar({ collapsed, onToggle, activeSection, o
     { id: 'projects', label: 'Projects', icon: HiOutlineFolder, route: '/projects' },
     { id: 'templates', label: 'Templates', icon: HiOutlineTemplate, route: '/templates' },
     { id: 'brand', label: 'Brand Hub', icon: HiOutlineCollection, route: '/brand' },
-    { id: 'ai', label: 'AI Tools', icon: HiOutlineSparkles, route: '/ai' },
-    { id: 'teams', label: 'Teams', icon: HiOutlineUserGroup, route: '/teams' },
     { id: 'notifications', label: 'Notifications', icon: HiOutlineBell, badge: unreadCount, action: () => setNotifOpen(!notifOpen) },
-    { id: 'settings', label: 'Settings', icon: HiOutlineCog, route: '/settings' },
   ];
 
-  const moreItems: NavItem[] = [
-    { id: 'help', label: 'Help Center', icon: HiOutlineGlobe },
-    { id: 'feedback', label: 'Send Feedback', icon: HiOutlineGlobe },
-  ];
+  const moreItems: NavItem[] = [];
 
   useEffect(() => {
     const path = location.pathname;
@@ -133,30 +126,34 @@ export default function DashboardSidebar({ collapsed, onToggle, activeSection, o
           );
         })}
 
-        {/* More button */}
-        <button
-          onClick={() => setShowMore(!showMore)}
-          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white transition-all"
-        >
-          <HiOutlineDotsHorizontal size={20} className="flex-shrink-0" />
-          {!collapsed && <span>More</span>}
-        </button>
+        {moreItems.length > 0 && (
+          <>
+            {/* More button */}
+            <button
+              onClick={() => setShowMore(!showMore)}
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white transition-all"
+            >
+              <HiOutlineDotsHorizontal size={20} className="flex-shrink-0" />
+              {!collapsed && <span>More</span>}
+            </button>
 
-        {showMore && !collapsed && (
-          <div className="ml-4 space-y-0.5">
-            {moreItems.map((item) => {
-              const Icon = item.icon;
-              return (
-                <button
-                  key={item.id}
-                  className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white transition-all"
-                >
-                  <Icon size={16} />
-                  <span>{item.label}</span>
-                </button>
-              );
-            })}
-          </div>
+            {showMore && !collapsed && (
+              <div className="ml-4 space-y-0.5">
+                {moreItems.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <button
+                      key={item.id}
+                      className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white transition-all"
+                    >
+                      <Icon size={16} />
+                      <span>{item.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </>
         )}
       </nav>
 
@@ -192,13 +189,22 @@ export default function DashboardSidebar({ collapsed, onToggle, activeSection, o
 
           {showProfileMenu && !collapsed && (
             <div className="absolute bottom-full left-0 right-0 mb-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl py-1 z-50">
-              <button className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50">
+              <button
+                onClick={() => { navigate('/settings/profile'); setShowProfileMenu(false); }}
+                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50"
+              >
                 <HiOutlineUser size={16} /> Profile Settings
               </button>
-              <button className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50">
-                <HiOutlineCreditCard size={16} /> Subscription & Billing
+              <button
+                onClick={() => { navigate('/settings/subscription'); setShowProfileMenu(false); }}
+                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50"
+              >
+                <HiOutlineUser size={16} /> Subscription & Billing
               </button>
-              <button className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50">
+              <button
+                onClick={() => { navigate('/settings/workspace'); setShowProfileMenu(false); }}
+                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50"
+              >
                 <HiOutlineGlobe size={16} /> Workspace Settings
               </button>
               <div className="border-t border-gray-100 dark:border-gray-700 my-1" />

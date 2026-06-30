@@ -1,29 +1,16 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { HiOutlineChevronRight, HiOutlineSparkles, HiOutlineX } from 'react-icons/hi';
-import { WhatsNewItem } from '../../types';
+import { productUpdateAPI } from '../../utils/api';
 
-const WHATS_NEW_ITEMS: WhatsNewItem[] = [
-  {
-    id: 'wn-1', title: 'Magic Design AI', description: 'Generate complete designs from a text prompt. Just describe what you need!',
-    category: 'ai_feature', badge: 'NEW', publishedAt: new Date().toISOString(), isActive: true,
-  },
-  {
-    id: 'wn-2', title: '2024 Holiday Templates', description: 'Explore our curated collection of seasonal templates for Christmas, New Year, and more.',
-    category: 'seasonal', badge: 'SEASONAL', publishedAt: new Date().toISOString(), isActive: true,
-  },
-  {
-    id: 'wn-3', title: 'Real-time Collaboration', description: 'Work together with your team in real-time. See cursors and edits live!',
-    category: 'team_feature', publishedAt: new Date().toISOString(), isActive: true,
-  },
-  {
-    id: 'wn-4', title: 'Brand Kit Integration', description: 'Upload your brand colors, fonts, and logos for consistent designs across your team.',
-    category: 'product_update', publishedAt: new Date().toISOString(), isActive: true,
-  },
-  {
-    id: 'wn-5', title: 'Background Remover 2.0', description: 'Our AI-powered background remover is now 3x faster with better edge detection.',
-    category: 'ai_feature', badge: 'UPDATED', publishedAt: new Date().toISOString(), isActive: true,
-  },
-];
+interface ProductUpdate {
+  id: string;
+  title: string;
+  description: string;
+  icon: string;
+  badge?: string | null;
+  category: string;
+  createdAt: string;
+}
 
 const CATEGORY_COLORS: Record<string, string> = {
   ai_feature: 'from-amber-400 to-orange-500',
@@ -31,21 +18,28 @@ const CATEGORY_COLORS: Record<string, string> = {
   seasonal: 'from-green-400 to-emerald-500',
   team_feature: 'from-blue-500 to-cyan-500',
   product_update: 'from-pink-500 to-rose-500',
-};
-
-const CATEGORY_ICONS: Record<string, string> = {
-  ai_feature: '✨',
-  new_template: '🎨',
-  seasonal: '🎄',
-  team_feature: '👥',
-  product_update: '🚀',
+  maintenance: 'from-gray-400 to-gray-600',
 };
 
 export default function WhatsNew() {
+  const [items, setItems] = useState<ProductUpdate[]>([]);
   const [dismissed, setDismissed] = useState<string[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null);
 
-  const visibleItems = WHATS_NEW_ITEMS.filter((item) => !dismissed.includes(item.id));
+  useEffect(() => {
+    loadUpdates();
+  }, []);
+
+  const loadUpdates = async () => {
+    try {
+      const { data } = await productUpdateAPI.list();
+      setItems(data);
+    } catch {
+      setItems([]);
+    }
+  };
+
+  const visibleItems = items.filter((item) => !dismissed.includes(item.id));
 
   if (visibleItems.length === 0) return null;
 
@@ -58,12 +52,12 @@ export default function WhatsNew() {
           </div>
           <div>
             <h3 className="text-base font-bold text-gray-900 dark:text-white">What's New</h3>
-            <p className="text-xs text-gray-400">Latest updates and features</p>
+            <p className="text-xs text-gray-400">{items.length} updates</p>
           </div>
         </div>
       </div>
 
-      <div className="divide-y divide-gray-50 dark:divide-gray-800">
+      <div className="divide-y divide-gray-50 dark:divide-gray-800 max-h-[400px] overflow-y-auto">
         {visibleItems.map((item) => (
           <div
             key={item.id}
@@ -71,8 +65,8 @@ export default function WhatsNew() {
             onClick={() => setExpanded(expanded === item.id ? null : item.id)}
           >
             <div className="flex items-start gap-3">
-              <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${CATEGORY_COLORS[item.category]} flex items-center justify-center flex-shrink-0`}>
-                <span className="text-lg">{CATEGORY_ICONS[item.category]}</span>
+              <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${CATEGORY_COLORS[item.category] || CATEGORY_COLORS.product_update} flex items-center justify-center flex-shrink-0`}>
+                <span className="text-lg">{item.icon}</span>
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
@@ -87,9 +81,7 @@ export default function WhatsNew() {
                 {expanded === item.id && (
                   <div className="mt-3 p-3 bg-gray-50 dark:bg-gray-800/50 rounded-xl">
                     <p className="text-xs text-gray-600 dark:text-gray-300">{item.description}</p>
-                    <button className="mt-2 text-xs font-medium text-[#7B2FBE] hover:underline flex items-center gap-1">
-                      Learn more <HiOutlineChevronRight size={12} />
-                    </button>
+                    <p className="text-[10px] text-gray-400 mt-2">{new Date(item.createdAt).toLocaleDateString()}</p>
                   </div>
                 )}
               </div>

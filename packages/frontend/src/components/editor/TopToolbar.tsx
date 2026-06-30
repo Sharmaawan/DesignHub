@@ -8,7 +8,7 @@ import {
   HiOutlineViewGrid, HiOutlineSun, HiOutlineMoon,
   HiOutlineSave, HiOutlineCheck, HiOutlineClock,
   HiOutlineChevronDown, HiOutlineCog, HiOutlinePencil,
-  HiOutlineChevronRight,
+  HiOutlineChevronRight, HiOutlineTemplate, HiOutlineFilm,
 } from 'react-icons/hi';
 import toast from 'react-hot-toast';
 import { useAuthStore } from '../../stores/authStore';
@@ -32,7 +32,7 @@ export default function TopToolbar({ onThemeToggle, isDark, onShowShortcuts, onO
     toggleGrid, toggleRulers, toggleGuides, toggleSnap,
     isSaving, lastSaved, setSaving, setLastSaved,
     setCommentsOpen, setVersionsOpen, commentsOpen, versionsOpen,
-    pages, currentPageIndex,
+    pages, currentPageIndex, sidePanelTab, setSidePanelTab,
   } = useEditorStore();
   const { projects, updateProject } = useProjectStore();
   const [showZoomMenu, setShowZoomMenu] = useState(false);
@@ -211,6 +211,16 @@ export default function TopToolbar({ onThemeToggle, isDark, onShowShortcuts, onO
         {/* Version History */}
         <button onClick={() => setVersionsOpen(!versionsOpen)} className={`toolbar-btn ${versionsOpen ? 'bg-canva-purple/10 text-canva-purple' : ''}`} title="Version history">
           <HiOutlineClock size={16} />
+        </button>
+
+        {/* Layers */}
+        <button onClick={() => setSidePanelTab(sidePanelTab === 'layers' ? '' : 'layers')} className={`toolbar-btn ${sidePanelTab === 'layers' ? 'bg-canva-purple/10 text-canva-purple' : ''}`} title="Layers panel">
+          <HiOutlineViewGrid size={16} />
+        </button>
+
+        {/* Transitions */}
+        <button onClick={() => setSidePanelTab(sidePanelTab === 'transitions' ? '' : 'transitions')} className={`toolbar-btn ${sidePanelTab === 'transitions' ? 'bg-canva-purple/10 text-canva-purple' : ''}`} title="Page transitions">
+          <HiOutlineFilm size={16} />
         </button>
 
         <div className="h-5 w-px bg-gray-200 dark:bg-gray-700" />

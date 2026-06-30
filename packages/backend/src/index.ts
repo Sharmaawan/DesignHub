@@ -21,6 +21,12 @@ import collaboratorRoutes from './routes/collaborators';
 import shareLinkRoutes from './routes/shareLinks';
 import preferenceRoutes from './routes/preferences';
 import activityRoutes from './routes/activity';
+import brandRoutes from './routes/brand';
+import aiSettingsRoutes from './routes/aiSettings';
+import aiRoutes from './routes/ai';
+import productUpdateRoutes from './routes/productUpdates';
+import backgroundRemovalRoutes from './routes/backgroundRemoval';
+import emailSettingsRoutes from './routes/emailSettings';
 
 const app = express();
 const httpServer = createServer(app);
@@ -51,6 +57,12 @@ app.use('/api/collaborators', collaboratorRoutes);
 app.use('/api/share-links', shareLinkRoutes);
 app.use('/api/preferences', preferenceRoutes);
 app.use('/api/activity', activityRoutes);
+app.use('/api/brand', brandRoutes);
+app.use('/api/ai-settings', aiSettingsRoutes);
+app.use('/api/ai', aiRoutes);
+app.use('/api/product-updates', productUpdateRoutes);
+app.use('/api/background-removal', backgroundRemovalRoutes);
+app.use('/api/email-settings', emailSettingsRoutes);
 
 app.get('/api/health', async (_, res) => {
   try {
@@ -61,7 +73,9 @@ app.get('/api/health', async (_, res) => {
   }
 });
 
-const collaborators = new Map<string, Map<string, { id: string; name: string; avatar: string; cursor?: { x: number; y: number } }>>();
+const collaborators = new Map<string, Map<string, { id: string; name: string; avatar: string; color: string; cursor?: { x: number; y: number } }>>();
+
+const CURSOR_COLORS = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#FF8C00', '#98D8C8'];
 
 io.on('connection', (socket) => {
   console.log(`User connected: ${socket.id}`);
@@ -69,8 +83,9 @@ io.on('connection', (socket) => {
   socket.on('join-project', (projectId: string, user: { id: string; name: string; avatar: string }) => {
     socket.join(projectId);
     if (!collaborators.has(projectId)) collaborators.set(projectId, new Map());
-    collaborators.get(projectId)!.set(socket.id, { ...user, id: socket.id });
-    socket.to(projectId).emit('user-joined', { ...user, id: socket.id });
+    const colorIndex = collaborators.get(projectId)!.size % CURSOR_COLORS.length;
+    collaborators.get(projectId)!.set(socket.id, { ...user, id: socket.id, color: CURSOR_COLORS[colorIndex] });
+    socket.to(projectId).emit('user-joined', { ...user, id: socket.id, color: CURSOR_COLORS[colorIndex] });
     socket.emit('collaborators', Array.from(collaborators.get(projectId)!.values()));
   });
 
@@ -79,7 +94,7 @@ io.on('connection', (socket) => {
     if (projectCollabs?.has(socket.id)) {
       const collab = projectCollabs.get(socket.id)!;
       collab.cursor = cursor;
-      socket.to(projectId).emit('cursor-update', { id: socket.id, cursor });
+      socket.to(projectId).emit('cursor-update', { id: socket.id, cursor, color: collab.color });
     }
   });
 
@@ -87,8 +102,24 @@ io.on('connection', (socket) => {
     socket.to(projectId).emit('element-changed', { userId: socket.id, ...data });
   });
 
+  socket.on('element-add', (projectId: string, element: any) => {
+    socket.to(projectId).emit('element-added', { userId: socket.id, element });
+  });
+
+  socket.on('element-delete', (projectId: string, elementId: string) => {
+    socket.to(projectId).emit('element-deleted', { userId: socket.id, elementId });
+  });
+
+  socket.on('page-change', (projectId: string, pageIndex: number) => {
+    socket.to(projectId).emit('page-changed', { userId: socket.id, pageIndex });
+  });
+
   socket.on('chat-message', (projectId: string, message: any) => {
     io.to(projectId).emit('new-message', { ...message, userId: socket.id, timestamp: new Date().toISOString() });
+  });
+
+  socket.on('comment-add', (projectId: string, comment: any) => {
+    socket.to(projectId).emit('comment-added', { userId: socket.id, ...comment });
   });
 
   socket.on('disconnect', () => {

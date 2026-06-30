@@ -13,10 +13,17 @@ model User {
   email            String    @unique
   passwordHash     String?   @map("password_hash")
   avatar           String?
+  googleId         String?   @unique @map("google_id")
+  lastLogin        DateTime? @map("last_login")
   role             String    @default("user")
   subscriptionPlan String?   @default("free") @map("subscription_plan")
   provider         String?
   providerId       String?   @unique @map("provider_id")
+  smtpHost         String?   @map("smtp_host")
+  smtpPort         Int?      @default(587) @map("smtp_port")
+  smtpUser         String?   @map("smtp_user")
+  smtpPass         String?   @map("smtp_pass")
+  smtpEnabled      Boolean   @default(false) @map("smtp_enabled")
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
 
@@ -32,6 +39,16 @@ model User {
   userPreferences  UserPreferences?
   collaboratorOn   Collaborator[]
   projectShares    ProjectShare[]
+  brandColors      BrandColor[]
+  brandFonts       BrandFont[]
+  brandLogos       BrandLogo[]
+  brandTemplates   BrandTemplate[]
+  brandAssets      UserBrandAsset[]
+  aiSettings       AISetting[]
+  teamInvitesSent  TeamInvite[]     @relation("TeamInviteSender")
+  aiRequests       AIRequest[]
+  aiGenerations    AIGeneration[]
+  backgroundRemovals BackgroundRemoval[]
 
   @@map("users")
 }
@@ -58,6 +75,7 @@ model Project {
   shareLinks     ShareLink[]
   exportHistory  ExportHistory[]
   favorites      Favorite[]
+  brandTemplates BrandTemplate[]
 
   @@map("projects")
 }
@@ -157,6 +175,7 @@ model Team {
   owner    User          @relation("TeamOwner", fields: [ownerId], references: [id])
   members  TeamMember[]
   brandAssets BrandAsset[]
+  invites  TeamInvite[]
 
   @@map("teams")
 }
@@ -289,6 +308,20 @@ model BrandAsset {
   @@map("brand_assets")
 }
 
+model UserBrandAsset {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  name      String?
+  url       String
+  type      String
+  folder    String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("user_brand_assets")
+}
+
 model RecentActivity {
   id           String   @id @default(cuid())
   userId       String   @map("user_id")
@@ -325,4 +358,147 @@ model UserPreferences {
   user User @relation(fields: [userId], references: [id])
 
   @@map("user_preferences")
+}
+
+model BrandColor {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  hex       String
+  name      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("brand_colors")
+}
+
+model BrandFont {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  name      String
+  type      String
+  url       String?
+  isDefault Boolean  @default(false) @map("is_default")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("brand_fonts")
+}
+
+model BrandLogo {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  name      String?
+  url       String
+  isDefault Boolean  @default(false) @map("is_default")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("brand_logos")
+}
+
+model BrandTemplate {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  projectId String   @map("project_id")
+  category  String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user    User    @relation(fields: [userId], references: [id])
+  project Project @relation(fields: [projectId], references: [id])
+
+  @@map("brand_templates")
+}
+
+model AISetting {
+  id           String   @id @default(cuid())
+  userId       String   @map("user_id")
+  provider     String
+  encryptedKey String   @map("encrypted_key")
+  model        String?
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([userId, provider])
+  @@map("ai_settings")
+}
+
+model TeamInvite {
+  id           String   @id @default(cuid())
+  teamId       String   @map("team_id")
+  email        String
+  role         String   @default("editor")
+  invitedById  String   @map("invited_by_id")
+  status       String   @default("pending")
+  token        String   @unique
+  expiresAt    DateTime @map("expires_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  team      Team @relation(fields: [teamId], references: [id])
+  invitedBy User @relation("TeamInviteSender", fields: [invitedById], references: [id])
+
+  @@map("team_invites")
+}
+
+model ProductUpdate {
+  id          String   @id @default(cuid())
+  title       String
+  description String
+  icon        String   @default("🚀")
+  badge       String?
+  category    String   @default("product_update")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("product_updates")
+}
+
+model AIRequest {
+  id           String   @id @default(cuid())
+  userId       String   @map("user_id")
+  provider     String
+  prompt       String   @db.Text
+  contentType  String   @map("content_type")
+  tokensUsed   Int?     @map("tokens_used")
+  status       String   @default("pending")
+  error        String?  @db.Text
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("ai_requests")
+}
+
+model AIGeneration {
+  id           String   @id @default(cuid())
+  userId       String   @map("user_id")
+  provider     String
+  prompt       String   @db.Text
+  result       String   @db.Text
+  contentType  String   @map("content_type")
+  tokensUsed   Int?     @map("tokens_used")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("ai_generations")
+}
+
+model BackgroundRemoval {
+  id            String   @id @default(cuid())
+  userId        String   @map("user_id")
+  originalUrl   String   @map("original_url")
+  resultUrl     String?  @map("result_url")
+  status        String   @default("pending")
+  error         String?
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("background_removals")
 }

@@ -11,6 +11,7 @@ import PageNavigation from '../components/editor/PageNavigation';
 import CommentsPanel from '../components/editor/CommentsPanel';
 import VersionHistory from '../components/editor/VersionHistory';
 import FloatingToolbar from '../components/editor/FloatingToolbar';
+import LayersPanel from '../components/editor/LayersPanel';
 import SettingsModal from '../components/editor/SettingsModal';
 import ShareModal from '../components/editor/ShareModal';
 import ExportModal from '../components/editor/ExportModal';
@@ -24,7 +25,7 @@ export default function EditorPage() {
     pages, currentPageIndex, selectedElementIds, zoom, isSaving, lastSaved,
     setProject, setZoom, zoomIn, zoomOut, undo, redo, copy, paste, cut,
     pushHistory, setSaving, setLastSaved, removeElements, selectAll, deselectAll,
-    setCommentsOpen, setVersionsOpen, commentsOpen, versionsOpen,
+    setCommentsOpen, setVersionsOpen, commentsOpen, versionsOpen, layersOpen, setLayersOpen,
     addPage, deselectAll: deselect,
   } = useEditorStore();
   const { projects, updateProject, loadProjects } = useProjectStore();
@@ -130,6 +131,7 @@ export default function EditorPage() {
         </div>
 
         <RightSidebar />
+        {layersOpen && <LayersPanel />}
         {commentsOpen && <CommentsPanel />}
         {versionsOpen && <VersionHistory />}
       </div>
