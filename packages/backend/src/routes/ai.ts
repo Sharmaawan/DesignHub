@@ -14,12 +14,25 @@ function decryptKey(encrypted: string): string {
   return decrypted;
 }
 
+// Never forward an upstream provider's 401/403 as-is — the frontend treats any 401/403
+// from our API as "your session expired" and force-logs the user out. An invalid AI
+// provider key is a different failure and must not trigger that.
+function upstreamStatus(status: number): number {
+  return status === 401 || status === 403 ? 502 : status;
+}
+
 // Generate text content
 router.post('/generate', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const { provider, prompt, type } = req.body;
+    console.log(`[ai/generate] request received userId=${req.userId} provider=${provider} type=${type || 'text'}`);
+
     if (!provider || !prompt) {
       return res.status(400).json({ error: 'Provider and prompt are required' });
+    }
+
+    if (type === 'image' && provider !== 'openai') {
+      return res.status(400).json({ error: `${provider} does not support image generation. Add an OpenAI API key in Settings to generate images.` });
     }
 
     let apiKey = '';
@@ -43,6 +56,7 @@ router.post('/generate', authMiddleware, async (req: AuthRequest, res: Response)
     }
 
     if (!apiKey) {
+      console.error(`[ai/generate] no API key found for provider=${provider} userId=${req.userId}`);
       return res.status(404).json({ error: `No API key found for ${provider}. Add one in Settings or .env file.` });
     }
 
@@ -57,7 +71,42 @@ router.post('/generate', authMiddleware, async (req: AuthRequest, res: Response)
       },
     });
 
-    if (provider === 'openai') {
+    if (provider === 'openai' && type === 'image') {
+      const response = await fetch('https://api.openai.com/v1/images/generations', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: 'dall-e-3',
+          prompt,
+          n: 1,
+          size: '1024x1024',
+        }),
+      });
+
+      if (!response.ok) {
+        const err = await response.json() as any;
+        console.error(`[ai/generate] openai image request failed status=${response.status}`, err);
+        await prisma.aIRequest.update({ where: { id: aiRequest.id }, data: { status: 'failed', error: err.error?.message || 'Image generation failed' } });
+        return res.status(upstreamStatus(response.status)).json({ error: err.error?.message || 'Image generation failed' });
+      }
+
+      const data = await response.json() as any;
+      const imageUrl = data.data?.[0]?.url || '';
+      console.log(`[ai/generate] openai image generated userId=${req.userId}`);
+
+      await prisma.aIRequest.update({ where: { id: aiRequest.id }, data: { status: 'completed' } });
+      const generation = await prisma.aIGeneration.create({
+        data: { userId: req.userId!, provider, prompt, result: imageUrl, contentType: 'image' },
+      });
+      await prisma.recentActivity.create({
+        data: { userId: req.userId!, activityType: 'ai_generation', referenceId: generation.id },
+      }).catch((e) => console.error('[ai/generate] failed to log recent activity', e));
+
+      return res.json({ content: imageUrl, contentType: 'image' });
+    } else if (provider === 'openai') {
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -74,20 +123,25 @@ router.post('/generate', authMiddleware, async (req: AuthRequest, res: Response)
 
       if (!response.ok) {
         const err = await response.json() as any;
+        console.error(`[ai/generate] openai request failed status=${response.status}`, err);
         await prisma.aIRequest.update({ where: { id: aiRequest.id }, data: { status: 'failed', error: err.error?.message || 'AI request failed' } });
-        return res.status(response.status).json({ error: err.error?.message || 'AI request failed' });
+        return res.status(upstreamStatus(response.status)).json({ error: err.error?.message || 'AI request failed' });
       }
 
       const data = await response.json() as any;
       const content = data.choices?.[0]?.message?.content || 'No content generated';
       const tokens = Number(data.usage?.total_tokens || 0);
+      console.log(`[ai/generate] openai text generated userId=${req.userId} tokens=${tokens}`);
 
       await prisma.aIRequest.update({ where: { id: aiRequest.id }, data: { status: 'completed', tokensUsed: tokens } });
-      await prisma.aIGeneration.create({
+      const generation = await prisma.aIGeneration.create({
         data: { userId: req.userId!, provider, prompt, result: content, contentType: type || 'text', tokensUsed: tokens },
       });
+      await prisma.recentActivity.create({
+        data: { userId: req.userId!, activityType: 'ai_generation', referenceId: generation.id },
+      }).catch((e) => console.error('[ai/generate] failed to log recent activity', e));
 
-      res.json({ content, usage: data.usage });
+      res.json({ content, contentType: type || 'text', usage: data.usage });
     } else if (provider === 'anthropic') {
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
@@ -105,24 +159,30 @@ router.post('/generate', authMiddleware, async (req: AuthRequest, res: Response)
 
       if (!response.ok) {
         const err = await response.json() as any;
+        console.error(`[ai/generate] anthropic request failed status=${response.status}`, err);
         await prisma.aIRequest.update({ where: { id: aiRequest.id }, data: { status: 'failed', error: err.error?.message || 'AI request failed' } });
-        return res.status(response.status).json({ error: err.error?.message || 'AI request failed' });
+        return res.status(upstreamStatus(response.status)).json({ error: err.error?.message || 'AI request failed' });
       }
 
       const data = await response.json() as any;
       const content = data.content?.[0]?.text || 'No content generated';
       const tokens = Number(data.usage?.input_tokens || 0) + Number(data.usage?.output_tokens || 0);
+      console.log(`[ai/generate] anthropic text generated userId=${req.userId} tokens=${tokens}`);
 
       await prisma.aIRequest.update({ where: { id: aiRequest.id }, data: { status: 'completed', tokensUsed: tokens } });
-      await prisma.aIGeneration.create({
+      const generation = await prisma.aIGeneration.create({
         data: { userId: req.userId!, provider, prompt, result: content, contentType: type || 'text', tokensUsed: tokens },
       });
+      await prisma.recentActivity.create({
+        data: { userId: req.userId!, activityType: 'ai_generation', referenceId: generation.id },
+      }).catch((e) => console.error('[ai/generate] failed to log recent activity', e));
 
-      res.json({ content, usage: data.usage });
+      res.json({ content, contentType: type || 'text', usage: data.usage });
     } else {
       res.status(400).json({ error: 'Unsupported provider' });
     }
   } catch (err: any) {
+    console.error('[ai/generate] unhandled error', err);
     res.status(500).json({ error: err.message || 'AI generation failed' });
   }
 });

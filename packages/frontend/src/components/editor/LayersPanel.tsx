@@ -20,8 +20,10 @@ export default function LayersPanel() {
     selectElement, bringForward, sendBackward, bringToFront, sendToBack,
     duplicateElements, removeElements, renameElement,
     lockElement, unlockElement, hideElement, showElement,
-    groupElements, ungroupElements,
+    groupElements, ungroupElements, setCurrentPage,
   } = useEditorStore();
+
+  const [pagesCollapsed, setPagesCollapsed] = useState(false);
 
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
@@ -90,6 +92,59 @@ export default function LayersPanel() {
 
   return (
     <div className="space-y-2">
+      {/* Pages Section */}
+      <div className="border border-gray-100 dark:border-gray-800 rounded-lg overflow-hidden">
+        <button
+          onClick={() => setPagesCollapsed(!pagesCollapsed)}
+          className="w-full flex items-center justify-between px-2.5 py-2 bg-gray-50 dark:bg-gray-800/50 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+          <span className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+            Pages ({pages.length})
+          </span>
+          <svg className={`w-3 h-3 text-gray-400 transition-transform ${pagesCollapsed ? '-rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+        {!pagesCollapsed && (
+          <div className="p-1.5 flex flex-col gap-1">
+            {pages.map((page, idx) => (
+              <button
+                key={page.id}
+                onClick={() => setCurrentPage(idx)}
+                className={`flex items-center gap-2 px-2 py-1.5 rounded-md text-left transition-all ${
+                  idx === currentPageIndex
+                    ? 'bg-canva-purple/10 ring-1 ring-canva-purple/30 dark:bg-canva-purple/20'
+                    : 'hover:bg-gray-50 dark:hover:bg-gray-800/50'
+                }`}>
+                {/* Mini page thumbnail */}
+                <div
+                  className="w-8 h-6 rounded border border-gray-200 dark:border-gray-700 flex-shrink-0 overflow-hidden"
+                  style={{ background: page.backgroundColor || '#FFFFFF' }}>
+                  {idx === currentPageIndex && (
+                    <div className="w-full h-0.5" style={{ background: '#6366F1' }} />
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className={`text-xs truncate font-medium ${idx === currentPageIndex ? 'text-canva-purple' : 'text-gray-700 dark:text-gray-300'}`}>
+                    {page.name || `Page ${idx + 1}`}
+                  </div>
+                  <div className="text-[9px] text-gray-400">{page.elements.length} element{page.elements.length !== 1 ? 's' : ''}</div>
+                </div>
+                {idx === currentPageIndex && (
+                  <div className="w-1.5 h-1.5 rounded-full bg-canva-purple flex-shrink-0" />
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Divider */}
+      <div className="flex items-center gap-2">
+        <div className="flex-1 h-px bg-gray-100 dark:bg-gray-800" />
+        <span className="text-[9px] font-semibold text-gray-400 uppercase tracking-wide">Elements</span>
+        <div className="flex-1 h-px bg-gray-100 dark:bg-gray-800" />
+      </div>
+
       {/* Action Buttons */}
       <div className="flex flex-wrap gap-1">
         <button onClick={() => { if (selectedCount === 1) bringToFront(selectedElementIds[0]); }} disabled={selectedCount !== 1}

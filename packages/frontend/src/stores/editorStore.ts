@@ -82,6 +82,7 @@ interface EditorState {
   toggleRulers: () => void;
   toggleGuides: () => void;
   toggleSnap: () => void;
+  setGridSize: (size: number) => void;
 
   undo: () => void;
   redo: () => void;
@@ -98,6 +99,14 @@ interface EditorState {
   setElementAnimation: (elementId: string, animation: ElementAnimation) => void;
   renameElement: (elementId: string, name: string) => void;
   setPageBackgroundColor: (pageIndex: number, color: string) => void;
+
+  importDocumentPages: (defs: Array<{
+    name: string;
+    width: number;
+    height: number;
+    backgroundColor: string;
+    elements: Omit<CanvasElement, 'id'>[];
+  }>) => void;
 
   setSaving: (saving: boolean) => void;
   setLastSaved: (time: string) => void;
@@ -592,6 +601,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   toggleRulers: () => set((s) => ({ showRulers: !s.showRulers })),
   toggleGuides: () => set((s) => ({ showGuides: !s.showGuides })),
   toggleSnap: () => set((s) => ({ snapEnabled: !s.snapEnabled })),
+  setGridSize: (size) => set({ gridSize: Math.max(2, Math.min(200, size)) }),
 
   undo: () => {
     const { history, historyIndex } = get();
@@ -705,6 +715,34 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const newPages = [...pages];
     newPages[pageIndex] = { ...newPages[pageIndex], backgroundColor: color };
     set({ pages: newPages });
+  },
+
+  importDocumentPages: (defs) => {
+    const { pages, currentPageIndex } = get();
+    const isBlankCanvas = pages.length === 1 && pages[0].elements.length === 0;
+
+    const newPages: Page[] = defs.map((def) => ({
+      id: generateId(),
+      name: def.name,
+      width: def.width,
+      height: def.height,
+      backgroundColor: def.backgroundColor,
+      elements: def.elements.map((el) => ({ ...el, id: generateId() } as CanvasElement)),
+    }));
+
+    let finalPages: Page[];
+    let firstIdx: number;
+    if (isBlankCanvas) {
+      finalPages = newPages;
+      firstIdx = 0;
+    } else {
+      finalPages = [...pages];
+      finalPages.splice(currentPageIndex + 1, 0, ...newPages);
+      firstIdx = currentPageIndex + 1;
+    }
+
+    set({ pages: finalPages, currentPageIndex: firstIdx, selectedElementIds: [] });
+    get().pushHistory();
   },
 
   get currentPage() {

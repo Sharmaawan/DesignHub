@@ -2,6 +2,17 @@ import { useState } from 'react';
 import { useEditorStore } from '../../stores/editorStore';
 import { HiOutlinePlus, HiOutlineDuplicate, HiOutlineTrash } from 'react-icons/hi';
 
+const THUMB_MAX_W = 96;
+const THUMB_MAX_H = 68;
+
+function getThumbSize(width: number, height: number) {
+  const ratio = width / height;
+  const boxRatio = THUMB_MAX_W / THUMB_MAX_H;
+  return ratio > boxRatio
+    ? { width: THUMB_MAX_W, height: THUMB_MAX_W / ratio }
+    : { width: THUMB_MAX_H * ratio, height: THUMB_MAX_H };
+}
+
 export default function PageNavigation() {
   const {
     pages, currentPageIndex, setCurrentPage, addPage, removePage, duplicatePage,
@@ -25,14 +36,13 @@ export default function PageNavigation() {
 
       <div className="flex-1 overflow-x-auto px-4 py-2">
         <div className="flex gap-3 h-full items-center">
-          {pages.map((page, index) => (
+          {pages.map((page, index) => {
+            const thumbSize = getThumbSize(page.width, page.height);
+            return (
             <div
               key={page.id}
-              className={`relative flex-shrink-0 cursor-pointer group rounded-lg transition-all ${
-                index === currentPageIndex
-                  ? 'ring-2 ring-canva-purple shadow-md scale-105'
-                  : 'ring-1 ring-gray-200 dark:ring-gray-700 hover:ring-gray-300 dark:hover:ring-gray-600'
-              }`}
+              className="relative flex-shrink-0 cursor-pointer group rounded-lg transition-all flex items-center justify-center"
+              style={{ width: THUMB_MAX_W, height: THUMB_MAX_H }}
               onClick={() => setCurrentPage(index)}
               onContextMenu={(e) => {
                 e.preventDefault();
@@ -40,8 +50,12 @@ export default function PageNavigation() {
               }}
             >
               <div
-                className="w-24 h-[60px] rounded-md overflow-hidden relative"
-                style={{ backgroundColor: page.backgroundColor }}
+                className={`rounded-md overflow-hidden relative transition-all ${
+                  index === currentPageIndex
+                    ? 'ring-2 ring-canva-purple shadow-md scale-105'
+                    : 'ring-1 ring-gray-200 dark:ring-gray-700 hover:ring-gray-300 dark:hover:ring-gray-600'
+                }`}
+                style={{ width: thumbSize.width, height: thumbSize.height, backgroundColor: page.backgroundColor }}
               >
                 {/* Mini preview */}
                 {page.elements.length > 0 && (
@@ -100,7 +114,8 @@ export default function PageNavigation() {
                 </button>
               )}
             </div>
-          ))}
+            );
+          })}
 
           <button
             onClick={addPage}

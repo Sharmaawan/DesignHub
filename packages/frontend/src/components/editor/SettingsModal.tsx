@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { HiOutlineX, HiOutlineCheck, HiOutlineCog, HiOutlineSun, HiOutlineMoon, HiOutlineGlobe, HiOutlineKey, HiOutlineClock, HiOutlineViewGrid, HiOutlineTemplate, HiOutlineBell, HiOutlineShieldCheck, HiOutlineUser } from 'react-icons/hi';
+import { HiOutlineX, HiOutlineCheck, HiOutlineCog, HiOutlineSun, HiOutlineMoon, HiOutlineGlobe, HiOutlineKey, HiOutlineClock, HiOutlineViewGrid, HiOutlineTemplate, HiOutlineBell, HiOutlineShieldCheck, HiOutlineUser, HiOutlineSparkles, HiOutlineTrash } from 'react-icons/hi';
 import { useThemeStore } from '../../stores/themeStore';
+import { aiSettingsAPI } from '../../utils/api';
 import toast from 'react-hot-toast';
 
 interface SettingsModalProps {
@@ -8,7 +9,16 @@ interface SettingsModalProps {
   onClose: () => void;
 }
 
-type SettingsTab = 'appearance' | 'editor' | 'account' | 'shortcuts' | 'notifications' | 'privacy';
+type SettingsTab = 'appearance' | 'editor' | 'account' | 'shortcuts' | 'notifications' | 'privacy' | 'ai';
+
+interface AISettingRow {
+  id: string;
+  provider: string;
+  hasKey: boolean;
+  keyPreview: string | null;
+  model: string | null;
+  isActive: boolean;
+}
 
 interface AppSettings {
   appearance: { theme: 'light' | 'dark' | 'system'; language: string };
@@ -46,9 +56,71 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('appearance');
   const { setTheme } = useThemeStore();
 
+  const [aiSettings, setAiSettings] = useState<AISettingRow[]>([]);
+  const [aiSettingsLoading, setAiSettingsLoading] = useState(false);
+  const [newProvider, setNewProvider] = useState<'openai' | 'anthropic'>('openai');
+  const [newApiKey, setNewApiKey] = useState('');
+  const [newModel, setNewModel] = useState('');
+  const [savingKey, setSavingKey] = useState(false);
+
   useEffect(() => {
     if (open) setSettings(loadSettings());
   }, [open]);
+
+  const loadAiSettings = async () => {
+    setAiSettingsLoading(true);
+    try {
+      const { data } = await aiSettingsAPI.list();
+      setAiSettings(data);
+    } catch (err) {
+      console.error('[Settings] failed to load AI settings', err);
+      toast.error('Failed to load AI settings');
+    } finally {
+      setAiSettingsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (open && activeTab === 'ai') loadAiSettings();
+  }, [open, activeTab]);
+
+  const handleSaveKey = async () => {
+    if (!newApiKey.trim()) { toast.error('Enter an API key'); return; }
+    setSavingKey(true);
+    try {
+      await aiSettingsAPI.saveKey({ provider: newProvider, apiKey: newApiKey.trim(), model: newModel.trim() || undefined });
+      toast.success(`${newProvider} API key saved`);
+      setNewApiKey('');
+      setNewModel('');
+      await loadAiSettings();
+    } catch (err: any) {
+      console.error('[Settings] failed to save AI key', err);
+      toast.error(err.response?.data?.error || 'Failed to save API key');
+    } finally {
+      setSavingKey(false);
+    }
+  };
+
+  const handleDeleteKey = async (id: string) => {
+    try {
+      await aiSettingsAPI.deleteKey(id);
+      toast.success('API key removed');
+      await loadAiSettings();
+    } catch (err) {
+      console.error('[Settings] failed to delete AI key', err);
+      toast.error('Failed to remove API key');
+    }
+  };
+
+  const handleToggleKey = async (id: string) => {
+    try {
+      await aiSettingsAPI.toggleKey(id);
+      await loadAiSettings();
+    } catch (err) {
+      console.error('[Settings] failed to toggle AI key', err);
+      toast.error('Failed to update API key');
+    }
+  };
 
   const update = (section: keyof AppSettings, key: string, value: any) => {
     const updated = { ...settings, [section]: { ...(settings[section] as any), [key]: value } };
@@ -63,6 +135,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
   const tabs: { id: SettingsTab; icon: any; label: string }[] = [
     { id: 'appearance', icon: HiOutlineSun, label: 'Appearance' },
     { id: 'editor', icon: HiOutlineViewGrid, label: 'Editor' },
+    { id: 'ai', icon: HiOutlineSparkles, label: 'AI' },
     { id: 'shortcuts', icon: HiOutlineKey, label: 'Shortcuts' },
     { id: 'account', icon: HiOutlineUser, label: 'Account' },
     { id: 'notifications', icon: HiOutlineBell, label: 'Notifications' },
@@ -173,6 +246,88 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
                   <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-1">Default canvas height</label>
                   <input type="number" value={settings.editor.defaultCanvasHeight} onChange={(e) => update('editor', 'defaultCanvasHeight', Number(e.target.value))} className="input-field" />
                 </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'ai' && (
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">AI Providers</h3>
+                <p className="text-xs text-gray-400 mt-0.5">Add an API key to enable Magic Write, image generation, and design ideas in the editor.</p>
+              </div>
+
+              {/* Existing keys */}
+              {aiSettingsLoading ? (
+                <p className="text-sm text-gray-400">Loading…</p>
+              ) : aiSettings.length === 0 ? (
+                <p className="text-sm text-gray-400">No API keys configured yet.</p>
+              ) : (
+                <div className="space-y-2">
+                  {aiSettings.map((s) => (
+                    <div key={s.id} className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg border border-gray-200 dark:border-gray-700">
+                      <div>
+                        <div className="text-sm font-medium text-gray-800 dark:text-gray-200 capitalize">{s.provider}</div>
+                        <div className="text-xs text-gray-400">
+                          {s.hasKey ? `Key ${s.keyPreview}` : 'No key'}{s.model ? ` · ${s.model}` : ''}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <button
+                          onClick={() => handleToggleKey(s.id)}
+                          className={`w-10 h-6 rounded-full transition-colors relative ${s.isActive ? 'bg-canva-purple' : 'bg-gray-300 dark:bg-gray-600'}`}
+                          title={s.isActive ? 'Active' : 'Inactive'}
+                        >
+                          <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${s.isActive ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                        </button>
+                        <button onClick={() => handleDeleteKey(s.id)} className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20">
+                          <HiOutlineTrash size={16} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Add new key */}
+              <div className="pt-4 border-t border-gray-200 dark:border-gray-700 space-y-3">
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block">Add API key</label>
+                <div className="grid grid-cols-3 gap-3">
+                  {(['openai', 'anthropic'] as const).map((p) => (
+                    <button
+                      key={p}
+                      onClick={() => setNewProvider(p)}
+                      className={`p-2.5 rounded-xl border-2 text-sm font-medium capitalize transition-all ${
+                        newProvider === p
+                          ? 'border-canva-purple bg-canva-purple/5 text-canva-purple'
+                          : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-gray-300'
+                      }`}
+                    >
+                      {p}
+                    </button>
+                  ))}
+                </div>
+                <input
+                  type="password"
+                  placeholder={newProvider === 'openai' ? 'sk-...' : 'sk-ant-...'}
+                  value={newApiKey}
+                  onChange={(e) => setNewApiKey(e.target.value)}
+                  className="input-field"
+                />
+                <input
+                  type="text"
+                  placeholder={`Model (optional, e.g. ${newProvider === 'openai' ? 'gpt-4o' : 'claude-sonnet-4-6'})`}
+                  value={newModel}
+                  onChange={(e) => setNewModel(e.target.value)}
+                  className="input-field"
+                />
+                <button
+                  onClick={handleSaveKey}
+                  disabled={savingKey || !newApiKey.trim()}
+                  className="btn-primary text-sm w-full disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {savingKey ? 'Saving…' : 'Save API key'}
+                </button>
               </div>
             </div>
           )}

@@ -12,6 +12,8 @@ import CommentsPanel from '../components/editor/CommentsPanel';
 import VersionHistory from '../components/editor/VersionHistory';
 import FloatingToolbar from '../components/editor/FloatingToolbar';
 import LayersPanel from '../components/editor/LayersPanel';
+import PageTransitions from '../components/editor/PageTransitions';
+import ElementAnimations from '../components/editor/ElementAnimations';
 import SettingsModal from '../components/editor/SettingsModal';
 import ShareModal from '../components/editor/ShareModal';
 import ExportModal from '../components/editor/ExportModal';
@@ -28,6 +30,7 @@ export default function EditorPage() {
     setCommentsOpen, setVersionsOpen, commentsOpen, versionsOpen, layersOpen, setLayersOpen,
     addPage, deselectAll: deselect,
   } = useEditorStore();
+  const sidePanelTab = useEditorStore((s) => s.sidePanelTab);
   const { projects, updateProject, loadProjects } = useProjectStore();
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -131,7 +134,55 @@ export default function EditorPage() {
         </div>
 
         <RightSidebar />
-        {layersOpen && <LayersPanel />}
+
+        {/* Layers panel — shown via toolbar button or store flag */}
+        {(layersOpen || sidePanelTab === 'layers') && (
+          <div className="w-60 bg-white dark:bg-canva-dark-surface border-l border-gray-200 dark:border-canva-dark-border flex flex-col overflow-hidden flex-shrink-0">
+            <div className="flex items-center justify-between px-3 py-2.5 border-b border-gray-100 dark:border-gray-800">
+              <span className="text-sm font-semibold text-gray-900 dark:text-white">Layers</span>
+              <button
+                onClick={() => { useEditorStore.getState().setLayersOpen(false); useEditorStore.getState().setSidePanelTab(''); }}
+                className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 text-lg leading-none"
+              >×</button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-2">
+              <LayersPanel />
+            </div>
+          </div>
+        )}
+
+        {/* Transitions panel */}
+        {sidePanelTab === 'transitions' && (
+          <div className="w-60 bg-white dark:bg-canva-dark-surface border-l border-gray-200 dark:border-canva-dark-border flex flex-col overflow-hidden flex-shrink-0">
+            <div className="flex items-center justify-between px-3 py-2.5 border-b border-gray-100 dark:border-gray-800">
+              <span className="text-sm font-semibold text-gray-900 dark:text-white">Transitions</span>
+              <button
+                onClick={() => useEditorStore.getState().setSidePanelTab('')}
+                className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 text-lg leading-none"
+              >×</button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-3">
+              <PageTransitions />
+            </div>
+          </div>
+        )}
+
+        {/* Animations panel */}
+        {sidePanelTab === 'animations' && (
+          <div className="w-60 bg-white dark:bg-canva-dark-surface border-l border-gray-200 dark:border-canva-dark-border flex flex-col overflow-hidden flex-shrink-0">
+            <div className="flex items-center justify-between px-3 py-2.5 border-b border-gray-100 dark:border-gray-800">
+              <span className="text-sm font-semibold text-gray-900 dark:text-white">Animations</span>
+              <button
+                onClick={() => useEditorStore.getState().setSidePanelTab('')}
+                className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 text-lg leading-none"
+              >×</button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-3">
+              <ElementAnimations />
+            </div>
+          </div>
+        )}
+
         {commentsOpen && <CommentsPanel />}
         {versionsOpen && <VersionHistory />}
       </div>

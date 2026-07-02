@@ -78,6 +78,7 @@ export default function MagicMediaPanel() {
 
     setGenerating(true);
     try {
+      console.log('[MagicMedia] generate request', { activeTab, selectedStyle });
       const res = await fetch('http://localhost:3001/api/ai/generate', {
         method: 'POST',
         headers: {
@@ -85,25 +86,27 @@ export default function MagicMediaPanel() {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          provider: 'anthropic',
-          prompt: `Generate an image description for: ${prompt} in ${selectedStyle} style. Provide a detailed description suitable for image generation.`,
-          type: 'text',
+          provider: 'openai',
+          prompt: `${prompt}, ${selectedStyle} style`,
+          type: 'image',
         }),
       });
 
-      if (!res.ok) throw new Error('Generation failed');
-
       const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Generation failed');
+      console.log('[MagicMedia] generate response received', { hasContent: !!data.content });
+
       const newResult: GeneratedItem = {
         id: `gen-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        url: data.result || data.url || '',
+        url: data.content || '',
         type: activeTab,
       };
 
       setResults((prev) => [newResult, ...prev]);
       toast.success(`${activeTab === 'images' ? 'Image' : activeTab === 'videos' ? 'Video' : 'Graphic'} generated!`);
-    } catch (err) {
-      toast.error('Generation failed. Please try again.');
+    } catch (err: any) {
+      console.error('[MagicMedia] generate failed', err);
+      toast.error(err.message || 'Generation failed. Please try again.');
     } finally {
       setGenerating(false);
     }

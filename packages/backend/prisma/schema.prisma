@@ -312,7 +312,7 @@ model UserBrandAsset {
   id        String   @id @default(cuid())
   userId    String   @map("user_id")
   name      String?
-  url       String
+  url       String   @db.LongText
   type      String
   folder    String?
   createdAt DateTime @default(now()) @map("created_at")
@@ -377,7 +377,7 @@ model BrandFont {
   userId    String   @map("user_id")
   name      String
   type      String
-  url       String?
+  url       String?  @db.LongText
   isDefault Boolean  @default(false) @map("is_default")
   createdAt DateTime @default(now()) @map("created_at")
 
@@ -390,7 +390,7 @@ model BrandLogo {
   id        String   @id @default(cuid())
   userId    String   @map("user_id")
   name      String?
-  url       String
+  url       String   @db.LongText
   isDefault Boolean  @default(false) @map("is_default")
   createdAt DateTime @default(now()) @map("created_at")
 

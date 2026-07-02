@@ -5,7 +5,8 @@ import { useEditorStore } from '../stores/editorStore';
 import { useAuthStore } from '../stores/authStore';
 import DashboardSidebar from '../components/dashboard/DashboardSidebar';
 import CreateButton from '../components/dashboard/CreateButton';
-import { HiOutlineSearch, HiOutlineBell, HiOutlineHeart } from 'react-icons/hi';
+import UploadTemplateModal from '../components/dashboard/UploadTemplateModal';
+import { HiOutlineSearch, HiOutlineBell, HiOutlineHeart, HiOutlineUpload } from 'react-icons/hi';
 import { useNotificationStore } from '../stores/notificationStore';
 import toast from 'react-hot-toast';
 
@@ -27,6 +28,7 @@ export default function TemplatesPage() {
   const [activeSection, setActiveSection] = useState('templates');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
+  const [showUploadModal, setShowUploadModal] = useState(false);
 
   useEffect(() => { loadTemplates(); }, []);
 
@@ -70,6 +72,12 @@ export default function TemplatesPage() {
           <div className="flex items-center justify-between px-6 h-16">
             <h2 className="text-lg font-bold text-gray-900 dark:text-white">Templates</h2>
             <div className="flex items-center gap-3">
+              <button
+                onClick={() => setShowUploadModal(true)}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-gray-200 dark:border-gray-700 text-sm font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+              >
+                <HiOutlineUpload size={16} /> Upload Template
+              </button>
               <CreateButton />
               <button onClick={() => setNotifOpen(true)} className="relative p-2.5 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-gray-500">
                 <HiOutlineBell size={20} />
@@ -78,6 +86,13 @@ export default function TemplatesPage() {
             </div>
           </div>
         </header>
+
+        <UploadTemplateModal
+          open={showUploadModal}
+          onClose={() => setShowUploadModal(false)}
+          onCreated={loadTemplates}
+          categories={CATEGORIES.filter((c) => c !== 'All')}
+        />
 
         <main className="px-6 py-8 max-w-[1400px] mx-auto overflow-y-auto">
           {/* Search */}

@@ -98,7 +98,8 @@ router.post('/logos', authMiddleware, async (req: AuthRequest, res: Response) =>
       data: { name, url, isDefault: isDefault || false, userId: req.userId! },
     });
     res.json(logo);
-  } catch {
+  } catch (err) {
+    console.error('[brand/logos] create failed', err);
     res.status(500).json({ error: 'Failed to create brand logo' });
   }
 });
@@ -143,7 +144,8 @@ router.post('/assets', authMiddleware, async (req: AuthRequest, res: Response) =
       data: { name, url, type, folder, userId: req.userId! },
     });
     res.json(asset);
-  } catch {
+  } catch (err) {
+    console.error('[brand/assets] create failed', err);
     res.status(500).json({ error: 'Failed to create brand asset' });
   }
 });

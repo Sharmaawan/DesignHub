@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback, useEffect } from 'react';
+import { useRef, useState, useCallback, useEffect, useMemo } from 'react';
 import { Stage, Layer, Rect, Text, Image as KonvaImage, Group, Transformer, Line } from 'react-konva';
 import { useEditorStore } from '../../stores/editorStore';
 import { CanvasElement, Page, TextData, ImageData, ShapeData, TableData, ChartData } from '../../types';
@@ -29,6 +29,14 @@ export default function EditorCanvas({ page }: EditorCanvasProps) {
   const sortedElements = [...page.elements]
     .sort((a, b) => a.zIndex - b.zIndex)
     .filter((e) => e.visible);
+
+  // Icons always resize proportionally (corner handles only) — dragging a side handle
+  // without this would squash one axis, which the contain-fit icon renderer then shows
+  // as the whole icon shrinking to fit the smaller dimension (looks like it "disappeared").
+  const singleSelected = selectedElementIds.length === 1
+    ? page.elements.find((e) => e.id === selectedElementIds[0])
+    : null;
+  const isIconSelected = singleSelected?.type === 'icon';
 
   useEffect(() => {
     const container = containerRef.current;
@@ -346,22 +354,12 @@ export default function EditorCanvas({ page }: EditorCanvasProps) {
       case 'text': {
         const data = element.data as TextData;
         return (
-          <Text
+          <AnimatedTextElement
             key={element.id}
-            {...commonProps}
-            text={data.content}
-            fontFamily={data.fontFamily}
-            fontSize={data.fontSize}
-            fontStyle={data.fontStyle === 'italic' ? 'italic' : 'normal'}
-            fontWeight={data.fontWeight as any}
-            fill={data.color}
-            width={element.width}
-            height={element.height}
-            align={data.textAlign}
-            lineHeight={data.lineHeight}
-            letterSpacing={data.letterSpacing}
-            textDecoration={data.textDecoration}
-            visible={!isTextEdit}
+            element={element}
+            commonProps={commonProps}
+            data={data}
+            isTextEdit={isTextEdit}
           />
         );
       }
@@ -406,6 +404,16 @@ export default function EditorCanvas({ page }: EditorCanvasProps) {
             element={element}
             commonProps={commonProps}
             data={data}
+          />
+        );
+      }
+      case 'icon': {
+        return (
+          <IconElement
+            key={element.id}
+            element={element}
+            commonProps={commonProps}
+            data={element.data as any}
           />
         );
       }
@@ -513,11 +521,13 @@ export default function EditorCanvas({ page }: EditorCanvasProps) {
             anchorSize={10}
             anchorCornerRadius={2}
             rotateAnchorOffset={25}
-            enabledAnchors={['top-left', 'top-right', 'bottom-left', 'bottom-right', 'middle-left', 'middle-right', 'top-center', 'bottom-center']}
-            keepRatio={false}
+            enabledAnchors={isIconSelected
+              ? ['top-left', 'top-right', 'bottom-left', 'bottom-right']
+              : ['top-left', 'top-right', 'bottom-left', 'bottom-right', 'middle-left', 'middle-right', 'top-center', 'bottom-center']}
+            keepRatio={isIconSelected}
             boundBoxFunc={(oldBox, newBox) => {
               if (newBox.width < 20 || newBox.height < 20) return oldBox;
-              if (shiftHeld) {
+              if (isIconSelected || shiftHeld) {
                 const ratio = oldBox.width / oldBox.height;
                 const newW = Math.max(20, newBox.width);
                 const newH = Math.max(20, newW / ratio);
@@ -529,6 +539,174 @@ export default function EditorCanvas({ page }: EditorCanvasProps) {
         </Layer>
       </Stage>
     </div>
+  );
+}
+
+function AnimatedTextElement({ element, commonProps, data, isTextEdit }: {
+  element: CanvasElement;
+  commonProps: any;
+  data: TextData & { animation?: string };
+  isTextEdit: boolean;
+}) {
+  const textRef = useRef<Konva.Text>(null);
+  const [displayText, setDisplayText] = useState(data.content);
+  const timerRef = useRef<ReturnType<typeof setTimeout>>();
+  const intervalRef = useRef<ReturnType<typeof setInterval>>();
+
+  // Keep displayed text in sync with content
+  useEffect(() => {
+    if (data.animation !== 'typewriter') setDisplayText(data.content);
+  }, [data.content, data.animation]);
+
+  // Run animation — deferred so React-Konva finishes reconciling before we touch the node
+  useEffect(() => {
+    clearTimeout(timerRef.current);
+    clearInterval(intervalRef.current);
+
+    const anim = data.animation;
+    if (!anim || anim === 'none') {
+      setDisplayText(data.content);
+      return;
+    }
+
+    if (anim === 'typewriter') {
+      setDisplayText('');
+      let i = 0;
+      intervalRef.current = setInterval(() => {
+        i++;
+        setDisplayText(data.content.slice(0, i));
+        if (i >= data.content.length) clearInterval(intervalRef.current);
+      }, 60);
+      return () => { clearInterval(intervalRef.current); };
+    }
+
+    // Defer past React's reconciliation so imperative opacity changes aren't overwritten
+    timerRef.current = setTimeout(() => {
+      const node = textRef.current;
+      if (!node) return;
+
+      // Reset node to clean state before each animation
+      node.stopDrag();
+      node.offsetX(0);
+      node.offsetY(0);
+      node.scaleX(1);
+      node.scaleY(1);
+      node.opacity(element.opacity);
+
+      switch (anim) {
+        case 'fadeIn':
+          node.opacity(0);
+          node.to({ opacity: element.opacity, duration: 0.9, easing: Konva.Easings.EaseInOut });
+          break;
+        case 'slideUp':
+          node.offsetY(-60);
+          node.opacity(0);
+          node.to({ offsetY: 0, opacity: element.opacity, duration: 0.6, easing: Konva.Easings.EaseOut });
+          break;
+        case 'slideLeft':
+          node.offsetX(-80);
+          node.opacity(0);
+          node.to({ offsetX: 0, opacity: element.opacity, duration: 0.6, easing: Konva.Easings.EaseOut });
+          break;
+        case 'zoom':
+          node.scaleX(0.1);
+          node.scaleY(0.1);
+          node.opacity(0);
+          node.to({ scaleX: 1, scaleY: 1, opacity: element.opacity, duration: 0.5, easing: Konva.Easings.EaseOut });
+          break;
+        case 'bounce':
+          node.offsetY(-60);
+          node.to({ offsetY: 0, duration: 0.9, easing: Konva.Easings.BounceEaseOut });
+          break;
+        case 'pulse':
+          node.to({ scaleX: 1.08, scaleY: 1.08, duration: 0.4, easing: Konva.Easings.EaseInOut, onFinish: () => {
+            node.to({ scaleX: 1, scaleY: 1, duration: 0.4, easing: Konva.Easings.EaseInOut });
+          }});
+          break;
+      }
+    }, 30);
+
+    return () => { clearTimeout(timerRef.current); };
+  // Re-run whenever the animation type or element identity changes
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [element.id, data.animation]);
+
+  return (
+    <Text
+      ref={textRef}
+      {...commonProps}
+      text={displayText}
+      fontFamily={data.fontFamily}
+      fontSize={data.fontSize}
+      fontStyle={data.fontStyle === 'italic' ? 'italic' : 'normal'}
+      fontWeight={data.fontWeight as any}
+      fill={data.color}
+      width={element.width}
+      height={element.height}
+      align={data.textAlign}
+      lineHeight={data.lineHeight}
+      letterSpacing={data.letterSpacing}
+      textDecoration={data.textDecoration}
+      visible={!isTextEdit}
+    />
+  );
+}
+
+// Konva's own Path.parsePathData() uses a regex tokenizer that mis-parses compact SVG
+// arc-flag notation (e.g. Heroicons' "a1 1 0 001.414 1.414", where "00" flags run
+// straight into the next coordinate with no separator) — it only special-cases the
+// literal token "00", not "00" glued to a following number, silently corrupting the
+// rest of the path. Rather than hand-parse SVG ourselves, rasterize real <path>/<circle>/
+// etc. markup through the browser's own (spec-correct) SVG engine, exactly like a normal
+// <img>, then draw that as a Konva.Image — the same approach already used for uploaded
+// images below. This sidesteps the parser bug entirely instead of working around it.
+function buildIconSvgMarkup(data: any): { markup: string; vbWidth: number; vbHeight: number } {
+  const paths: string[] = data.svgPaths ? data.svgPaths : data.svgPath ? [data.svgPath] : [];
+  const iconFills: string[] = data.iconFills ? data.iconFills : [];
+  const vbWidth: number = data.viewBoxWidth || data.viewBoxSize || 20;
+  const vbHeight: number = data.viewBoxHeight || data.viewBoxSize || 20;
+  const accentFill: string = data.fill || '#6366F1';
+  const body = paths
+    .map((p, i) => {
+      const rawFill = iconFills[i] || iconFills[0] || 'currentColor';
+      const fill = rawFill === 'currentColor' || rawFill === 'none' ? accentFill : rawFill;
+      return `<path d="${p.replace(/"/g, '&quot;')}" fill="${fill}"/>`;
+    })
+    .join('');
+  return {
+    markup: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${vbWidth} ${vbHeight}">${body}</svg>`,
+    vbWidth,
+    vbHeight,
+  };
+}
+
+function IconElement({ element, commonProps, data }: { element: CanvasElement; commonProps: any; data: any }) {
+  const [image, setImage] = useState<HTMLImageElement | null>(null);
+  const { markup, vbWidth, vbHeight } = useMemo(() => buildIconSvgMarkup(data), [
+    data.svgPaths, data.svgPath, data.iconFills, data.fill, data.viewBoxWidth, data.viewBoxHeight, data.viewBoxSize,
+  ]);
+
+  useEffect(() => {
+    const img = new window.Image();
+    img.onload = () => setImage(img);
+    img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(markup)}`;
+  }, [markup]);
+
+  if (!image) return <Group {...commonProps} width={element.width} height={element.height} />;
+
+  // Contain-fit: scale uniformly to fit inside the element's box, centered, so a
+  // non-square viewBox never stretches even though the bounding box itself may not be square.
+  const rawScale = Math.min(element.width / vbWidth, element.height / vbHeight);
+  const scale = Number.isFinite(rawScale) && rawScale > 0 ? rawScale : 1;
+  const drawWidth = vbWidth * scale;
+  const drawHeight = vbHeight * scale;
+  const offsetX = (element.width - drawWidth) / 2;
+  const offsetY = (element.height - drawHeight) / 2;
+
+  return (
+    <Group {...commonProps} width={element.width} height={element.height}>
+      <KonvaImage image={image} x={offsetX} y={offsetY} width={drawWidth} height={drawHeight} />
+    </Group>
   );
 }
 
@@ -574,10 +752,39 @@ function ImageElement({ element, commonProps, data }: { element: CanvasElement; 
   if (data.hue !== undefined && data.hue !== 0) filters.push(Konva.Filters.HSL);
   if (data.blur !== undefined && data.blur > 0) filters.push(Konva.Filters.Blur);
 
+  const flipH = !!(data as any).flipH;
+  const flipV = !!(data as any).flipV;
+
+  // Adjust x/y so the flipped image still occupies the same visual bounding box
+  const flipProps = (flipH || flipV) ? {
+    ...commonProps,
+    x: commonProps.x + (flipH ? element.width : 0),
+    y: commonProps.y + (flipV ? element.height : 0),
+    scaleX: flipH ? -1 : 1,
+    scaleY: flipV ? -1 : 1,
+  } : commonProps;
+
+  // cropX/Y/Width/Height are percentages of the source image (0-100; 0,0,100,100 = full
+  // image, uncropped) — converted here into the source-pixel rect Konva's `crop` expects.
+  const cropXPct = (data as any).cropX ?? 0;
+  const cropYPct = (data as any).cropY ?? 0;
+  const cropWPct = (data as any).cropWidth ?? 100;
+  const cropHPct = (data as any).cropHeight ?? 100;
+  const isCropped = cropXPct !== 0 || cropYPct !== 0 || cropWPct !== 100 || cropHPct !== 100;
+  const cropProp = isCropped ? {
+    crop: {
+      x: (cropXPct / 100) * image.naturalWidth,
+      y: (cropYPct / 100) * image.naturalHeight,
+      width: Math.max(1, (cropWPct / 100) * image.naturalWidth),
+      height: Math.max(1, (cropHPct / 100) * image.naturalHeight),
+    },
+  } : {};
+
   return (
     <KonvaImage
       ref={imageRef}
-      {...commonProps}
+      {...flipProps}
+      {...cropProp}
       image={image}
       width={element.width}
       height={element.height}

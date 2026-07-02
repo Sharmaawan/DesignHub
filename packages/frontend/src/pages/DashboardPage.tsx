@@ -214,6 +214,64 @@ export default function DashboardPage({ initialSection }: { initialSection?: str
             <QuickAccessCategories />
           </section>
 
+          {/* Magic AI Studio — home only */}
+          {activeSection === 'home' && (
+            <section className="mb-10">
+              <div className="relative rounded-2xl overflow-hidden bg-gradient-to-r from-[#6366F1] via-[#8B5CF6] to-[#EC4899] p-px shadow-xl">
+                <div className="rounded-2xl bg-white dark:bg-[#1a1a2e] px-6 py-5">
+                  <div className="flex flex-col md:flex-row md:items-center gap-6">
+                    {/* Left: headline */}
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-xl">✨</span>
+                        <h2 className="text-lg font-extrabold bg-gradient-to-r from-[#6366F1] to-[#EC4899] bg-clip-text text-transparent">
+                          Magic AI Studio
+                        </h2>
+                        <span className="px-1.5 py-0.5 text-[9px] font-bold bg-gradient-to-r from-[#6366F1] to-[#EC4899] text-white rounded-full">NEW</span>
+                      </div>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                        Generate text, design ideas, and image descriptions instantly with AI.
+                      </p>
+                    </div>
+                    {/* Right: quick-action cards */}
+                    <div className="flex gap-3 flex-wrap">
+                      {[
+                        { emoji: '✍️', label: 'Magic Write', desc: 'AI copywriting', color: 'from-violet-500 to-purple-600' },
+                        { emoji: '🖼️', label: 'Image Ideas', desc: 'Visual concepts', color: 'from-pink-500 to-rose-600' },
+                        { emoji: '💡', label: 'Design Ideas', desc: 'Inspiration', color: 'from-amber-500 to-orange-600' },
+                        { emoji: '🎨', label: 'Color Palette', desc: 'AI colors', color: 'from-teal-500 to-cyan-600' },
+                      ].map((action) => (
+                        <button
+                          key={action.label}
+                          onClick={() => {
+                            setProject({
+                              id: `proj-${Date.now()}`,
+                              name: 'AI Design',
+                              pages: [{ id: `page-${Date.now()}`, name: 'Page 1', elements: [], backgroundColor: '#FFFFFF', width: 1920, height: 1080 }],
+                              ownerId: user?.id || '1',
+                              collaborators: [],
+                              isFavorite: false,
+                              isTemplate: false,
+                              createdAt: new Date().toISOString(),
+                              updatedAt: new Date().toISOString(),
+                            });
+                            navigate('/editor');
+                            toast.success(`Open the AI tab in the editor sidebar`);
+                          }}
+                          className="flex flex-col items-center gap-1.5 px-4 py-3 rounded-xl bg-gray-50 dark:bg-gray-800/60 hover:bg-gray-100 dark:hover:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 transition-all group min-w-[80px]"
+                        >
+                          <span className="text-2xl group-hover:scale-110 transition-transform">{action.emoji}</span>
+                          <span className="text-xs font-semibold text-gray-800 dark:text-gray-200">{action.label}</span>
+                          <span className="text-[9px] text-gray-400">{action.desc}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+          )}
+
           {/* Templates section (home only) */}
           {activeSection === 'home' && (
             <section className="mb-10">

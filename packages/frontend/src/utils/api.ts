@@ -54,15 +54,25 @@ export const categoryAPI = {
 };
 
 export const uploadAPI = {
-  upload: (file: File) => {
+  upload: (file: File, onProgress?: (pct: number) => void) => {
     const formData = new FormData();
     formData.append('file', file);
-    return api.post('/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+    return api.post('/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress: (ev) => {
+        if (ev.total) onProgress?.(Math.round((ev.loaded / ev.total) * 100));
+      },
+    });
   },
-  uploadMultiple: (files: File[]) => {
+  uploadMultiple: (files: File[], onProgress?: (pct: number) => void) => {
     const formData = new FormData();
     files.forEach((f) => formData.append('files', f));
-    return api.post('/upload/multiple', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+    return api.post('/upload/multiple', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress: (ev) => {
+        if (ev.total) onProgress?.(Math.round((ev.loaded / ev.total) * 100));
+      },
+    });
   },
   list: () => api.get('/upload'),
   delete: (id: string) => api.delete(`/upload/${id}`),
@@ -148,6 +158,13 @@ export const aiAPI = {
   generate: (data: { provider: string; prompt: string; type: string }) => api.post('/ai/generate', data),
   history: () => api.get('/ai/history'),
   stats: () => api.get('/ai/stats'),
+};
+
+export const aiSettingsAPI = {
+  list: () => api.get('/ai-settings'),
+  saveKey: (data: { provider: string; apiKey: string; model?: string }) => api.post('/ai-settings/key', data),
+  deleteKey: (id: string) => api.delete(`/ai-settings/key/${id}`),
+  toggleKey: (id: string) => api.put(`/ai-settings/key/${id}/toggle`),
 };
 
 export const backgroundRemovalAPI = {

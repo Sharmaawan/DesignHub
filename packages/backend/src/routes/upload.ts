@@ -15,14 +15,28 @@ const storage = multer.diskStorage({
   },
 });
 
+const ALLOWED_EXTS = new Set([
+  // Images
+  '.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.bmp', '.tiff', '.ico',
+  // Video
+  '.mp4', '.webm', '.mov', '.avi', '.mkv',
+  // Audio
+  '.mp3', '.wav', '.ogg', '.aac', '.flac', '.m4a',
+  // Documents
+  '.pdf',
+  '.doc', '.docx',
+  '.ppt', '.pptx',
+  '.xls', '.xlsx',
+  '.csv', '.txt', '.rtf',
+]);
+
 const upload = multer({
   storage,
-  limits: { fileSize: 50 * 1024 * 1024 },
+  limits: { fileSize: 100 * 1024 * 1024 }, // 100 MB
   fileFilter: (req, file, cb) => {
-    const allowed = ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.mp4', '.webm'];
     const ext = path.extname(file.originalname).toLowerCase();
-    if (allowed.includes(ext)) cb(null, true);
-    else cb(new Error('File type not supported'));
+    if (ALLOWED_EXTS.has(ext)) cb(null, true);
+    else cb(new Error(`File type ${ext} not supported`));
   },
 });
 

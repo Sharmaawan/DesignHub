@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useBrandStore } from '../stores/brandStore';
 import { useNotificationStore } from '../stores/notificationStore';
+import { uploadAPI } from '../utils/api';
 import DashboardSidebar from '../components/dashboard/DashboardSidebar';
 import CreateButton from '../components/dashboard/CreateButton';
 import NotificationCenter from '../components/dashboard/NotificationCenter';
@@ -48,35 +49,39 @@ export default function BrandHubPage() {
     { id: 'images' as const, label: 'Images', icon: HiOutlinePhotograph, count: images.length },
   ];
 
+  // Upload the actual file (multipart, same endpoint every other file upload in this app
+  // uses) and store just the short returned URL — not a base64 data URL. Embedding the
+  // whole image as base64 directly in JSON is what caused uploads to fail: it produces a
+  // multi-KB/MB string that overflows what the database column was built to hold.
+  const BACKEND = import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:3001';
+
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = async (ev) => {
-      try {
-        await addLogo({ name: file.name, url: ev.target?.result as string, isDefault: logos.length === 0 });
-        toast.success('Logo uploaded');
-      } catch (err: any) {
-        toast.error(err.message);
-      }
-    };
-    reader.readAsDataURL(file);
+    try {
+      const { data: saved } = await uploadAPI.upload(file);
+      const url = `${BACKEND}${saved.url}`;
+      await addLogo({ name: file.name, url, isDefault: logos.length === 0 });
+      toast.success('Logo uploaded');
+    } catch (err: any) {
+      console.error('[BrandHub] logo upload failed', err);
+      toast.error(err.response?.data?.error || err.message || 'Failed to upload logo');
+    }
     e.target.value = '';
   };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = async (ev) => {
-      try {
-        await addImage({ name: file.name, url: ev.target?.result as string, folder: 'Brand Assets' });
-        toast.success('Image uploaded');
-      } catch (err: any) {
-        toast.error(err.message);
-      }
-    };
-    reader.readAsDataURL(file);
+    try {
+      const { data: saved } = await uploadAPI.upload(file);
+      const url = `${BACKEND}${saved.url}`;
+      await addImage({ name: file.name, url, folder: 'Brand Assets' });
+      toast.success('Image uploaded');
+    } catch (err: any) {
+      console.error('[BrandHub] image upload failed', err);
+      toast.error(err.response?.data?.error || err.message || 'Failed to upload image');
+    }
     e.target.value = '';
   };
 

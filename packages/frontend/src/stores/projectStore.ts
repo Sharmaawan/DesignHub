@@ -64,6 +64,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set((s) => ({
       projects: s.projects.map((p) => p.id === id ? { ...p, ...data, updatedAt: new Date().toISOString() } : p),
     }));
+    // Persist to MySQL for real DB projects (local-only projects have id starting with 'proj-')
+    if (!id.startsWith('proj-')) {
+      projectAPI.update(id, data).catch(() => {/* silent — autosave best-effort */});
+    }
   },
 
   deleteProject: (id) => {

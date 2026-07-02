@@ -107,6 +107,15 @@ export interface IconData {
   iconName: string;
   svgPath: string;
   fill: string;
+  /** Multiple path fragments for compound/multi-shape SVG icons; svgPath is used when absent. */
+  svgPaths?: string[];
+  /** Per-path fill color, parallel to svgPaths. 'currentColor'/'none' falls back to `fill`. */
+  iconFills?: string[];
+  /** Original SVG viewBox size — used to scale the icon without distorting its aspect ratio. */
+  viewBoxWidth?: number;
+  viewBoxHeight?: number;
+  /** @deprecated use viewBoxWidth/viewBoxHeight — kept for icons inserted before that split. */
+  viewBoxSize?: number;
 }
 
 export interface ChartData {

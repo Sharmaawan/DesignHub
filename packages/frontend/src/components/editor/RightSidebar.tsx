@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { useEditorStore } from '../../stores/editorStore';
-import { CanvasElement, TextData, ImageData, ShapeData, TableData, ChartData } from '../../types';
+import { CanvasElement, TextData, ImageData, ShapeData, TableData, ChartData, IconData } from '../../types';
 import { COLORS_PALETTE, FONT_FAMILIES, FONT_WEIGHT_MAP, FONT_WEIGHT_LABELS, GRADIENT_PRESETS } from '../../utils/cn';
 import {
   HiOutlineX, HiOutlineTrash, HiOutlineDuplicate, HiOutlineLockClosed,
@@ -8,7 +8,7 @@ import {
   HiOutlineArrowUp, HiOutlineArrowDown, HiOutlinePlus, HiOutlineMinus,
   HiOutlinePhotograph, HiOutlineAdjustments,
   HiOutlineArrowLeft, HiOutlineArrowRight,
-  HiOutlineTemplate, HiOutlineCog,
+  HiOutlineTemplate, HiOutlineCog, HiOutlineChevronDown, HiOutlineChevronUp,
 } from 'react-icons/hi';
 import toast from 'react-hot-toast';
 
@@ -17,8 +17,11 @@ export default function RightSidebar() {
     pages, currentPageIndex, selectedElementIds, rightPanelOpen, setRightPanelOpen,
     updateElement, removeElements, duplicateElements, bringForward, sendBackward,
     bringToFront, sendToBack, lockElement, unlockElement, hideElement, showElement,
-    pushHistory,
+    pushHistory, setPageBackgroundColor, updatePage, duplicatePage, removePage,
+    showGrid, showRulers, showGuides, snapEnabled, gridSize,
+    toggleGrid, toggleRulers, toggleGuides, toggleSnap, setGridSize,
   } = useEditorStore();
+  const [showColorSwatches, setShowColorSwatches] = useState(false);
 
   const page = pages[currentPageIndex];
   const selectedElements = page?.elements.filter((e) => selectedElementIds.includes(e.id)) || [];
@@ -26,6 +29,10 @@ export default function RightSidebar() {
 
   if (!rightPanelOpen) return null;
 
+  // Nothing selected — the page's own background isn't a clickable canvas element (it's
+  // a page property, not a shape), so clicking empty canvas can never "select" it. Show
+  // its controls here instead, the same way Canva surfaces page-level properties when
+  // nothing else is selected — otherwise there's no way to discover how to change it.
   if (!element) {
     return (
       <div className="w-72 bg-white dark:bg-canva-dark-surface border-l border-gray-200 dark:border-canva-dark-border overflow-y-auto">
@@ -33,10 +40,105 @@ export default function RightSidebar() {
           <span className="text-sm font-semibold text-gray-900 dark:text-white">Design</span>
           <button onClick={() => setRightPanelOpen(false)} className="toolbar-btn"><HiOutlineX size={16} /></button>
         </div>
-        <div className="p-4">
-          <p className="text-sm text-gray-400 dark:text-gray-500 text-center py-8">
-            Select an element on the canvas to edit its properties
+        <div className="p-4 space-y-5">
+          <p className="text-xs text-gray-400 dark:text-gray-500">
+            Click any text, shape, or image on the canvas to edit it. Nothing selected right now, so here's the page itself:
           </p>
+          {page && (
+            <>
+              {/* Quick page actions */}
+              <div className="flex items-center gap-1">
+                <button onClick={() => duplicatePage(currentPageIndex)} className="toolbar-btn flex-1 flex items-center justify-center gap-1 text-xs" title="Duplicate page">
+                  <HiOutlineDuplicate size={14} /> Duplicate page
+                </button>
+                <button
+                  onClick={() => { if (pages.length > 1) removePage(currentPageIndex); else toast.error("Can't delete the only page"); }}
+                  className="toolbar-btn text-red-500 hover:text-red-600" title="Delete page"
+                >
+                  <HiOutlineTrash size={14} />
+                </button>
+              </div>
+
+              <Section title="Page">
+                <label className="text-xs text-gray-500 mb-1 block">Page name</label>
+                <input
+                  type="text"
+                  value={page.name}
+                  onChange={(e) => updatePage(currentPageIndex, { name: e.target.value })}
+                  onBlur={() => pushHistory()}
+                  className="input-field text-sm"
+                />
+              </Section>
+
+              <Section title="Page Size">
+                <div className="grid grid-cols-2 gap-2">
+                  <NumberInput
+                    label="W" value={Math.round(page.width)} min={100} max={8000}
+                    onChange={(v) => { updatePage(currentPageIndex, { width: Math.max(100, v) }); pushHistory(); }}
+                  />
+                  <NumberInput
+                    label="H" value={Math.round(page.height)} min={100} max={8000}
+                    onChange={(v) => { updatePage(currentPageIndex, { height: Math.max(100, v) }); pushHistory(); }}
+                  />
+                </div>
+              </Section>
+
+              <Section title="Page Background">
+                <ColorPicker
+                  label="Background color"
+                  value={/^#/.test(page.backgroundColor) ? page.backgroundColor : '#FFFFFF'}
+                  onChange={(v) => setPageBackgroundColor(currentPageIndex, v)}
+                />
+                <button
+                  onClick={() => setShowColorSwatches((s) => !s)}
+                  className="mt-3 w-full flex items-center justify-between text-xs text-gray-500 hover:text-canva-purple transition-colors"
+                >
+                  <span>More colors &amp; gradients</span>
+                  {showColorSwatches ? <HiOutlineChevronUp size={14} /> : <HiOutlineChevronDown size={14} />}
+                </button>
+                {showColorSwatches && (
+                  <div className="mt-2">
+                    <div className="grid grid-cols-9 gap-1.5">
+                      {COLORS_PALETTE.map((color) => (
+                        <button key={color} style={{ background: color }}
+                          onClick={() => setPageBackgroundColor(currentPageIndex, color)}
+                          className="w-6 h-6 rounded border border-gray-200 dark:border-gray-700 hover:scale-110 hover:ring-2 hover:ring-canva-purple transition-all" title={color} />
+                      ))}
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 mt-2">
+                      {GRADIENT_PRESETS.map((g, i) => (
+                        <button key={i} style={{ background: g }}
+                          onClick={() => setPageBackgroundColor(currentPageIndex, g)}
+                          className="h-9 rounded-lg hover:ring-2 hover:ring-canva-purple transition-all" />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </Section>
+
+              <Section title="Canvas Settings">
+                {[
+                  { label: 'Show grid', on: showGrid, toggle: toggleGrid },
+                  { label: 'Show rulers', on: showRulers, toggle: toggleRulers },
+                  { label: 'Show guides', on: showGuides, toggle: toggleGuides },
+                  { label: 'Snap to grid', on: snapEnabled, toggle: toggleSnap },
+                ].map((s) => (
+                  <label key={s.label} className="flex items-center justify-between py-1.5 cursor-pointer">
+                    <span className="text-xs text-gray-600 dark:text-gray-400">{s.label}</span>
+                    <button
+                      onClick={s.toggle}
+                      className={`w-9 h-5 rounded-full transition-colors relative ${s.on ? 'bg-canva-purple' : 'bg-gray-300 dark:bg-gray-600'}`}
+                    >
+                      <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${s.on ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                    </button>
+                  </label>
+                ))}
+                <div className="mt-2">
+                  <NumberInput label="Grid size" value={gridSize} min={2} max={200} onChange={(v) => setGridSize(v)} />
+                </div>
+              </Section>
+            </>
+          )}
         </div>
       </div>
     );
@@ -130,6 +232,9 @@ export default function RightSidebar() {
 
         {/* Shape Properties */}
         {element.type === 'shape' && <ShapeProperties element={element} handleDataUpdate={handleDataUpdate} />}
+
+        {/* Icon Properties */}
+        {element.type === 'icon' && <IconProperties element={element} handleDataUpdate={handleDataUpdate} />}
 
         {/* Table Properties */}
         {element.type === 'table' && <TableProperties element={element} handleDataUpdate={handleDataUpdate} />}
@@ -323,6 +428,25 @@ function TextProperties({ element, handleDataUpdate }: { element: CanvasElement;
           </div>
         )}
       </Section>
+      <Section title="Text Animation">
+        <select
+          value={(element.data as any).animation || 'none'}
+          onChange={(e) => handleDataUpdate({ animation: e.target.value })}
+          className="input-field"
+        >
+          <option value="none">— No animation</option>
+          <option value="typewriter">⌨️ Typewriter</option>
+          <option value="fadeIn">🌅 Fade In</option>
+          <option value="slideUp">⬆️ Slide Up</option>
+          <option value="slideLeft">⬅️ Slide Left</option>
+          <option value="bounce">🏀 Bounce</option>
+          <option value="zoom">🔍 Zoom</option>
+          <option value="pulse">💓 Pulse</option>
+        </select>
+        {(element.data as any).animation && (element.data as any).animation !== 'none' && (
+          <p className="text-[10px] text-gray-400 mt-1">Animation plays on canvas load. Re-select to replay.</p>
+        )}
+      </Section>
     </>
   );
 }
@@ -470,14 +594,21 @@ function ImageProperties({ element, handleDataUpdate }: { element: CanvasElement
           </button>
         </div>
 
-        {/* Crop */}
+        {/* Crop — percentages of the source image; 0/0/100/100 is uncropped */}
         <div className="mb-3">
-          <button
-            onClick={() => toast('Crop mode - use transform handles to adjust')}
-            className="w-full h-9 rounded-lg border border-gray-200 dark:border-gray-700 flex items-center justify-center gap-2 text-xs font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-          >
-            <HiOutlineAdjustments size={14} /> Crop
-          </button>
+          <div className="flex items-center justify-between mb-1.5">
+            <label className="text-xs text-gray-500 flex items-center gap-1"><HiOutlineAdjustments size={13} /> Crop</label>
+            <button
+              onClick={() => handleDataUpdate({ cropX: 0, cropY: 0, cropWidth: 100, cropHeight: 100 })}
+              className="text-[10px] text-gray-400 hover:text-canva-purple"
+            >
+              Reset
+            </button>
+          </div>
+          <Slider label="Left" value={(data as any).cropX ?? 0} onChange={(v) => handleDataUpdate({ cropX: Math.min(v, 100 - ((data as any).cropWidth ?? 100)) })} min={0} max={99} />
+          <Slider label="Top" value={(data as any).cropY ?? 0} onChange={(v) => handleDataUpdate({ cropY: Math.min(v, 100 - ((data as any).cropHeight ?? 100)) })} min={0} max={99} />
+          <Slider label="Width" value={(data as any).cropWidth ?? 100} onChange={(v) => handleDataUpdate({ cropWidth: Math.min(v, 100 - ((data as any).cropX ?? 0)) })} min={1} max={100} />
+          <Slider label="Height" value={(data as any).cropHeight ?? 100} onChange={(v) => handleDataUpdate({ cropHeight: Math.min(v, 100 - ((data as any).cropY ?? 0)) })} min={1} max={100} />
         </div>
 
         {/* Rounded Corners */}
@@ -514,6 +645,18 @@ function ShapeProperties({ element, handleDataUpdate }: { element: CanvasElement
       </div>
       <NumberInput label="Stroke W" value={data.strokeWidth} onChange={(v) => handleDataUpdate({ strokeWidth: v })} min={0} max={50} />
       <NumberInput label="Corner R" value={data.cornerRadius} onChange={(v) => handleDataUpdate({ cornerRadius: v })} min={0} max={500} />
+    </Section>
+  );
+}
+
+function IconProperties({ element, handleDataUpdate }: { element: CanvasElement; handleDataUpdate: (data: Record<string, unknown>) => void }) {
+  const data = element.data as IconData;
+  return (
+    <Section title="Icon Style">
+      <ColorPicker label="Recolor" value={data.fill || '#000000'} onChange={(v) => handleDataUpdate({ fill: v })} />
+      <p className="text-[10px] text-gray-400 mt-2">
+        Only applies to single-color paths — multi-color icons keep their original per-path colors.
+      </p>
     </Section>
   );
 }
