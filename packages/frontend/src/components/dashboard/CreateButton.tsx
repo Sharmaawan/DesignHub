@@ -5,6 +5,7 @@ import { CANVAS_PRESETS } from '../../utils/cn';
 import { DesignType } from '../../types';
 import toast from 'react-hot-toast';
 import { projectAPI } from '../../utils/api';
+import VideoSuggestionsModal from './VideoSuggestionsModal';
 
 const DESIGN_TYPES: DesignType[] = [
   { id: 'presentation', label: 'Presentation', icon: '📊', width: 1920, height: 1080, category: 'Presentations', description: '16:9 widescreen' },
@@ -40,6 +41,7 @@ const DESIGN_TYPES: DesignType[] = [
 export default function CreateButton() {
   const [isOpen, setIsOpen] = useState(false);
   const [showCustomSize, setShowCustomSize] = useState(false);
+  const [showVideoFormats, setShowVideoFormats] = useState(false);
   const [customWidth, setCustomWidth] = useState(1080);
   const [customHeight, setCustomHeight] = useState(1080);
   const navigate = useNavigate();
@@ -107,6 +109,15 @@ export default function CreateButton() {
       return;
     }
 
+    if (type.id === 'video') {
+      // Video shouldn't jump straight into a project — ask which video format
+      // first (landscape, Reel, TikTok, etc.), matching Canva's own "Videos"
+      // section, then create the project for the chosen format once picked.
+      setIsOpen(false);
+      setShowVideoFormats(true);
+      return;
+    }
+
     const width = type.width;
     const height = type.height;
     const pages = [{
@@ -147,6 +158,7 @@ export default function CreateButton() {
 
   return (
     <div className="relative" ref={menuRef}>
+      <VideoSuggestionsModal open={showVideoFormats} onClose={() => setShowVideoFormats(false)} />
       <button
         onClick={() => setIsOpen(!isOpen)}
         className="flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-[#7B2FBE] to-[#9B4DCA] text-white rounded-full font-semibold shadow-lg shadow-[#7B2FBE]/30 hover:shadow-xl hover:shadow-[#7B2FBE]/40 hover:scale-105 active:scale-95 transition-all duration-200"

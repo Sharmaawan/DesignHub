@@ -3,6 +3,7 @@ import { HiOutlineChevronLeft, HiOutlineChevronRight } from 'react-icons/hi';
 import { useNavigate } from 'react-router-dom';
 import { projectAPI } from '../../utils/api';
 import toast from 'react-hot-toast';
+import VideoSuggestionsModal from './VideoSuggestionsModal';
 
 interface Category {
   id: string;
@@ -45,6 +46,7 @@ export default function QuickAccessCategories() {
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(true);
   const [showCustomModal, setShowCustomModal] = useState(false);
+  const [showVideoModal, setShowVideoModal] = useState(false);
   const [customW, setCustomW] = useState('1920');
   const [customH, setCustomH] = useState('1080');
   const [customUnit, setCustomUnit] = useState<'px' | 'mm' | 'in'>('px');
@@ -138,6 +140,14 @@ export default function QuickAccessCategories() {
       setShowCustomModal(true);
       return;
     }
+    if (cat.id === 'video') {
+      // Unlike every other quick-create entry, Video shouldn't jump straight into
+      // a project — ask which video format first (landscape, Reel, TikTok, etc.),
+      // matching how Canva's own "Videos" section works, then create the project
+      // for the chosen format once picked.
+      setShowVideoModal(true);
+      return;
+    }
     if (cat.width && cat.height) {
       const pages = [{
         id: `page-${Date.now()}`,
@@ -175,6 +185,8 @@ export default function QuickAccessCategories() {
 
   return (
     <div className="relative">
+
+      <VideoSuggestionsModal open={showVideoModal} onClose={() => setShowVideoModal(false)} />
 
       {/* Custom Size Modal */}
       {showCustomModal && (
