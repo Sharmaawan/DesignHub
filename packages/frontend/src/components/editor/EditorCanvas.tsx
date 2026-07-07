@@ -3,6 +3,7 @@ import { Stage, Layer, Rect, Text, Image as KonvaImage, Group, Transformer, Line
 import { useEditorStore } from '../../stores/editorStore';
 import { CanvasElement, Page, TextData, ImageData, ShapeData, TableData, ChartData, VideoData } from '../../types';
 import Konva from 'konva';
+import { Collaborator } from '../../hooks/useCollaboration';
 
 interface EditorCanvasProps {
   page: Page;
@@ -13,6 +14,8 @@ interface EditorCanvasProps {
   zoomOverride?: number;
   panOverride?: { x: number; y: number };
   hideChrome?: boolean;
+  collaborators?: Collaborator[];
+  onCursorMove?: (x: number, y: number) => void;
 }
 
 // "Show rulers" toggle existed in the store and the Settings UI but nothing ever
@@ -66,7 +69,7 @@ function Ruler({ zoom, panX, panY, width, height }: { zoom: number; panX: number
   );
 }
 
-export default function EditorCanvas({ page, zoomOverride, panOverride, hideChrome }: EditorCanvasProps) {
+export default function EditorCanvas({ page, zoomOverride, panOverride, hideChrome, collaborators, onCursorMove }: EditorCanvasProps) {
   const stageRef = useRef<Konva.Stage>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const transformerRef = useRef<Konva.Transformer>(null);
@@ -229,7 +232,19 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
     }
   };
 
+  const lastCursorEmitRef = useRef(0);
+
   const handleStageMouseMove = (e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
+    if (onCursorMove) {
+      // Throttled — this fires on every pixel of mouse movement, and broadcasting
+      // each one individually would flood the socket for no visible benefit.
+      const now = Date.now();
+      if (now - lastCursorEmitRef.current > 50) {
+        lastCursorEmitRef.current = now;
+        const pos = stageRef.current?.getRelativePointerPosition();
+        if (pos) onCursorMove(pos.x, pos.y);
+      }
+    }
     if (isDrawingRef.current) {
       const pos = stageRef.current?.getRelativePointerPosition();
       if (!pos) return;
@@ -711,6 +726,27 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
           />
         </Layer>
       </Stage>
+
+      {/* Other viewers' live cursors — plain HTML overlay converting page-space
+          coordinates to screen-space with the same zoom/pan transform the Stage
+          itself uses, same technique the Ruler above already uses. */}
+      {collaborators?.filter((c) => c.cursor).map((c) => (
+        <div
+          key={c.id}
+          className="absolute z-30 pointer-events-none transition-transform duration-75 ease-linear"
+          style={{ left: 0, top: 0, transform: `translate(${c.cursor!.x * zoom + panX}px, ${c.cursor!.y * zoom + panY}px)` }}
+        >
+          <svg width="18" height="18" viewBox="0 0 18 18" style={{ fill: c.color }}>
+            <path d="M1 1l6.5 15 2.5-6 6-2.5z" />
+          </svg>
+          <span
+            className="ml-3.5 -mt-1 inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold text-white whitespace-nowrap"
+            style={{ backgroundColor: c.color }}
+          >
+            {c.name}
+          </span>
+        </div>
+      ))}
     </div>
   );
 }

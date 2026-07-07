@@ -20,6 +20,7 @@ import ExportModal from '../components/editor/ExportModal';
 import PublishModal from '../components/editor/PublishModal';
 import PreviewMode from '../components/editor/PreviewMode';
 import toast from 'react-hot-toast';
+import { useCollaboration } from '../hooks/useCollaboration';
 
 export default function EditorPage() {
   const { projectId } = useParams();
@@ -112,6 +113,7 @@ export default function EditorPage() {
   }, [handleKeyDown]);
 
   const currentPage = pages[currentPageIndex];
+  const { collaborators, emitCursorMove } = useCollaboration(projectId);
 
   return (
     <div className="h-screen flex flex-col bg-gray-100 dark:bg-canva-dark-bg overflow-hidden">
@@ -124,6 +126,7 @@ export default function EditorPage() {
         onOpenPublish={() => setShowPublish(true)}
         onOpenSettings={() => setShowSettings(true)}
         onOpenPreview={() => setShowPreview(true)}
+        collaborators={collaborators}
       />
 
       <div className="flex-1 flex overflow-hidden relative">
@@ -132,7 +135,7 @@ export default function EditorPage() {
         <div className="flex-1 flex flex-col overflow-hidden">
           {/* Canvas Area */}
           <div className="flex-1 relative overflow-hidden bg-gray-200/50 dark:bg-gray-900/50">
-            {currentPage && <EditorCanvas page={currentPage} />}
+            {currentPage && <EditorCanvas page={currentPage} collaborators={collaborators} onCursorMove={emitCursorMove} />}
             <FloatingToolbar />
           </div>
 

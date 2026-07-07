@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { useAuthStore } from './stores/authStore';
@@ -19,6 +20,17 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
+  // A token in localStorage only proves *a* session existed — `user` itself
+  // (name/avatar/id used throughout the app, including the new collaboration
+  // presence feature) was never re-hydrated on a fresh load/reload, only ever
+  // set in-memory by an actual login()/register() call. That's almost certainly
+  // what was behind the sidebar showing a generic "User" fallback after a reload
+  // earlier in this project's history.
+  const { token, user, loadUser } = useAuthStore();
+  useEffect(() => {
+    if (token && !user) loadUser();
+  }, [token, user, loadUser]);
+
   return (
     <BrowserRouter>
       <Toaster

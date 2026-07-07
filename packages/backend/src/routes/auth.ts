@@ -3,9 +3,9 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import prisma from '../lib/prisma';
 import { OAuth2Client } from 'google-auth-library';
+import { JWT_SECRET } from '../lib/secrets';
 
 const router = Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'designhub-secret-key-2024';
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID);
 
@@ -15,6 +15,9 @@ router.post('/register', async (req: Request, res: Response) => {
     const { name, email, password } = req.body;
     if (!name || !email || !password) {
       return res.status(400).json({ error: 'All fields are required' });
+    }
+    if (password.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters' });
     }
     const existing = await prisma.user.findUnique({ where: { email } });
     if (existing) {

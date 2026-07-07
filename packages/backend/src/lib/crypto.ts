@@ -1,8 +1,5 @@
 import crypto from 'crypto';
-
-// Shared by AI provider keys and social platform tokens — was previously duplicated
-// verbatim in routes/ai.ts and routes/aiSettings.ts.
-const ENCRYPTION_KEY = process.env.API_KEY_SECRET || 'designhub-api-key-secret-2024!';
+import { API_KEY_SECRET as ENCRYPTION_KEY } from './secrets';
 
 export function encryptSecret(text: string): string {
   const cipher = crypto.createCipheriv('aes-256-cbc', Buffer.alloc(32, ENCRYPTION_KEY.slice(0, 32)), Buffer.alloc(16));

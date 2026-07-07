@@ -6,6 +6,8 @@ dotenv.config({ override: true });
 
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import prisma from './lib/prisma';
@@ -35,17 +37,30 @@ import { startScheduler } from './lib/scheduler';
 
 const app = express();
 const httpServer = createServer(app);
+const FRONTEND_ORIGIN = process.env.FRONTEND_URL || 'http://localhost:5173';
 const io = new Server(httpServer, {
   cors: {
-    origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+    origin: FRONTEND_ORIGIN,
     methods: ['GET', 'POST'],
   },
 });
 
-app.use(cors());
+// crossOriginResourcePolicy relaxed to 'cross-origin' — /uploads is routinely
+// loaded (as <img>/<video> src) from a frontend served on a different origin
+// than this API in a typical two-service deployment.
+app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+app.use(cors({ origin: FRONTEND_ORIGIN, credentials: true }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use('/uploads', express.static('uploads'));
+
+// Generous global ceiling against abuse; a much tighter one below specifically
+// guards the unauthenticated register/login/google endpoints from brute-forcing.
+app.use('/api/', rateLimit({ windowMs: 15 * 60 * 1000, limit: 300, standardHeaders: true, legacyHeaders: false }));
+app.use('/api/auth', rateLimit({
+  windowMs: 15 * 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false,
+  message: { error: 'Too many attempts — please try again later.' },
+}));
 
 app.use('/api/auth', authRoutes);
 app.use('/api/projects', projectRoutes);
@@ -77,6 +92,19 @@ app.get('/api/health', async (_, res) => {
   } catch {
     res.json({ status: 'ok', database: 'disconnected', timestamp: new Date().toISOString() });
   }
+});
+
+app.use('/api', (req, res) => {
+  res.status(404).json({ error: 'Not found' });
+});
+
+// Catches anything a route handler threw/rejected without its own try/catch —
+// most routes already handle their own errors, this is the backstop.
+app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error('[unhandled error]', err);
+  res.status(err.status || 500).json({
+    error: process.env.NODE_ENV === 'production' ? 'Internal server error' : (err.message || 'Internal server error'),
+  });
 });
 
 const collaborators = new Map<string, Map<string, { id: string; name: string; avatar: string; color: string; cursor?: { x: number; y: number } }>>();

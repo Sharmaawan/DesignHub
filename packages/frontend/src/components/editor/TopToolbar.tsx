@@ -13,6 +13,7 @@ import {
 } from 'react-icons/hi';
 import toast from 'react-hot-toast';
 import { useAuthStore } from '../../stores/authStore';
+import { Collaborator } from '../../hooks/useCollaboration';
 
 interface TopToolbarProps {
   onThemeToggle: () => void;
@@ -23,9 +24,10 @@ interface TopToolbarProps {
   onOpenPublish: () => void;
   onOpenSettings: () => void;
   onOpenPreview: () => void;
+  collaborators: Collaborator[];
 }
 
-export default function TopToolbar({ onThemeToggle, isDark, onShowShortcuts, onOpenShare, onOpenExport, onOpenPublish, onOpenSettings, onOpenPreview }: TopToolbarProps) {
+export default function TopToolbar({ onThemeToggle, isDark, onShowShortcuts, onOpenShare, onOpenExport, onOpenPublish, onOpenSettings, onOpenPreview, collaborators }: TopToolbarProps) {
   const navigate = useNavigate();
   const { user } = useAuthStore();
   const {
@@ -228,11 +230,19 @@ export default function TopToolbar({ onThemeToggle, isDark, onShowShortcuts, onO
 
         <div className="h-5 w-px bg-gray-200 dark:bg-gray-700" />
 
-        {/* Collaborators avatars */}
+        {/* Collaborators avatars — real live viewers of this project, via useCollaboration */}
         <div className="flex -space-x-2 mx-1">
           <img src={user?.avatar} alt="" className="w-7 h-7 rounded-full border-2 border-white dark:border-gray-800 bg-gray-200" title="You" />
-          <div className="w-7 h-7 rounded-full border-2 border-white dark:border-gray-800 bg-canva-purple/20 flex items-center justify-center text-[9px] font-bold text-canva-purple" title="Sarah Chen">SC</div>
-          <div className="w-7 h-7 rounded-full border-2 border-white dark:border-gray-800 bg-green-100 flex items-center justify-center text-[9px] font-bold text-green-600" title="Mike Johnson">MJ</div>
+          {collaborators.map((c) => (
+            c.avatar
+              ? <img key={c.id} src={c.avatar} alt="" className="w-7 h-7 rounded-full border-2 border-white dark:border-gray-800 bg-gray-200" title={c.name} />
+              : (
+                <div key={c.id} style={{ backgroundColor: `${c.color}33`, color: c.color }}
+                  className="w-7 h-7 rounded-full border-2 border-white dark:border-gray-800 flex items-center justify-center text-[9px] font-bold" title={c.name}>
+                  {c.name.split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase()}
+                </div>
+              )
+          ))}
         </div>
 
         {/* Preview */}

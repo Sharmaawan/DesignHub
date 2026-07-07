@@ -1,8 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import prisma from '../lib/prisma';
-
-const JWT_SECRET = process.env.JWT_SECRET || 'designhub-secret-key-2024';
+import { JWT_SECRET } from '../lib/secrets';
 
 export interface AuthRequest extends Request {
   userId?: string;
