@@ -49,6 +49,9 @@ model User {
   aiRequests       AIRequest[]
   aiGenerations    AIGeneration[]
   backgroundRemovals BackgroundRemoval[]
+  socialAccounts   SocialAccount[]
+  socialPosts      SocialPost[]
+  uploadedTemplates Template[]
 
   @@map("users")
 }
@@ -76,6 +79,7 @@ model Project {
   exportHistory  ExportHistory[]
   favorites      Favorite[]
   brandTemplates BrandTemplate[]
+  socialPosts    SocialPost[]
 
   @@map("projects")
 }
@@ -134,9 +138,15 @@ model Template {
   data        Json?
   tags        Json
   isPremium   Boolean  @default(false) @map("is_premium")
+  // Null for the built-in/seed catalog — those are shared by everyone and never
+  // deletable. Only templates a user uploaded themselves (ownerId set) can be
+  // deleted/restored, so nobody can remove a template out from under other users.
+  ownerId     String?   @map("owner_id")
+  deletedAt   DateTime? @map("deleted_at")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
+  owner     User?      @relation(fields: [ownerId], references: [id])
   favorites Favorite[]
 
   @@map("templates")
@@ -501,4 +511,70 @@ model BackgroundRemoval {
   user User @relation(fields: [userId], references: [id])
 
   @@map("background_removals")
+}
+
+model SocialAccount {
+  id               String    @id @default(cuid())
+  userId           String    @map("user_id")
+  platform         String    // 'facebook' | 'instagram' | 'linkedin' | 'twitter' | 'pinterest'
+  platformUserId   String    @map("platform_user_id")
+  platformUsername String?   @map("platform_username")
+  accessToken      String    @db.LongText @map("access_token")   // encrypted
+  refreshToken     String?   @db.LongText @map("refresh_token")  // encrypted
+  tokenExpiresAt   DateTime? @map("token_expires_at")
+  isActive         Boolean   @default(true) @map("is_active")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  user  User         @relation(fields: [userId], references: [id])
+  posts SocialPost[]
+
+  @@unique([userId, platform, platformUserId])
+  @@map("social_accounts")
+}
+
+model SocialPost {
+  id              String    @id @default(cuid())
+  userId          String    @map("user_id")
+  projectId       String?   @map("project_id")
+  socialAccountId String    @map("social_account_id")
+  platform        String
+  status          String    @default("draft") // draft|scheduled|publishing|published|failed
+  mediaType       String    @map("media_type") // image|video|carousel|story
+  mediaUrls       Json      @map("media_urls")
+  caption         String?   @db.Text
+  hashtags        Json?
+  altText         String?   @map("alt_text") @db.Text
+  firstComment    String?   @map("first_comment") @db.Text
+  linkUrl         String?   @map("link_url")
+  scheduledFor    DateTime? @map("scheduled_for")
+  publishedAt     DateTime? @map("published_at")
+  platformPostId  String?   @map("platform_post_id")
+  errorMessage    String?   @map("error_message") @db.Text
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  user          User                 @relation(fields: [userId], references: [id])
+  project       Project?             @relation(fields: [projectId], references: [id])
+  socialAccount SocialAccount        @relation(fields: [socialAccountId], references: [id])
+  analytics     SocialPostAnalytics?
+
+  @@index([status, scheduledFor])
+  @@index([userId])
+  @@map("social_posts")
+}
+
+model SocialPostAnalytics {
+  id           String   @id @default(cuid())
+  socialPostId String   @unique @map("social_post_id")
+  likes        Int      @default(0)
+  comments     Int      @default(0)
+  shares       Int      @default(0)
+  reach        Int      @default(0)
+  impressions  Int      @default(0)
+  fetchedAt    DateTime @default(now()) @map("fetched_at")
+
+  socialPost SocialPost @relation(fields: [socialPostId], references: [id])
+
+  @@map("social_post_analytics")
 }

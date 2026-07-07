@@ -168,13 +168,13 @@ export default function TeamRequests() {
         <div className="divide-y divide-gray-50 dark:divide-gray-800">
           {pendingInvites.map((invite) => (
             <div key={invite.id} className="p-4 hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-9 h-9 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center flex-shrink-0">
                     <HiOutlineMail size={16} className="text-green-600 dark:text-green-400" />
                   </div>
-                  <div>
-                    <p className="text-sm font-medium text-gray-900 dark:text-white">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
                       {invite.team?.name || 'Team'}
                     </p>
                     <p className="text-[11px] text-gray-400">
@@ -182,7 +182,7 @@ export default function TeamRequests() {
                     </p>
                   </div>
                 </div>
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-1 flex-shrink-0">
                   <button
                     onClick={() => handleAccept(invite.id)}
                     className="p-1.5 rounded-lg hover:bg-green-50 dark:hover:bg-green-900/20 text-green-600 transition-colors"
@@ -209,24 +209,26 @@ export default function TeamRequests() {
         <div className="divide-y divide-gray-50 dark:divide-gray-800">
           {(currentTeam.invites || []).map((invite: any) => (
             <div key={invite.id} className="p-4 hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-full bg-[#7B2FBE]/10 flex items-center justify-center">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-9 h-9 rounded-full bg-[#7B2FBE]/10 flex items-center justify-center flex-shrink-0">
                     <span className="text-sm font-bold text-[#7B2FBE]">{invite.email[0].toUpperCase()}</span>
                   </div>
-                  <div>
-                    <p className="text-sm font-medium text-gray-900 dark:text-white">{invite.email}</p>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{invite.email}</p>
                     <p className="text-[11px] text-gray-400">{invite.role} · {getTimeRemaining(invite.expiresAt)}</p>
                   </div>
                 </div>
-                <div className="flex items-center gap-1">
+                {/* flex-shrink-0 so a long email truncates instead of squeezing these
+                    (especially Revoke/delete) off the edge of a narrow card. */}
+                <div className="flex items-center gap-1 flex-shrink-0">
                   <button onClick={() => handleCopyLink(invite.token)} className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-400 hover:text-gray-600 transition-colors" title="Copy link">
                     <HiOutlineLink size={14} />
                   </button>
                   <button onClick={() => handleResend(invite.id)} className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-400 hover:text-blue-600 transition-colors" title="Resend">
                     <HiOutlineRefresh size={14} />
                   </button>
-                  <button onClick={() => handleRevoke(invite.id)} className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-gray-400 hover:text-red-600 transition-colors" title="Revoke">
+                  <button onClick={() => handleRevoke(invite.id)} className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-gray-400 hover:text-red-600 transition-colors" title="Revoke invite">
                     <HiOutlineX size={14} />
                   </button>
                 </div>

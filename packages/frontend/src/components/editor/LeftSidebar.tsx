@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { uploadAPI, aiAPI, aiSettingsAPI } from '../../utils/api';
 import { importPDF, importSVG, importCSV, importXLSX, importDOCX, importPPTX } from '../../utils/documentImport';
 import { useEditorStore } from '../../stores/editorStore';
@@ -7,7 +8,8 @@ import {
   HiOutlineTemplate, HiOutlineViewGrid, HiOutlinePencil,
   HiOutlineColorSwatch, HiOutlineUpload,
   HiOutlineSearch, HiOutlinePlus, HiOutlineChevronLeft,
-  HiOutlineSparkles,
+  HiOutlineSparkles, HiOutlineChevronDown, HiOutlineChevronUp,
+  HiOutlinePencilAlt, HiCursorClick, HiOutlineTrash,
 } from 'react-icons/hi';
 import toast from 'react-hot-toast';
 
@@ -81,16 +83,19 @@ function parseSvgShapes(body: string): { paths: string[]; fills: string[] } {
   return { paths, fills };
 }
 
-type TabKey = 'templates' | 'elements' | 'text' | 'uploads' | 'background' | 'ai';
+type TabKey = 'templates' | 'elements' | 'text' | 'uploads' | 'background' | 'ai' | 'tools';
 
 const TABS: { key: TabKey; icon: React.ElementType; label: string }[] = [
   { key: 'templates', icon: HiOutlineTemplate, label: 'Templates' },
   { key: 'elements', icon: HiOutlineViewGrid, label: 'Elements' },
   { key: 'text', icon: HiOutlinePencil, label: 'Text' },
+  { key: 'tools', icon: HiOutlinePencilAlt, label: 'Tools' },
   { key: 'uploads', icon: HiOutlineUpload, label: 'Uploads' },
   { key: 'background', icon: HiOutlineColorSwatch, label: 'Background' },
   { key: 'ai', icon: HiOutlineSparkles, label: 'AI' },
 ];
+
+const DRAW_COLORS = ['#1E1E1E', '#EF4444', '#F59E0B', '#10B981', '#3B82F6', '#7B2FBE', '#EC4899', '#FFFFFF'];
 
 const SHAPE_TYPES = [
   'rectangle', 'circle', 'triangle', 'star',
@@ -162,6 +167,36 @@ const AI_DESIGN_PALETTES = [
   { bg: '#083344', accent: '#22D3EE', text: '#FFFFFF' },
 ];
 
+// Curated Picsum (picsum.photos) photo ids — a free, no-API-key placeholder image
+// service, same category of external asset service this app already uses elsewhere
+// (Iconify for icon search, DiceBear for avatars). Picked for variety: nature,
+// texture, abstract, architecture — good general-purpose design backgrounds.
+const BACKGROUND_PHOTOS = [
+  { id: '1015', label: 'Mountain Lake' },
+  { id: '1018', label: 'Forest Road' },
+  { id: '1043', label: 'Green Field' },
+  { id: '1036', label: 'Night Sky' },
+  { id: '1050', label: 'Misty Peaks' },
+  { id: '1080', label: 'Ferns' },
+  { id: '106', label: 'Foliage' },
+  { id: '110', label: 'Waves' },
+  { id: '164', label: 'Skyline' },
+  { id: '129', label: 'Marble' },
+  { id: '145', label: 'Desert' },
+  { id: '160', label: 'Ocean' },
+];
+
+// Picsum is random stock photography with no theme search, so occasion-specific
+// backgrounds (birthday, convocation, ...) are fetched live from Wikimedia Commons —
+// a free, keyless, CORS-enabled public search API (same "no API key needed" bar as
+// Picsum/Iconify/DiceBear already used elsewhere in this file).
+const BACKGROUND_PHOTO_CATEGORIES: { label: string; query: string }[] = [
+  { label: 'Birthday', query: 'birthday party balloons decoration' },
+  { label: 'Conference', query: 'conference hall presentation stage' },
+  { label: 'Convocation', query: 'graduation convocation ceremony' },
+  { label: 'Academic', query: 'university campus academic library' },
+];
+
 const BUILT_IN_TEMPLATES = [
   // General — keeps whatever canvas size is already open
   { id: 'minimal',         cat: 'General',    name: 'Minimal',           bg: '#FFFFFF', accent: '#6366F1', text: '#111827' },
@@ -172,36 +207,66 @@ const BUILT_IN_TEMPLATES = [
   { id: 'ocean',           cat: 'General',    name: 'Ocean',             bg: '#EFF6FF', accent: '#3B82F6', text: '#1E3A8A' },
   { id: 'creative',        cat: 'General',    name: 'Creative',          bg: '#FDF4FF', accent: '#A855F7', text: '#581C87' },
   { id: 'corporate',       cat: 'General',    name: 'Corporate',         bg: '#F8FAFC', accent: '#0F172A', text: '#0F172A' },
+  { id: 'sunset-glow',     cat: 'General',    name: 'Sunset Glow',       bg: '#FFF7ED', accent: '#FB923C', text: '#7C2D12' },
+  { id: 'midnight-gold',   cat: 'General',    name: 'Midnight Gold',     bg: '#0B1120', accent: '#FBBF24', text: '#FDE68A' },
+  { id: 'mint-fresh',      cat: 'General',    name: 'Mint Fresh',        bg: '#ECFDF5', accent: '#059669', text: '#064E3B' },
+  { id: 'berry-pop',       cat: 'General',    name: 'Berry Pop',         bg: '#500724', accent: '#F472B6', text: '#FCE7F3' },
+  { id: 'classic-mono',    cat: 'General',    name: 'Classic Mono',      bg: '#171717', accent: '#FFFFFF', text: '#FAFAFA' },
+  { id: 'sky-pastel',      cat: 'General',    name: 'Sky Pastel',        bg: '#F0F9FF', accent: '#0EA5E9', text: '#0C4A6E' },
+  { id: 'ocean-breeze',    cat: 'General',    name: 'Ocean Breeze',      bg: '#0C4A6E', accent: '#FFFFFF', text: '#FFFFFF', photoId: '160' },
+  { id: 'mountain-vista',  cat: 'General',    name: 'Mountain Vista',    bg: '#0F172A', accent: '#FFFFFF', text: '#FFFFFF', photoId: '1015' },
+  { id: 'urban-skyline',   cat: 'General',    name: 'Urban Skyline',     bg: '#0F172A', accent: '#38BDF8', text: '#FFFFFF', photoId: '164' },
+  { id: 'marble-luxe',     cat: 'General',    name: 'Marble Luxe',       bg: '#F5F5F4', accent: '#B8860B', text: '#1C1917', photoId: '129', overlay: 'light' },
+  { id: 'forest-path',     cat: 'General',    name: 'Forest Path',       bg: '#052E16', accent: '#4ADE80', text: '#FFFFFF', photoId: '1018' },
+  { id: 'desert-dunes',    cat: 'General',    name: 'Desert Dunes',      bg: '#78350F', accent: '#FB923C', text: '#FFFFFF', photoId: '145' },
   // Birthday → 1080×1350
   { id: 'bday-fun',        cat: 'Birthday',   name: 'Fun Birthday',      bg: '#FFF9C4', accent: '#FF6F00', text: '#4A148C' },
   { id: 'bday-elegant',    cat: 'Birthday',   name: 'Elegant Birthday',  bg: '#1A1A2E', accent: '#FFD700', text: '#FFFFFF' },
   { id: 'bday-pastel',     cat: 'Birthday',   name: 'Pastel Party',      bg: '#FCE4EC', accent: '#E91E63', text: '#880E4F' },
   { id: 'bday-kids',       cat: 'Birthday',   name: 'Kids Birthday',     bg: '#E3F2FD', accent: '#FF5722', text: '#0D47A1' },
+  { id: 'bday-confetti',   cat: 'Birthday',   name: 'Confetti Bash',     bg: '#FFF1F2', accent: '#FB7185', text: '#881337' },
+  { id: 'bday-galaxy',     cat: 'Birthday',   name: 'Galaxy Party',      bg: '#1E1B4B', accent: '#A78BFA', text: '#EDE9FE' },
   // Instagram → 1080×1080 (Post) / 1080×1920 (Story)
   { id: 'ig-minimal',      cat: 'Instagram',  name: 'IG Minimal',        bg: '#FAFAFA', accent: '#C13584', text: '#262626' },
   { id: 'ig-bold',         cat: 'Instagram',  name: 'IG Bold',           bg: '#833AB4', accent: '#FCAF45', text: '#FFFFFF' },
   { id: 'ig-story-dark',   cat: 'Instagram',  name: 'Story Dark',        bg: '#0F0F0F', accent: '#E040FB', text: '#FFFFFF', width: 1080, height: 1920 },
   { id: 'ig-story-light',  cat: 'Instagram',  name: 'Story Light',       bg: '#FFF0F6', accent: '#E91E63', text: '#1A1A1A', width: 1080, height: 1920 },
   { id: 'ig-product',      cat: 'Instagram',  name: 'Product Post',      bg: '#F5F5F5', accent: '#212121', text: '#212121' },
+  { id: 'ig-golden-hour',  cat: 'Instagram',  name: 'Golden Hour',       bg: '#FED7AA', accent: '#EA580C', text: '#7C2D12' },
+  { id: 'ig-pastel-grid',  cat: 'Instagram',  name: 'Pastel Grid',       bg: '#FDF2F8', accent: '#F9A8D4', text: '#831843' },
+  { id: 'ig-editorial',    cat: 'Instagram',  name: 'Editorial',         bg: '#FAFAF9', accent: '#78716C', text: '#1C1917' },
+  { id: 'ig-nature-escape', cat: 'Instagram', name: 'Nature Escape',     bg: '#052E16', accent: '#FFFFFF', text: '#FFFFFF', photoId: '1080' },
+  { id: 'ig-city-nights',  cat: 'Instagram',  name: 'City Nights',       bg: '#0F172A', accent: '#A78BFA', text: '#FFFFFF', photoId: '1036' },
   // Facebook → 1200×630 (Post) / 1080×1920 (Story)
   { id: 'fb-cover',        cat: 'Facebook',   name: 'FB Cover',          bg: '#1877F2', accent: '#FFFFFF', text: '#FFFFFF' },
   { id: 'fb-post',         cat: 'Facebook',   name: 'FB Post',           bg: '#FFFFFF', accent: '#1877F2', text: '#1C1E21' },
   { id: 'fb-event',        cat: 'Facebook',   name: 'FB Event',          bg: '#18191A', accent: '#42B72A', text: '#FFFFFF' },
   { id: 'fb-story',        cat: 'Facebook',   name: 'FB Story',          bg: '#1877F2', accent: '#FFFFFF', text: '#FFFFFF', width: 1080, height: 1920 },
+  { id: 'fb-minimal',      cat: 'Facebook',   name: 'FB Minimal',        bg: '#F0F2F5', accent: '#1877F2', text: '#050505' },
+  { id: 'fb-announcement', cat: 'Facebook',   name: 'Announcement',      bg: '#E7F3FF', accent: '#0866FF', text: '#050505' },
+  { id: 'fb-scenic-cover', cat: 'Facebook',   name: 'Scenic Cover',      bg: '#0F172A', accent: '#FFFFFF', text: '#FFFFFF', photoId: '1050' },
   // Logo → 500×500
   { id: 'logo-minimal',    cat: 'Logo',       name: 'Minimal Logo',      bg: '#FFFFFF', accent: '#111827', text: '#111827' },
   { id: 'logo-bold',       cat: 'Logo',       name: 'Bold Logo',         bg: '#111827', accent: '#6366F1', text: '#FFFFFF' },
   { id: 'logo-colorful',   cat: 'Logo',       name: 'Colorful Logo',     bg: '#FFF7ED', accent: '#EA580C', text: '#1C1917' },
   { id: 'logo-elegant',    cat: 'Logo',       name: 'Elegant Logo',      bg: '#FAF5FF', accent: '#7C3AED', text: '#1E1B4B' },
+  { id: 'logo-luxury',     cat: 'Logo',       name: 'Luxury Logo',       bg: '#0C0A09', accent: '#D4AF37', text: '#F5F5F4' },
+  { id: 'logo-pastel',     cat: 'Logo',       name: 'Pastel Logo',       bg: '#FDF4FF', accent: '#D946EF', text: '#4A044E' },
   // Business Card → 1050×600
   { id: 'biz-clean',       cat: 'Business Card', name: 'Clean Card',     bg: '#FFFFFF', accent: '#2563EB', text: '#111827' },
   { id: 'biz-dark',        cat: 'Business Card', name: 'Dark Card',      bg: '#111827', accent: '#10B981', text: '#FFFFFF' },
   { id: 'biz-elegant',     cat: 'Business Card', name: 'Elegant Card',   bg: '#1E1B4B', accent: '#C084FC', text: '#EDE9FE' },
+  { id: 'biz-gold',        cat: 'Business Card', name: 'Gold Accent',   bg: '#FFFFFF', accent: '#B8860B', text: '#1C1917' },
+  { id: 'biz-sage',        cat: 'Business Card', name: 'Sage Card',     bg: '#F0FDF4', accent: '#4D7C0F', text: '#14532D' },
+  { id: 'biz-marble',      cat: 'Business Card', name: 'Marble Card',   bg: '#F5F5F4', accent: '#B8860B', text: '#1C1917', photoId: '129', overlay: 'light' },
   // YouTube → 1280×720 (Thumbnail)
   { id: 'yt-gaming',       cat: 'YouTube',    name: 'Gaming Thumbnail',  bg: '#0F0F0F', accent: '#FF0000', text: '#FFFFFF' },
   { id: 'yt-education',    cat: 'YouTube',    name: 'Education',         bg: '#FFF8E1', accent: '#F57F17', text: '#1A1A1A' },
   { id: 'yt-vlog',         cat: 'YouTube',    name: 'Vlog Thumbnail',    bg: '#E8F5E9', accent: '#2E7D32', text: '#1B5E20' },
   { id: 'yt-tech',         cat: 'YouTube',    name: 'Tech Thumbnail',    bg: '#E3F2FD', accent: '#1565C0', text: '#0D47A1' },
+  { id: 'yt-podcast',      cat: 'YouTube',    name: 'Podcast Thumbnail', bg: '#1E1B4B', accent: '#818CF8', text: '#E0E7FF' },
+  { id: 'yt-beauty',       cat: 'YouTube',    name: 'Beauty Thumbnail',  bg: '#FFF1F2', accent: '#FB7185', text: '#881337' },
+  { id: 'yt-travel',       cat: 'YouTube',    name: 'Travel Thumbnail',  bg: '#052E16', accent: '#FACC15', text: '#FFFFFF', photoId: '1043' },
 ].map((t) => ({ ...t, width: (t as any).width ?? CATEGORY_SIZE[t.cat]?.width, height: (t as any).height ?? CATEGORY_SIZE[t.cat]?.height }));
 
 const TEMPLATE_CATS = ['All', ...Array.from(new Set(BUILT_IN_TEMPLATES.map((t) => t.cat)))];
@@ -236,6 +301,7 @@ function ShapePreview({ shape, color }: { shape: string; color: string }) {
 }
 
 export default function LeftSidebar() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState<TabKey>('templates');
   const [panelOpen, setPanelOpen] = useState(true);
   const [search, setSearch] = useState('');
@@ -245,6 +311,10 @@ export default function LeftSidebar() {
   const [iconifyResults, setIconifyResults] = useState<{ name: string; prefix: string; body: string; width: number; height: number }[]>([]);
   const [iconifyLoading, setIconifyLoading] = useState(false);
   const [templateCat, setTemplateCat] = useState('All');
+  const [showBgColorOptions, setShowBgColorOptions] = useState(false);
+  const [bgPhotoCategory, setBgPhotoCategory] = useState<string | null>(null);
+  const [bgPhotoResults, setBgPhotoResults] = useState<{ url: string; title: string }[]>([]);
+  const [bgPhotoLoading, setBgPhotoLoading] = useState(false);
   const [aiTemplatePrompt, setAiTemplatePrompt] = useState('');
   const [aiTemplateGenerating, setAiTemplateGenerating] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
@@ -252,6 +322,20 @@ export default function LeftSidebar() {
   const [aiResult, setAiResult] = useState('');
   const [aiTab, setAiTab] = useState<'write' | 'image' | 'suggest'>('write');
   const [aiConfiguredProviders, setAiConfiguredProviders] = useState<string[]>([]);
+  const [aiReferenceImages, setAiReferenceImages] = useState<{ dataUrl: string; name: string }[]>([]);
+
+  // Landed here from a Dashboard "Magic AI Studio" quick-action card (?ai=write/image/
+  // suggest) — those used to just create a blank design and tell the user to go find
+  // the AI tab themselves via a toast; this opens it directly instead.
+  useEffect(() => {
+    const ai = searchParams.get('ai');
+    if (ai === 'write' || ai === 'image' || ai === 'suggest') {
+      setActiveTab('ai');
+      setPanelOpen(true);
+      setAiTab(ai);
+      setSearchParams({}, { replace: true });
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     if (activeTab !== 'ai' && activeTab !== 'templates') return;
@@ -266,8 +350,30 @@ export default function LeftSidebar() {
       .catch((err) => console.error('[AI] failed to load configured providers', err));
   }, [activeTab]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const aiRefFileInputRef = useRef<HTMLInputElement>(null);
 
-  const { addElement, removeElements, pushHistory, pages, currentPageIndex, setPageBackgroundColor, updatePage, importDocumentPages } = useEditorStore();
+  const AI_MAX_REFERENCE_IMAGES = 6;
+
+  const handleAiReferenceFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (files.length === 0) return;
+    const room = AI_MAX_REFERENCE_IMAGES - aiReferenceImages.length;
+    if (room <= 0) { toast.error(`Up to ${AI_MAX_REFERENCE_IMAGES} reference images`); return; }
+    const toAdd = files.slice(0, room);
+    if (files.length > toAdd.length) toast.error(`Only added ${toAdd.length} — up to ${AI_MAX_REFERENCE_IMAGES} reference images`);
+    toAdd.forEach((file) => {
+      if (!file.type.startsWith('image/')) { toast.error(`${file.name} isn't an image`); return; }
+      const reader = new FileReader();
+      reader.onload = () => setAiReferenceImages((prev) => [...prev, { dataUrl: reader.result as string, name: file.name }]);
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const {
+    addElement, removeElements, pushHistory, pages, currentPageIndex, setPageBackgroundColor, updatePage, importDocumentPages,
+    activeTool, setActiveTool, drawColor, setDrawColor, drawWidth, setDrawWidth,
+  } = useEditorStore();
   const currentPage = pages[currentPageIndex];
   const cw = currentPage?.width ?? 1920;
   const ch = currentPage?.height ?? 1080;
@@ -350,7 +456,7 @@ export default function LeftSidebar() {
     // bar/title/subtitle on top of whatever a previous template click already added —
     // otherwise every click layers more overlapping duplicates on the same page.
     const existingTemplateElementIds = pages[currentPageIndex].elements
-      .filter((e) => e.name === 'Accent Bar' || e.name === 'Title' || e.name === 'Subtitle')
+      .filter((e) => ['Accent Bar', 'Title', 'Subtitle', 'Background Photo', 'Photo Overlay'].includes(e.name))
       .map((e) => e.id);
     if (existingTemplateElementIds.length > 0) removeElements(existingTemplateElementIds);
 
@@ -361,7 +467,32 @@ export default function LeftSidebar() {
     if (tpl.width && tpl.height) {
       updatePage(currentPageIndex, { width: tpl.width, height: tpl.height });
     }
-    setPageBackgroundColor(currentPageIndex, tpl.bg);
+
+    const photoId = (tpl as any).photoId as string | undefined;
+    if (photoId) {
+      // Same technique as the standalone "Add background photo" feature — Picsum
+      // crops server-side to exactly tw x th, so it fills any page format cleanly.
+      addElement({
+        type: 'image', x: 0, y: 0, width: tw, height: th,
+        rotation: 0, opacity: 1, visible: true, locked: false, name: 'Background Photo', zIndex: 0,
+        data: {
+          type: 'image', objectFit: 'cover', borderRadius: 0, brightness: 100, contrast: 100, saturation: 100, hue: 0, blur: 0, filters: [],
+          src: `https://picsum.photos/id/${photoId}/${Math.round(tw)}/${Math.round(th)}`,
+          cropX: 0, cropY: 0, cropWidth: 100, cropHeight: 100,
+        } as any,
+      });
+      addElement({
+        type: 'shape', x: 0, y: 0, width: tw, height: th,
+        rotation: 0, opacity: 1, visible: true, locked: false, name: 'Photo Overlay', zIndex: 0,
+        data: {
+          type: 'shape', shapeType: 'rectangle',
+          fill: (tpl as any).overlay === 'light' ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.35)',
+          stroke: 'transparent', strokeWidth: 0, cornerRadius: 0,
+        },
+      });
+    } else {
+      setPageBackgroundColor(currentPageIndex, tpl.bg);
+    }
     addElement({
       type: 'shape', x: 0, y: 0, width: tw, height: 8,
       rotation: 0, opacity: 1, visible: true, locked: false, name: 'Accent Bar', zIndex: 0,
@@ -443,6 +574,88 @@ export default function LeftSidebar() {
     }
   };
 
+  // Replace, not stack — same pattern as handleApplyTemplate, so picking a different
+  // photo swaps the background instead of layering photos on top of each other.
+  // Inserted unlocked (not full-page-locked) so it behaves like any other image —
+  // the user can select it and resize/move it, e.g. to cover only half the page,
+  // instead of being stuck at exactly full-page size.
+  const replaceBackgroundPhotoElement = (data: Record<string, unknown>) => {
+    const existingId = pages[currentPageIndex].elements.find((e) => e.name === 'Background Photo')?.id;
+    if (existingId) removeElements([existingId]);
+    addElement({
+      type: 'image', x: 0, y: 0, width: cw, height: ch,
+      rotation: 0, opacity: 1, visible: true, locked: false, name: 'Background Photo', zIndex: 0,
+      data: {
+        type: 'image', objectFit: 'cover', borderRadius: 0, brightness: 100, contrast: 100, saturation: 100, hue: 0, blur: 0,
+        filters: [], ...data,
+      } as any,
+    });
+    pushHistory();
+    toast.success('Background photo added — drag or resize it like any image');
+  };
+
+  const handleAddBackgroundPhoto = (photoId: string) => {
+    // Picsum crops server-side to exactly the requested pixel size, so no client-side
+    // crop math is needed here — it already fills cw×ch on any page format (Facebook,
+    // Instagram Story, etc.) without distortion.
+    replaceBackgroundPhotoElement({
+      src: `https://picsum.photos/id/${photoId}/${Math.round(cw)}/${Math.round(ch)}`,
+      cropX: 0, cropY: 0, cropWidth: 100, cropHeight: 100,
+    });
+  };
+
+  // Wikimedia results are fixed-size thumbnails at their native aspect ratio, which
+  // rarely matches the page (e.g. a square photo on a 1200x630 Facebook Post canvas)
+  // — since the renderer doesn't implement `objectFit` itself, stretching it to
+  // cw x ch directly would visibly distort it. Instead: load it to read its natural
+  // size, then compute a "cover" crop in the same cropX/Y/Width/Height percentage
+  // fields the image crop tool already uses, so it fills the page cleanly on any size.
+  const handleAddSearchedBackgroundPhoto = (url: string) => {
+    const img = new window.Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const targetRatio = cw / ch;
+      const srcRatio = img.naturalWidth / img.naturalHeight;
+      let cropX = 0, cropY = 0, cropWidth = 100, cropHeight = 100;
+      if (srcRatio > targetRatio) {
+        cropWidth = (targetRatio / srcRatio) * 100;
+        cropX = (100 - cropWidth) / 2;
+      } else if (srcRatio < targetRatio) {
+        cropHeight = (srcRatio / targetRatio) * 100;
+        cropY = (100 - cropHeight) / 2;
+      }
+      replaceBackgroundPhotoElement({ src: url, cropX, cropY, cropWidth, cropHeight });
+    };
+    img.onerror = () => toast.error('Could not load that photo — try another');
+    img.src = url;
+  };
+
+  const handleSearchBackgroundCategory = async (category: { label: string; query: string }) => {
+    setBgPhotoCategory(category.label);
+    setBgPhotoLoading(true);
+    setBgPhotoResults([]);
+    try {
+      const params = new URLSearchParams({
+        action: 'query', generator: 'search', gsrsearch: category.query, gsrnamespace: '6',
+        gsrlimit: '12', prop: 'imageinfo', iiprop: 'url', iiurlwidth: '400', format: 'json', origin: '*',
+      });
+      const res = await fetch(`https://commons.wikimedia.org/w/api.php?${params.toString()}`);
+      if (!res.ok) throw new Error('Search failed');
+      const data = await res.json();
+      const pages: any[] = Object.values(data.query?.pages || {});
+      const results = pages
+        .filter((p) => p.imageinfo?.[0]?.thumburl)
+        .map((p) => ({ url: p.imageinfo[0].thumburl as string, title: (p.title as string).replace(/^File:/, '').replace(/\.\w+$/, '') }));
+      setBgPhotoResults(results);
+      if (results.length === 0) toast.error(`No ${category.label.toLowerCase()} photos found — try a different category`);
+    } catch (err) {
+      console.error('[BackgroundPhotos] search failed', err);
+      toast.error('Photo search failed — check your connection');
+    } finally {
+      setBgPhotoLoading(false);
+    }
+  };
+
   const handleAiGenerate = async () => {
     if (!aiPrompt.trim()) { toast.error('Enter a prompt first'); return; }
     const token = localStorage.getItem('designhub-token');
@@ -462,13 +675,18 @@ export default function LeftSidebar() {
       ? `Write compelling design copy for: ${aiPrompt}. Provide 2-3 short punchy lines suitable for a visual design. Format: just the text, no explanations.`
       : aiTab === 'suggest'
       ? `Suggest design ideas for: ${aiPrompt}. Give 3 specific visual design suggestions with colors, fonts, and layout ideas. Keep each suggestion to 1-2 sentences.`
+      : isImage && aiReferenceImages.length > 0
+      ? `${aiPrompt}. Incorporate the attached logo/reference image${aiReferenceImages.length > 1 ? 's' : ''} naturally into the design.`
       : aiPrompt;
 
     console.log('[AI] generate request', { provider, type: isImage ? 'image' : 'text', aiTab });
     setAiGenerating(true);
     setAiResult('');
     try {
-      const { data } = await aiAPI.generate({ provider, prompt, type: isImage ? 'image' : 'text' });
+      const { data } = await aiAPI.generate({
+        provider, prompt, type: isImage ? 'image' : 'text',
+        ...(isImage && aiReferenceImages.length > 0 ? { referenceImages: aiReferenceImages.map((r) => r.dataUrl) } : {}),
+      });
       console.log('[AI] generate response received', { hasContent: !!data.content, contentType: data.contentType });
       const content: string = data.content || '';
       if (!content) throw new Error('AI provider returned no content');
@@ -617,6 +835,30 @@ export default function LeftSidebar() {
     });
     pushHistory();
     toast.success(`${name} added to canvas`);
+  };
+
+  // Reads the video's real dimensions first (same technique as loadImageSize for
+  // template uploads) so it lands on the canvas at its own aspect ratio instead of a
+  // guessed default that would look stretched.
+  const addVideoToCanvas = (url: string, name: string) => {
+    const probe = document.createElement('video');
+    probe.preload = 'metadata';
+    probe.onloadedmetadata = () => {
+      const nw = probe.videoWidth || 640;
+      const nh = probe.videoHeight || 360;
+      const maxW = 500;
+      const w = Math.min(maxW, nw);
+      const h = w * (nh / nw);
+      addElement({
+        type: 'video', x: cx, y: cy, width: w, height: h,
+        rotation: 0, opacity: 1, visible: true, locked: false, name, zIndex: 0,
+        data: { type: 'video', src: url, autoplay: true, loop: true, muted: true, startTime: 0, endTime: 0 },
+      });
+      pushHistory();
+      toast.success(`${name} added to canvas`);
+    };
+    probe.onerror = () => toast.error('Could not read that video file');
+    probe.src = url;
   };
 
   const BACKEND = import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:3001';
@@ -959,6 +1201,12 @@ export default function LeftSidebar() {
   });
 
   const handleTabClick = (key: TabKey) => {
+    // Leaving the Tools tab (switching elsewhere, or collapsing it) should drop back
+    // to Select — otherwise the canvas stays in draw/erase mode with no visible sign
+    // of it once the Tools panel itself is no longer even showing.
+    if (activeTab === 'tools' && (key !== 'tools' || panelOpen) && activeTool !== 'select') {
+      setActiveTool('select');
+    }
     if (activeTab === key && panelOpen) { setPanelOpen(false); return; }
     setActiveTab(key);
     setPanelOpen(true);
@@ -986,7 +1234,13 @@ export default function LeftSidebar() {
         <div className="w-64 bg-white dark:bg-canva-dark-surface border-r border-gray-200 dark:border-canva-dark-border flex flex-col overflow-hidden">
           <div className="flex items-center justify-between px-3 py-2.5 border-b border-gray-100 dark:border-gray-800 flex-shrink-0">
             <span className="text-sm font-semibold text-gray-900 dark:text-white capitalize">{activeTab}</span>
-            <button onClick={() => setPanelOpen(false)} className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400">
+            <button
+              onClick={() => {
+                if (activeTab === 'tools' && activeTool !== 'select') setActiveTool('select');
+                setPanelOpen(false);
+              }}
+              className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400"
+            >
               <HiOutlineChevronLeft size={14} />
             </button>
           </div>
@@ -1043,6 +1297,12 @@ export default function LeftSidebar() {
                     <button key={tpl.id} onClick={() => handleApplyTemplate(tpl)}
                       className="group relative self-start rounded-lg overflow-hidden border-2 border-transparent hover:border-canva-purple transition-all shadow-sm"
                       style={{ background: tpl.bg, aspectRatio: tpl.width && tpl.height ? `${tpl.width} / ${tpl.height}` : '16 / 9' }}>
+                      {(tpl as any).photoId && (
+                        <img src={`https://picsum.photos/id/${(tpl as any).photoId}/200/120`} alt="" loading="lazy" className="absolute inset-0 w-full h-full object-cover" />
+                      )}
+                      {(tpl as any).photoId && (
+                        <div className="absolute inset-0" style={{ background: (tpl as any).overlay === 'light' ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.3)' }} />
+                      )}
                       <div className="absolute top-0 left-0 right-0 h-2" style={{ background: tpl.accent }} />
                       <div className="absolute inset-0 flex flex-col justify-center px-2.5">
                         <div className="text-[11px] font-bold truncate leading-tight" style={{ color: tpl.text }}>{tpl.name}</div>
@@ -1222,6 +1482,77 @@ export default function LeftSidebar() {
               </div>
             )}
 
+            {/* TOOLS — freehand drawing/annotation directly on the canvas */}
+            {activeTab === 'tools' && (
+              <div className="p-3">
+                <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-2">Draw</p>
+                <div className="grid grid-cols-4 gap-1.5 mb-4">
+                  {([
+                    { tool: 'select', label: 'Select', icon: HiCursorClick },
+                    { tool: 'pen', label: 'Pen', icon: HiOutlinePencilAlt },
+                    { tool: 'highlighter', label: 'Highlight', icon: HiOutlinePencil },
+                    { tool: 'eraser', label: 'Eraser', icon: HiOutlineTrash },
+                  ] as const).map(({ tool, label, icon: Icon }) => (
+                    <button
+                      key={tool}
+                      onClick={() => setActiveTool(tool)}
+                      title={label}
+                      className={`flex flex-col items-center gap-1 py-2.5 rounded-lg border transition-colors ${
+                        activeTool === tool
+                          ? 'border-canva-purple bg-canva-purple/10 text-canva-purple'
+                          : 'border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50'
+                      }`}
+                    >
+                      <Icon size={18} />
+                      <span className="text-[9px] font-medium">{label}</span>
+                    </button>
+                  ))}
+                </div>
+
+                {activeTool !== 'select' && activeTool !== 'eraser' && (
+                  <div className="mb-4">
+                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-2">Color</p>
+                    <div className="flex flex-wrap gap-2">
+                      {DRAW_COLORS.map((c) => (
+                        <button
+                          key={c}
+                          onClick={() => setDrawColor(c)}
+                          className={`w-7 h-7 rounded-full border-2 transition-transform ${drawColor === c ? 'border-canva-purple scale-110' : 'border-gray-200 dark:border-gray-700'}`}
+                          style={{ background: c }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-2">Brush size</p>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="range"
+                      min={1}
+                      max={40}
+                      value={drawWidth}
+                      onChange={(e) => setDrawWidth(Number(e.target.value))}
+                      className="flex-1 h-1 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-canva-purple"
+                    />
+                    <span className="text-xs text-gray-400 w-6 text-right">{drawWidth}</span>
+                  </div>
+                </div>
+
+                {activeTool !== 'select' && activeTool !== 'eraser' && (
+                  <p className="text-[10px] text-gray-400 mt-4 leading-relaxed">
+                    Draw directly on the canvas by clicking and dragging. Switch back to "Select" when you're done to edit other elements normally.
+                  </p>
+                )}
+                {activeTool === 'eraser' && (
+                  <p className="text-[10px] text-gray-400 mt-4 leading-relaxed">
+                    Drag over a pen or highlighter stroke to remove it. This only erases your own drawings — it never affects photos, text, or shapes.
+                  </p>
+                )}
+              </div>
+            )}
+
             {/* UPLOADS */}
             {activeTab === 'uploads' && (
               <div className="p-3">
@@ -1277,12 +1608,14 @@ export default function LeftSidebar() {
                         const meta = FILE_CAT_META[cat] || FILE_CAT_META.unknown;
                         const isDone = f.progress >= 100;
                         const isImage = cat === 'image' || cat === 'svg';
-                        // Image/SVG go straight to canvas; PDFs/DOCX/PPTX/XLSX/TXT run
-                        // through the import pipeline; anything else (video/audio) has
-                        // no in-canvas representation, so it opens externally.
+                        // Image/SVG go straight to canvas; video becomes a real playable
+                        // canvas element; PDFs/DOCX/PPTX/XLSX/TXT run through the import
+                        // pipeline; audio has no in-canvas representation yet, so it
+                        // still opens externally.
                         const activate = () => {
                           if (!f.url) return;
                           if (isImage) addImageToCanvas(f.url, f.name);
+                          else if (cat === 'video') addVideoToCanvas(f.url, f.name);
                           else if (f.canvasable) handleImportExistingFile(f);
                           else window.open(f.url, '_blank', 'noopener,noreferrer');
                         };
@@ -1391,9 +1724,45 @@ export default function LeftSidebar() {
                   onChange={(e) => setAiPrompt(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handleAiGenerate(); }}
                   placeholder={aiTab === 'write' ? 'Catchy headline for a fitness brand…' : aiTab === 'image' ? 'Neon city skyline at dusk…' : 'Birthday card for a 30-year-old…'}
-                  rows={3}
-                  className="w-full px-3 py-2 text-xs border border-gray-200 dark:border-gray-700 rounded-lg resize-none bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-canva-purple/30 focus:border-canva-purple"
+                  rows={6}
+                  className="w-full px-3 py-2.5 text-xs border border-gray-200 dark:border-gray-700 rounded-lg resize-y min-h-[110px] bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-canva-purple/30 focus:border-canva-purple"
                 />
+
+                {/* Reference images (logo/template) upload — image mode only */}
+                {aiTab === 'image' && (
+                  <div>
+                    <input
+                      ref={aiRefFileInputRef}
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      className="hidden"
+                      onChange={handleAiReferenceFileChange}
+                    />
+                    {aiReferenceImages.length > 0 && (
+                      <div className="grid grid-cols-3 gap-1.5 mb-1.5">
+                        {aiReferenceImages.map((ref, i) => (
+                          <div key={i} className="relative group">
+                            <img src={ref.dataUrl} alt={ref.name} title={ref.name} className="w-full aspect-square rounded-lg object-cover border border-gray-200 dark:border-gray-700" />
+                            <button
+                              onClick={() => setAiReferenceImages((prev) => prev.filter((_, idx) => idx !== i))}
+                              className="absolute -top-1.5 -right-1.5 w-4 h-4 flex items-center justify-center rounded-full bg-gray-900/80 text-white text-[9px] opacity-0 group-hover:opacity-100 transition-opacity">
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {aiReferenceImages.length < AI_MAX_REFERENCE_IMAGES && (
+                      <button
+                        onClick={() => aiRefFileInputRef.current?.click()}
+                        className="w-full flex items-center justify-center gap-1.5 py-2 border border-dashed border-gray-300 dark:border-gray-600 rounded-lg text-[10px] text-gray-500 dark:text-gray-400 hover:border-canva-purple hover:text-canva-purple transition-colors">
+                        <HiOutlinePlus size={12} />
+                        {aiReferenceImages.length > 0 ? 'Add another reference image' : 'Upload logo / template images (optional)'}
+                      </button>
+                    )}
+                  </div>
+                )}
 
                 {/* Generate */}
                 <button
@@ -1460,26 +1829,91 @@ export default function LeftSidebar() {
             {/* BACKGROUND */}
             {activeTab === 'background' && (
               <div className="p-3">
-                <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-2">Solid colors</p>
-                <div className="grid grid-cols-9 gap-1.5 mb-4">
-                  {COLORS_PALETTE.map((color) => (
-                    <button key={color} style={{ background: color }} onClick={() => setPageBackgroundColor(currentPageIndex, color)}
-                      className="w-6 h-6 rounded border border-gray-200 dark:border-gray-700 hover:scale-110 hover:ring-2 hover:ring-canva-purple transition-all" title={color} />
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Photos</p>
+                  {bgPhotoCategory && (
+                    <button onClick={() => { setBgPhotoCategory(null); setBgPhotoResults([]); }} className="text-[9px] text-canva-purple hover:underline">
+                      ← Featured
+                    </button>
+                  )}
+                </div>
+
+                {/* Occasion categories — Picsum has no theme search, so these fetch
+                    real matching photos live from Wikimedia Commons instead. */}
+                <div className="flex gap-1 flex-wrap mb-2">
+                  {BACKGROUND_PHOTO_CATEGORIES.map((cat) => (
+                    <button key={cat.label} onClick={() => handleSearchBackgroundCategory(cat)}
+                      className={`px-2 py-0.5 rounded-full text-[9px] font-medium transition-colors ${
+                        bgPhotoCategory === cat.label ? 'bg-canva-purple text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+                      }`}>
+                      {cat.label}
+                    </button>
                   ))}
                 </div>
-                <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-2">Gradients</p>
-                <div className="grid grid-cols-3 gap-2 mb-3">
-                  {['linear-gradient(135deg,#667eea,#764ba2)','linear-gradient(135deg,#f093fb,#f5576c)','linear-gradient(135deg,#4facfe,#00f2fe)','linear-gradient(135deg,#43e97b,#38f9d7)','linear-gradient(135deg,#fa709a,#fee140)','linear-gradient(135deg,#a18cd1,#fbc2eb)','linear-gradient(135deg,#fccb90,#d57eeb)','linear-gradient(135deg,#e0c3fc,#8ec5fc)','linear-gradient(135deg,#fddb92,#d1fdff)'].map((g, i) => (
-                    <button key={i} style={{ background: g }} onClick={() => setPageBackgroundColor(currentPageIndex, g)}
-                      className="h-10 rounded-lg hover:ring-2 hover:ring-canva-purple transition-all" />
-                  ))}
-                </div>
-                <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1">Custom</p>
-                <div className="flex items-center gap-2">
-                  <input type="color" className="w-9 h-9 rounded cursor-pointer border border-gray-200"
-                    onChange={(e) => setPageBackgroundColor(currentPageIndex, e.target.value)} />
-                  <span className="text-xs text-gray-500">Pick any color</span>
-                </div>
+
+                {bgPhotoLoading && (
+                  <div className="flex items-center justify-center py-6 text-[10px] text-gray-400">
+                    <svg className="animate-spin h-4 w-4 mr-1.5" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                    Searching…
+                  </div>
+                )}
+
+                {!bgPhotoLoading && bgPhotoCategory ? (
+                  <div className="grid grid-cols-2 gap-2 mb-4">
+                    {bgPhotoResults.map((photo, i) => (
+                      <button key={i} onClick={() => handleAddSearchedBackgroundPhoto(photo.url)} title={photo.title}
+                        className="group relative aspect-video rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 hover:ring-2 hover:ring-canva-purple transition-all">
+                        <img src={photo.url} alt={photo.title} loading="lazy" className="w-full h-full object-cover" />
+                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors" />
+                        <span className="absolute bottom-1 left-1.5 right-1.5 text-[9px] font-medium text-white drop-shadow truncate">{photo.title}</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : !bgPhotoLoading && (
+                  <div className="grid grid-cols-2 gap-2 mb-4">
+                    {BACKGROUND_PHOTOS.map((photo) => (
+                      <button key={photo.id} onClick={() => handleAddBackgroundPhoto(photo.id)} title={photo.label}
+                        className="group relative aspect-video rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 hover:ring-2 hover:ring-canva-purple transition-all">
+                        <img src={`https://picsum.photos/id/${photo.id}/160/100`} alt={photo.label} loading="lazy" className="w-full h-full object-cover" />
+                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors" />
+                        <span className="absolute bottom-1 left-1.5 text-[9px] font-medium text-white drop-shadow">{photo.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                <button
+                  onClick={() => setShowBgColorOptions((s) => !s)}
+                  className="w-full flex items-center justify-between px-2.5 py-2 rounded-lg bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors mb-2"
+                >
+                  <span className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Color options</span>
+                  {showBgColorOptions ? <HiOutlineChevronUp size={14} className="text-gray-400" /> : <HiOutlineChevronDown size={14} className="text-gray-400" />}
+                </button>
+
+                {showBgColorOptions && (
+                  <div>
+                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-2">Solid colors</p>
+                    <div className="grid grid-cols-9 gap-1.5 mb-4">
+                      {COLORS_PALETTE.map((color) => (
+                        <button key={color} style={{ background: color }} onClick={() => setPageBackgroundColor(currentPageIndex, color)}
+                          className="w-6 h-6 rounded border border-gray-200 dark:border-gray-700 hover:scale-110 hover:ring-2 hover:ring-canva-purple transition-all" title={color} />
+                      ))}
+                    </div>
+                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-2">Gradients</p>
+                    <div className="grid grid-cols-3 gap-2 mb-3">
+                      {['linear-gradient(135deg,#667eea,#764ba2)','linear-gradient(135deg,#f093fb,#f5576c)','linear-gradient(135deg,#4facfe,#00f2fe)','linear-gradient(135deg,#43e97b,#38f9d7)','linear-gradient(135deg,#fa709a,#fee140)','linear-gradient(135deg,#a18cd1,#fbc2eb)','linear-gradient(135deg,#fccb90,#d57eeb)','linear-gradient(135deg,#e0c3fc,#8ec5fc)','linear-gradient(135deg,#fddb92,#d1fdff)'].map((g, i) => (
+                        <button key={i} style={{ background: g }} onClick={() => setPageBackgroundColor(currentPageIndex, g)}
+                          className="h-10 rounded-lg hover:ring-2 hover:ring-canva-purple transition-all" />
+                      ))}
+                    </div>
+                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1">Custom</p>
+                    <div className="flex items-center gap-2">
+                      <input type="color" className="w-9 h-9 rounded cursor-pointer border border-gray-200"
+                        onChange={(e) => setPageBackgroundColor(currentPageIndex, e.target.value)} />
+                      <span className="text-xs text-gray-500">Pick any color</span>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 

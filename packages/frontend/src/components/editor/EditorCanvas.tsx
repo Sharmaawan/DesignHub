@@ -1,14 +1,72 @@
 import { useRef, useState, useCallback, useEffect, useMemo } from 'react';
 import { Stage, Layer, Rect, Text, Image as KonvaImage, Group, Transformer, Line } from 'react-konva';
 import { useEditorStore } from '../../stores/editorStore';
-import { CanvasElement, Page, TextData, ImageData, ShapeData, TableData, ChartData } from '../../types';
+import { CanvasElement, Page, TextData, ImageData, ShapeData, TableData, ChartData, VideoData } from '../../types';
 import Konva from 'konva';
 
 interface EditorCanvasProps {
   page: Page;
+  // Preview mode needs its own zoom/pan (fit-to-frame) and needs grid/rulers/guides
+  // forced off, independent of whatever the live editor's global view state happens
+  // to be — passing them in here avoids having to temporarily mutate (and restore)
+  // shared store state, which is what made the earlier preview attempt fragile.
+  zoomOverride?: number;
+  panOverride?: { x: number; y: number };
+  hideChrome?: boolean;
 }
 
-export default function EditorCanvas({ page }: EditorCanvasProps) {
+// "Show rulers" toggle existed in the store and the Settings UI but nothing ever
+// rendered a ruler — this is that missing piece. Ticks are drawn in world (page)
+// coordinates transformed by the same zoom/pan the Stage itself uses, so they line
+// up with the actual canvas regardless of zoom level or how far it's panned.
+const RULER_SIZE = 20;
+const NICE_STEPS = [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 5000];
+
+function Ruler({ zoom, panX, panY, width, height }: { zoom: number; panX: number; panY: number; width: number; height: number }) {
+  const rawStep = 80 / zoom;
+  const step = NICE_STEPS.find((s) => s >= rawStep) || NICE_STEPS[NICE_STEPS.length - 1];
+
+  const hTicks: { screenX: number; label: number }[] = [];
+  const startWorldX = Math.floor(-panX / zoom / step) * step;
+  for (let wx = startWorldX; wx * zoom + panX < width; wx += step) {
+    hTicks.push({ screenX: wx * zoom + panX, label: wx });
+  }
+
+  const vTicks: { screenY: number; label: number }[] = [];
+  const startWorldY = Math.floor(-panY / zoom / step) * step;
+  for (let wy = startWorldY; wy * zoom + panY < height; wy += step) {
+    vTicks.push({ screenY: wy * zoom + panY, label: wy });
+  }
+
+  return (
+    <>
+      <div className="absolute top-0 left-5 right-0 h-5 bg-white/95 dark:bg-gray-900/95 border-b border-gray-200 dark:border-gray-700 overflow-hidden pointer-events-none z-20">
+        {hTicks.map((t) => (
+          <div key={t.label} className="absolute top-0 h-full" style={{ left: t.screenX }}>
+            <div className="w-px h-2 bg-gray-400 dark:bg-gray-500" />
+            <span className="text-[9px] text-gray-500 dark:text-gray-400 absolute top-2 left-0.5 whitespace-nowrap">{t.label}</span>
+          </div>
+        ))}
+      </div>
+      <div className="absolute top-5 left-0 bottom-0 w-5 bg-white/95 dark:bg-gray-900/95 border-r border-gray-200 dark:border-gray-700 overflow-hidden pointer-events-none z-20">
+        {vTicks.map((t) => (
+          <div key={t.label} className="absolute left-0" style={{ top: t.screenY }}>
+            <div className="h-px w-2 bg-gray-400 dark:bg-gray-500" />
+            <span
+              className="text-[9px] text-gray-500 dark:text-gray-400 absolute whitespace-nowrap origin-top-left"
+              style={{ left: 12, top: 1, transform: 'rotate(90deg)' }}
+            >
+              {t.label}
+            </span>
+          </div>
+        ))}
+      </div>
+      <div className="absolute top-0 left-0 w-5 h-5 bg-white/95 dark:bg-gray-900/95 border-r border-b border-gray-200 dark:border-gray-700 z-20" />
+    </>
+  );
+}
+
+export default function EditorCanvas({ page, zoomOverride, panOverride, hideChrome }: EditorCanvasProps) {
   const stageRef = useRef<Konva.Stage>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const transformerRef = useRef<Konva.Transformer>(null);
@@ -20,11 +78,22 @@ export default function EditorCanvas({ page }: EditorCanvasProps) {
   const [shiftHeld, setShiftHeld] = useState(false);
 
   const {
-    zoom, selectedElementIds, showGrid, gridSize, snapEnabled, showGuides,
-    panX, panY,
+    zoom: storeZoom, selectedElementIds, showGrid: storeShowGrid, gridSize, snapEnabled,
+    showGuides: storeShowGuides, showRulers: storeShowRulers,
+    panX: storePanX, panY: storePanY,
     selectElement, deselectAll, moveElement, updateElement, setZoom, setPan,
     setHoveredElement, pushHistory, setViewportCenter,
+    activeTool, drawColor, drawWidth, addDrawing,
   } = useEditorStore();
+  const [currentStroke, setCurrentStroke] = useState<number[]>([]);
+  const isDrawingRef = useRef(false);
+
+  const zoom = zoomOverride ?? storeZoom;
+  const panX = panOverride?.x ?? storePanX;
+  const panY = panOverride?.y ?? storePanY;
+  const showGrid = hideChrome ? false : storeShowGrid;
+  const showGuides = hideChrome ? false : storeShowGuides;
+  const showRulers = hideChrome ? false : storeShowRulers;
 
   const sortedElements = [...page.elements]
     .sort((a, b) => a.zIndex - b.zIndex)
@@ -100,11 +169,52 @@ export default function EditorCanvas({ page }: EditorCanvasProps) {
     e.evt.preventDefault();
     const scaleBy = 1.1;
     const oldScale = zoom;
-    const newScale = e.evt.deltaY > 0 ? oldScale / scaleBy : oldScale * scaleBy;
-    setZoom(Math.max(0.1, Math.min(5, newScale)));
-  }, [zoom, setZoom]);
+    const newScale = Math.max(0.1, Math.min(5, e.evt.deltaY > 0 ? oldScale / scaleBy : oldScale * scaleBy));
+    // Anchor the zoom to the viewport center — without adjusting pan here, scaling
+    // happens around the Stage's own (0,0), which visibly drags the page toward
+    // wherever that point currently sits on screen instead of zooming in place.
+    const cx = containerSize.width / 2;
+    const cy = containerSize.height / 2;
+    const stageX = (cx - panX) / oldScale;
+    const stageY = (cy - panY) / oldScale;
+    setZoom(newScale);
+    setPan(cx - stageX * newScale, cy - stageY * newScale);
+  }, [zoom, panX, panY, containerSize, setZoom, setPan]);
+
+  // Eraser deliberately never touches images/text/shapes — it only deletes your own
+  // pen/highlighter strokes that come within reach of the cursor, checked against each
+  // stroke's own recorded points (converted back to page coordinates via its element's
+  // x/y). A pixel-level canvas erase (destination-out) would have cut through whatever
+  // artwork happened to be underneath, which isn't what an annotation eraser should do.
+  const eraseNear = (px: number, py: number) => {
+    const { pages: allPages, currentPageIndex: pageIdx, removeElements: remove } = useEditorStore.getState();
+    const radius = Math.max(15, drawWidth * 2);
+    const toRemove: string[] = [];
+    for (const el of allPages[pageIdx].elements) {
+      if (el.type !== 'drawing') continue;
+      const data = el.data as any;
+      if (data.tool !== 'pen' && data.tool !== 'highlighter') continue;
+      const pts: number[] = data.points;
+      for (let i = 0; i < pts.length; i += 2) {
+        if (Math.hypot(el.x + pts[i] - px, el.y + pts[i + 1] - py) <= radius) {
+          toRemove.push(el.id);
+          break;
+        }
+      }
+    }
+    if (toRemove.length > 0) remove(toRemove);
+  };
 
   const handleStageMouseDown = (e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
+    if (activeTool !== 'select') {
+      const pos = stageRef.current?.getRelativePointerPosition();
+      if (!pos) return;
+      isDrawingRef.current = true;
+      if (activeTool === 'eraser') eraseNear(pos.x, pos.y);
+      else setCurrentStroke([pos.x, pos.y]);
+      return;
+    }
+
     const target = e.target;
     if (target === stageRef.current || target.name() === 'canvas-bg') {
       deselectAll();
@@ -120,6 +230,13 @@ export default function EditorCanvas({ page }: EditorCanvasProps) {
   };
 
   const handleStageMouseMove = (e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
+    if (isDrawingRef.current) {
+      const pos = stageRef.current?.getRelativePointerPosition();
+      if (!pos) return;
+      if (activeTool === 'eraser') eraseNear(pos.x, pos.y);
+      else setCurrentStroke((prev) => [...prev, pos.x, pos.y]);
+      return;
+    }
     if (isPanning) {
       const evt = e.evt as MouseEvent;
       const dx = evt.clientX - panStart.x - panX;
@@ -129,6 +246,14 @@ export default function EditorCanvas({ page }: EditorCanvasProps) {
   };
 
   const handleStageMouseUp = () => {
+    if (isDrawingRef.current) {
+      isDrawingRef.current = false;
+      if (activeTool !== 'eraser' && currentStroke.length >= 4) {
+        addDrawing(currentStroke, activeTool as 'pen' | 'highlighter', drawColor, drawWidth);
+      }
+      setCurrentStroke([]);
+      return;
+    }
     if (isPanning) {
       setIsPanning(false);
     }
@@ -332,7 +457,7 @@ export default function EditorCanvas({ page }: EditorCanvasProps) {
       y: element.y,
       rotation: element.rotation,
       opacity: element.opacity,
-      draggable: !element.locked,
+      draggable: !element.locked && activeTool === 'select',
       ...(element.shadow ? {
         shadowColor: element.shadow.color,
         shadowBlur: element.shadow.blur,
@@ -351,6 +476,24 @@ export default function EditorCanvas({ page }: EditorCanvasProps) {
     };
 
     switch (element.type) {
+      case 'drawing': {
+        const data = element.data as any;
+        return (
+          <Line
+            key={element.id}
+            {...commonProps}
+            points={data.points}
+            stroke={data.stroke}
+            strokeWidth={data.strokeWidth}
+            opacity={element.opacity * (data.tool === 'highlighter' ? 0.4 : 1)}
+            lineCap="round"
+            lineJoin="round"
+            tension={0.3}
+            globalCompositeOperation={data.tool === 'eraser' ? 'destination-out' : 'source-over'}
+            hitStrokeWidth={Math.max(data.strokeWidth, 12)}
+          />
+        );
+      }
       case 'text': {
         const data = element.data as TextData;
         return (
@@ -367,6 +510,17 @@ export default function EditorCanvas({ page }: EditorCanvasProps) {
         const data = element.data as ImageData;
         return (
           <ImageElement
+            key={element.id}
+            element={element}
+            commonProps={commonProps}
+            data={data}
+          />
+        );
+      }
+      case 'video': {
+        const data = element.data as VideoData;
+        return (
+          <VideoElement
             key={element.id}
             element={element}
             commonProps={commonProps}
@@ -432,7 +586,10 @@ export default function EditorCanvas({ page }: EditorCanvasProps) {
   };
 
   return (
-    <div ref={containerRef} className="w-full h-full">
+    <div ref={containerRef} className="w-full h-full relative">
+      {showRulers && containerSize.width > 0 && (
+        <Ruler zoom={zoom} panX={panX} panY={panY} width={containerSize.width} height={containerSize.height} />
+      )}
       <Stage
         ref={stageRef}
         width={containerSize.width}
@@ -451,7 +608,7 @@ export default function EditorCanvas({ page }: EditorCanvasProps) {
             setPan(e.target.x(), e.target.y());
           }
         }}
-        style={{ cursor: isPanning ? 'grabbing' : 'default' }}
+        style={{ cursor: isPanning ? 'grabbing' : activeTool !== 'select' ? 'crosshair' : 'default' }}
       >
         <Layer>
           <Rect
@@ -512,6 +669,22 @@ export default function EditorCanvas({ page }: EditorCanvasProps) {
 
           {sortedElements.map(renderElement)}
 
+          {/* Only pen/highlighter ever populate currentStroke — eraser works by
+              immediately deleting matched strokes in eraseNear(), it has no stroke
+              of its own to preview. */}
+          {currentStroke.length >= 4 && (
+            <Line
+              points={currentStroke}
+              stroke={drawColor}
+              strokeWidth={drawWidth}
+              opacity={activeTool === 'highlighter' ? 0.4 : 1}
+              lineCap="round"
+              lineJoin="round"
+              tension={0.3}
+              listening={false}
+            />
+          )}
+
           <Transformer
             ref={transformerRef}
             borderStroke="#7B2FBE"
@@ -552,6 +725,15 @@ function AnimatedTextElement({ element, commonProps, data, isTextEdit }: {
   const [displayText, setDisplayText] = useState(data.content);
   const timerRef = useRef<ReturnType<typeof setTimeout>>();
   const intervalRef = useRef<ReturnType<typeof setInterval>>();
+
+  const applyTextTransform = (text: string) => {
+    switch (data.textTransform) {
+      case 'uppercase': return text.toUpperCase();
+      case 'lowercase': return text.toLowerCase();
+      case 'capitalize': return text.replace(/\b\w/g, (c) => c.toUpperCase());
+      default: return text;
+    }
+  };
 
   // Keep displayed text in sync with content
   useEffect(() => {
@@ -631,11 +813,58 @@ function AnimatedTextElement({ element, commonProps, data, isTextEdit }: {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [element.id, data.animation]);
 
+  const text = applyTextTransform(displayText);
+
+  // Curved text: positive curvature arches the text upward (peak in the middle),
+  // negative dips it downward — each character is measured and placed as its own
+  // Text node along a circular arc, since Konva has no built-in text-on-a-path.
+  if (data.curvature && text.length > 0) {
+    const widths = measureCharWidths(text, data.fontFamily, data.fontSize, data.fontWeight, data.fontStyle);
+    const totalWidth = widths.reduce((a, b) => a + b, 0) || 1;
+    const angle = (data.curvature / 100) * Math.PI; // -100..100 → up to a half-circle sweep
+    const radius = totalWidth / Math.max(0.05, Math.abs(angle));
+    const curveSign = angle >= 0 ? 1 : -1;
+
+    let cumulative = 0;
+    const charNodes = Array.from(text).map((ch, i) => {
+      const w = widths[i];
+      const centerOffset = cumulative + w / 2;
+      cumulative += w;
+      const t = centerOffset / totalWidth - 0.5; // -0.5..0.5
+      const charAngle = t * angle;
+      const x = radius * Math.sin(charAngle);
+      const y = -curveSign * radius * (1 - Math.cos(charAngle));
+      return { ch, x, y, rotation: (charAngle * 180) / Math.PI };
+    });
+
+    return (
+      <Group {...commonProps} width={element.width} height={element.height} visible={!isTextEdit}>
+        {charNodes.map((c, i) => (
+          <Text
+            key={i}
+            text={c.ch}
+            x={element.width / 2 + c.x}
+            y={element.height / 2 + c.y}
+            offsetX={widths[i] / 2}
+            rotation={c.rotation}
+            fontFamily={data.fontFamily}
+            fontSize={data.fontSize}
+            fontStyle={data.fontStyle === 'italic' ? 'italic' : 'normal'}
+            fontWeight={data.fontWeight as any}
+            fill={data.color}
+            stroke={data.outline?.color}
+            strokeWidth={data.outline?.width ?? 0}
+          />
+        ))}
+      </Group>
+    );
+  }
+
   return (
     <Text
       ref={textRef}
       {...commonProps}
-      text={displayText}
+      text={text}
       fontFamily={data.fontFamily}
       fontSize={data.fontSize}
       fontStyle={data.fontStyle === 'italic' ? 'italic' : 'normal'}
@@ -647,9 +876,18 @@ function AnimatedTextElement({ element, commonProps, data, isTextEdit }: {
       lineHeight={data.lineHeight}
       letterSpacing={data.letterSpacing}
       textDecoration={data.textDecoration}
+      stroke={data.outline?.color}
+      strokeWidth={data.outline?.width ?? 0}
       visible={!isTextEdit}
     />
   );
+}
+
+function measureCharWidths(text: string, fontFamily: string, fontSize: number, fontWeight: number, fontStyle: string): number[] {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d')!;
+  ctx.font = `${fontStyle === 'italic' ? 'italic ' : ''}${fontWeight} ${fontSize}px ${fontFamily}`;
+  return Array.from(text).map((ch) => ctx.measureText(ch).width);
 }
 
 // Konva's own Path.parsePathData() uses a regex tokenizer that mis-parses compact SVG
@@ -680,11 +918,21 @@ function buildIconSvgMarkup(data: any): { markup: string; vbWidth: number; vbHei
   };
 }
 
-function IconElement({ element, commonProps, data }: { element: CanvasElement; commonProps: any; data: any }) {
+function IconElement({ element, commonProps: rawCommonProps, data }: { element: CanvasElement; commonProps: any; data: any }) {
   const [image, setImage] = useState<HTMLImageElement | null>(null);
   const { markup, vbWidth, vbHeight } = useMemo(() => buildIconSvgMarkup(data), [
     data.svgPaths, data.svgPath, data.iconFills, data.fill, data.viewBoxWidth, data.viewBoxHeight, data.viewBoxSize,
   ]);
+
+  const flipH = !!data.flipH;
+  const flipV = !!data.flipV;
+  const commonProps = (flipH || flipV) ? {
+    ...rawCommonProps,
+    x: rawCommonProps.x + (flipH ? element.width : 0),
+    y: rawCommonProps.y + (flipV ? element.height : 0),
+    scaleX: flipH ? -1 : 1,
+    scaleY: flipV ? -1 : 1,
+  } : rawCommonProps;
 
   useEffect(() => {
     const img = new window.Image();
@@ -799,13 +1047,101 @@ function ImageElement({ element, commonProps, data }: { element: CanvasElement; 
   );
 }
 
-function ShapeElement({ element, commonProps, data }: { element: CanvasElement; commonProps: any; data: ShapeData }) {
+// Konva has no native video node — the standard technique (same one Konva's own docs
+// use) is to hand a live <video> element to a Konva.Image as its image source and keep
+// redrawing the layer on every animation frame, so each redraw just samples whatever
+// frame the video is currently showing.
+function VideoElement({ element, commonProps, data }: { element: CanvasElement; commonProps: any; data: VideoData }) {
+  const videoElRef = useRef<HTMLVideoElement | null>(null);
+  const imageNodeRef = useRef<Konva.Image>(null);
+  const animRef = useRef<Konva.Animation | null>(null);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    const video = document.createElement('video');
+    video.crossOrigin = 'anonymous';
+    video.loop = data.loop ?? true;
+    video.muted = data.muted ?? true;
+    video.playsInline = true;
+    video.src = data.src;
+    if (data.startTime) video.currentTime = data.startTime;
+    videoElRef.current = video;
+
+    const handleReady = () => {
+      setReady(true);
+      if (data.autoplay ?? true) video.play().catch(() => { /* browser blocked autoplay — still shows first frame */ });
+    };
+    video.addEventListener('loadeddata', handleReady);
+
+    return () => {
+      video.removeEventListener('loadeddata', handleReady);
+      video.pause();
+      video.src = '';
+    };
+  }, [data.src]);
+
+  useEffect(() => {
+    const video = videoElRef.current;
+    if (video) video.muted = data.muted ?? true;
+  }, [data.muted]);
+
+  useEffect(() => {
+    const video = videoElRef.current;
+    if (video) video.loop = data.loop ?? true;
+  }, [data.loop]);
+
+  useEffect(() => {
+    if (!ready || !imageNodeRef.current) return;
+    const layer = imageNodeRef.current.getLayer();
+    if (!layer) return;
+    const anim = new Konva.Animation(() => {}, layer);
+    anim.start();
+    animRef.current = anim;
+    return () => { anim.stop(); };
+  }, [ready]);
+
+  if (!ready) {
+    return (
+      <Rect
+        {...commonProps}
+        width={element.width}
+        height={element.height}
+        fill="#111827"
+        cornerRadius={4}
+      />
+    );
+  }
+
+  return (
+    <KonvaImage
+      ref={imageNodeRef}
+      {...commonProps}
+      image={videoElRef.current!}
+      width={element.width}
+      height={element.height}
+    />
+  );
+}
+
+function ShapeElement({ element, commonProps: rawCommonProps, data }: { element: CanvasElement; commonProps: any; data: ShapeData }) {
   const { width, height } = element;
   const fill = data.fill || '#7B2FBE';
   const stroke = data.stroke || 'transparent';
   const strokeWidth = data.strokeWidth || 0;
   const cx = width / 2;
   const cy = height / 2;
+
+  // Shadow commonProps with a flip-adjusted version so every case below (there's one
+  // per shape type) picks it up automatically without needing its own flip handling.
+  const flipH = !!(data as any).flipH;
+  const flipV = !!(data as any).flipV;
+  const commonProps = (flipH || flipV) ? {
+    ...rawCommonProps,
+    x: rawCommonProps.x + (flipH ? width : 0),
+    y: rawCommonProps.y + (flipV ? height : 0),
+    scaleX: flipH ? -1 : 1,
+    scaleY: flipV ? -1 : 1,
+  } : rawCommonProps;
 
   // Generate polygon points scaled to width/height
   const getPolygonPoints = (sides: number, rotationDeg: number = 0): number[] => {

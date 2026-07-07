@@ -1,5 +1,8 @@
 import dotenv from 'dotenv';
-dotenv.config();
+// override: true — a stale machine-level OPENAI_API_KEY env var was silently
+// beating the .env file's value (dotenv doesn't override existing process.env
+// vars by default), so editing .env appeared to do nothing.
+dotenv.config({ override: true });
 
 import express from 'express';
 import cors from 'cors';
@@ -27,6 +30,8 @@ import aiRoutes from './routes/ai';
 import productUpdateRoutes from './routes/productUpdates';
 import backgroundRemovalRoutes from './routes/backgroundRemoval';
 import emailSettingsRoutes from './routes/emailSettings';
+import socialRoutes from './routes/social';
+import { startScheduler } from './lib/scheduler';
 
 const app = express();
 const httpServer = createServer(app);
@@ -63,6 +68,7 @@ app.use('/api/ai', aiRoutes);
 app.use('/api/product-updates', productUpdateRoutes);
 app.use('/api/background-removal', backgroundRemovalRoutes);
 app.use('/api/email-settings', emailSettingsRoutes);
+app.use('/api/social', socialRoutes);
 
 app.get('/api/health', async (_, res) => {
   try {
@@ -139,6 +145,7 @@ const PORT = process.env.PORT || 3001;
 httpServer.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`Health check: http://localhost:${PORT}/api/health`);
+  startScheduler();
 });
 
 export { io };

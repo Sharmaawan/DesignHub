@@ -9,6 +9,7 @@ import {
   HiOutlineSave, HiOutlineCheck, HiOutlineClock,
   HiOutlineChevronDown, HiOutlineCog, HiOutlinePencil,
   HiOutlineChevronRight, HiOutlineTemplate, HiOutlineFilm,
+  HiOutlineGlobeAlt, HiOutlineEye,
 } from 'react-icons/hi';
 import toast from 'react-hot-toast';
 import { useAuthStore } from '../../stores/authStore';
@@ -19,10 +20,12 @@ interface TopToolbarProps {
   onShowShortcuts: () => void;
   onOpenShare: () => void;
   onOpenExport: () => void;
+  onOpenPublish: () => void;
   onOpenSettings: () => void;
+  onOpenPreview: () => void;
 }
 
-export default function TopToolbar({ onThemeToggle, isDark, onShowShortcuts, onOpenShare, onOpenExport, onOpenSettings }: TopToolbarProps) {
+export default function TopToolbar({ onThemeToggle, isDark, onShowShortcuts, onOpenShare, onOpenExport, onOpenPublish, onOpenSettings, onOpenPreview }: TopToolbarProps) {
   const navigate = useNavigate();
   const { user } = useAuthStore();
   const {
@@ -48,7 +51,7 @@ export default function TopToolbar({ onThemeToggle, isDark, onShowShortcuts, onO
     if (!projectId) return;
     setSaving(true);
     const state = useEditorStore.getState();
-    updateProject(projectId, { pages: state.pages, name: project?.name || 'Untitled' });
+    updateProject(projectId, { canvasData: state.pages, name: project?.name || 'Untitled' });
     setTimeout(() => {
       setSaving(false);
       setLastSaved(new Date().toISOString());
@@ -232,6 +235,12 @@ export default function TopToolbar({ onThemeToggle, isDark, onShowShortcuts, onO
           <div className="w-7 h-7 rounded-full border-2 border-white dark:border-gray-800 bg-green-100 flex items-center justify-center text-[9px] font-bold text-green-600" title="Mike Johnson">MJ</div>
         </div>
 
+        {/* Preview */}
+        <button onClick={onOpenPreview} className="toolbar-btn flex items-center gap-1" title="Preview design">
+          <HiOutlineEye size={16} />
+          <span className="text-xs hidden lg:inline">Preview</span>
+        </button>
+
         {/* Share */}
         <button onClick={onOpenShare} className="toolbar-btn flex items-center gap-1" title="Share this design">
           <HiOutlineShare size={16} />
@@ -246,6 +255,10 @@ export default function TopToolbar({ onThemeToggle, isDark, onShowShortcuts, onO
           <HiOutlineDownload size={14} />
           <span className="hidden sm:inline">Export</span>
           <HiOutlineChevronDown size={10} />
+        </button>
+        <button onClick={onOpenPublish} className="btn-primary flex items-center gap-1.5 text-sm py-1.5 px-3" title="Publish to social media">
+          <HiOutlineGlobeAlt size={14} />
+          <span className="hidden sm:inline">Publish</span>
         </button>
       </div>
     </div>

@@ -1,26 +1,9 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../lib/prisma';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
-import crypto from 'crypto';
+import { encryptSecret as encryptKey, decryptSecret as decryptKey } from '../lib/crypto';
 
 const router = Router();
-
-// Simple XOR encryption for API keys (not production-grade, but prevents plain text storage)
-const ENCRYPTION_KEY = process.env.API_KEY_SECRET || 'designhub-api-key-secret-2024!';
-
-function encryptKey(text: string): string {
-  const cipher = crypto.createCipheriv('aes-256-cbc', Buffer.alloc(32, ENCRYPTION_KEY.slice(0, 32)), Buffer.alloc(16));
-  let encrypted = cipher.update(text, 'utf8', 'hex');
-  encrypted += cipher.final('hex');
-  return encrypted;
-}
-
-function decryptKey(encrypted: string): string {
-  const decipher = crypto.createDecipheriv('aes-256-cbc', Buffer.alloc(32, ENCRYPTION_KEY.slice(0, 32)), Buffer.alloc(16));
-  let decrypted = decipher.update(encrypted, 'hex', 'utf8');
-  decrypted += decipher.final('utf8');
-  return decrypted;
-}
 
 // Get all AI settings for user
 router.get('/', authMiddleware, async (req: AuthRequest, res: Response) => {

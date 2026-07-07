@@ -1,13 +1,14 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useProjectStore } from '../stores/projectStore';
-import { useEditorStore } from '../stores/editorStore';
 import { useAuthStore } from '../stores/authStore';
 import DashboardSidebar from '../components/dashboard/DashboardSidebar';
 import CreateButton from '../components/dashboard/CreateButton';
 import UploadTemplateModal from '../components/dashboard/UploadTemplateModal';
-import { HiOutlineSearch, HiOutlineBell, HiOutlineHeart, HiOutlineUpload } from 'react-icons/hi';
+import NotificationCenter from '../components/dashboard/NotificationCenter';
+import { HiOutlineSearch, HiOutlineBell, HiOutlineHeart, HiOutlineUpload, HiOutlineTrash } from 'react-icons/hi';
 import { useNotificationStore } from '../stores/notificationStore';
+import { projectAPI, templateAPI } from '../utils/api';
 import toast from 'react-hot-toast';
 
 const CATEGORIES = [
@@ -20,17 +21,27 @@ const CATEGORIES = [
 
 export default function TemplatesPage() {
   const navigate = useNavigate();
-  const { user } = useAuthStore();
   const { templates, loadTemplates } = useProjectStore();
-  const { setProject } = useEditorStore();
-  const { unreadCount, setIsOpen: setNotifOpen } = useNotificationStore();
+  const { user } = useAuthStore();
+  const { unreadCount, setIsOpen: setNotifOpen, loadNotifications } = useNotificationStore();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('designhub-sidebar-collapsed') === 'true');
   const [activeSection, setActiveSection] = useState('templates');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [showUploadModal, setShowUploadModal] = useState(false);
 
-  useEffect(() => { loadTemplates(); }, []);
+  useEffect(() => { loadTemplates(); loadNotifications(); }, []);
+
+  const handleDeleteTemplate = async (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    try {
+      await templateAPI.delete(id);
+      toast.success('Moved to recycle bin — manage it from Workspace Settings');
+      loadTemplates();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to delete template');
+    }
+  };
 
   const filteredTemplates = templates.filter((t) => {
     const matchesCategory = selectedCategory === 'All' || t.category === selectedCategory;
@@ -38,28 +49,23 @@ export default function TemplatesPage() {
     return matchesCategory && matchesSearch;
   });
 
-  const handleUseTemplate = (template: any) => {
+  const handleUseTemplate = async (template: any) => {
     const page = template.data?.pages?.[0];
     if (page) {
-      setProject({
-        id: `proj-${Date.now()}`,
-        name: template.name,
-        pages: [{
-          id: `page-${Date.now()}`,
-          name: 'Page 1',
-          elements: page.elements || [],
-          backgroundColor: page.backgroundColor || '#FFFFFF',
-          width: page.width || 1920,
-          height: page.height || 1080,
-        }],
-        ownerId: user?.id || '1',
-        collaborators: [],
-        isFavorite: false,
-        isTemplate: false,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      });
-      navigate('/editor');
+      const pages = [{
+        id: `page-${Date.now()}`,
+        name: 'Page 1',
+        elements: page.elements || [],
+        backgroundColor: page.backgroundColor || '#FFFFFF',
+        width: page.width || 1920,
+        height: page.height || 1080,
+      }];
+      try {
+        const { data } = await projectAPI.create({ name: template.name, canvasData: pages });
+        navigate(`/editor/${data.id}`);
+      } catch {
+        toast.error('Failed to create design');
+      }
     }
   };
 
@@ -136,7 +142,30 @@ export default function TemplatesPage() {
                     {template.isPro && (
                       <span className="absolute top-2 left-2 px-1.5 py-0.5 text-[9px] font-bold bg-amber-500 text-white rounded-full z-10">PRO</span>
                     )}
+                    {template.ownerId && template.ownerId === user?.id && (
+                      <button
+                        onClick={(e) => handleDeleteTemplate(e, template.id)}
+                        title="Delete template"
+                        className="absolute top-2 right-2 p-1.5 rounded-lg bg-white/90 dark:bg-gray-900/90 text-gray-500 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                      >
+                        <HiOutlineTrash size={14} />
+                      </button>
+                    )}
                     {page?.elements?.slice(0, 4).map((el: any, i: number) => {
+                      if (el.type === 'image') {
+                        return (
+                          <img
+                            key={i}
+                            src={el.data?.src}
+                            alt=""
+                            className="absolute object-cover"
+                            style={{
+                              left: `${(el.x / (page.width || 1920)) * 100}%`, top: `${(el.y / (page.height || 1080)) * 100}%`,
+                              width: `${(el.width / (page.width || 1920)) * 100}%`, height: `${(el.height / (page.height || 1080)) * 100}%`,
+                            }}
+                          />
+                        );
+                      }
                       if (el.type === 'text') {
                         return (
                           <div key={i} className="absolute overflow-hidden" style={{
@@ -169,6 +198,8 @@ export default function TemplatesPage() {
           </div>
         </main>
       </div>
+
+      <NotificationCenter />
     </div>
   );
 }

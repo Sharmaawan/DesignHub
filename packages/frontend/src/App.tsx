@@ -6,6 +6,7 @@ import RegisterPage from './pages/RegisterPage';
 import DashboardPage from './pages/DashboardPage';
 import TemplatesPage from './pages/TemplatesPage';
 import BrandHubPage from './pages/BrandHubPage';
+import SocialConnectionsPage from './pages/SocialConnectionsPage';
 import EditorPage from './pages/EditorPage';
 import ProfileSettingsPage from './pages/ProfileSettingsPage';
 import SubscriptionBillingPage from './pages/SubscriptionBillingPage';
@@ -49,6 +50,9 @@ export default function App() {
         } />
         <Route path="/brand" element={
           <ProtectedRoute><BrandHubPage /></ProtectedRoute>
+        } />
+        <Route path="/social" element={
+          <ProtectedRoute><SocialConnectionsPage /></ProtectedRoute>
         } />
         <Route path="/settings/profile" element={
           <ProtectedRoute><ProfileSettingsPage /></ProtectedRoute>

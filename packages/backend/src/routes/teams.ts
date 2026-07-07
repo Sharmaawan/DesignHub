@@ -172,6 +172,12 @@ router.post('/:id/invites', authMiddleware, async (req: AuthRequest, res: Respon
       teamName: team?.name || 'Team',
       inviteLink,
       role: role || 'editor',
+      // The inviter's own connected email (Settings > Email, see routes/emailSettings.ts)
+      // takes priority — that's the entire point of that feature. Without this, invites
+      // always fell through to an unset system-wide SMTP_USER and silently no-op'd.
+      userSmtp: inviter?.smtpEnabled && inviter.smtpUser && inviter.smtpPass
+        ? { host: inviter.smtpHost || 'smtp.gmail.com', port: inviter.smtpPort || 587, user: inviter.smtpUser, pass: inviter.smtpPass }
+        : null,
     });
 
     res.json({ ...invite, emailSent });

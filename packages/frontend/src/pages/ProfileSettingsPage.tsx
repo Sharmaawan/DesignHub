@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
-import { HiOutlineArrowLeft, HiOutlineUser, HiOutlineCamera, HiOutlineCheck, HiOutlineKey } from 'react-icons/hi';
+import { HiOutlineArrowLeft, HiOutlineUser, HiOutlineCamera, HiOutlineCheck, HiOutlineKey, HiOutlineMail } from 'react-icons/hi';
 import toast from 'react-hot-toast';
-import api from '../utils/api';
+import api, { emailSettingsAPI } from '../utils/api';
 
 export default function ProfileSettingsPage() {
   const navigate = useNavigate();
@@ -15,6 +15,66 @@ export default function ProfileSettingsPage() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [saving, setSaving] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
+
+  const [emailSettings, setEmailSettings] = useState<{ connected: boolean; host: string; port: number; email: string } | null>(null);
+  // Defaults to the account's login email — most people send invites from the same
+  // address they log in with, but this stays editable for anyone who wants a
+  // different sender mailbox (e.g. a work email vs. a personal login).
+  const [smtpEmail, setSmtpEmail] = useState(user?.email || '');
+  const [smtpAppPassword, setSmtpAppPassword] = useState('');
+  const [connectingEmail, setConnectingEmail] = useState(false);
+  const [testingEmail, setTestingEmail] = useState(false);
+  const [disconnectingEmail, setDisconnectingEmail] = useState(false);
+
+  useEffect(() => {
+    emailSettingsAPI.get()
+      .then(({ data }) => setEmailSettings(data))
+      .catch((err) => console.error('[EmailSettings] failed to load', err));
+  }, []);
+
+  const handleConnectEmail = async () => {
+    if (!smtpEmail.trim() || !smtpAppPassword.trim()) {
+      toast.error('Enter both your email and app password');
+      return;
+    }
+    setConnectingEmail(true);
+    try {
+      await emailSettingsAPI.connect({ email: smtpEmail.trim(), appPassword: smtpAppPassword.trim() });
+      toast.success('Email connected!');
+      setSmtpAppPassword('');
+      const { data } = await emailSettingsAPI.get();
+      setEmailSettings(data);
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to connect email');
+    } finally {
+      setConnectingEmail(false);
+    }
+  };
+
+  const handleTestEmail = async () => {
+    setTestingEmail(true);
+    try {
+      await emailSettingsAPI.test();
+      toast.success('Test email sent! Check your inbox.');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to send test email');
+    } finally {
+      setTestingEmail(false);
+    }
+  };
+
+  const handleDisconnectEmail = async () => {
+    setDisconnectingEmail(true);
+    try {
+      await emailSettingsAPI.disconnect();
+      toast.success('Email disconnected');
+      setEmailSettings({ connected: false, host: '', port: 587, email: '' });
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to disconnect email');
+    } finally {
+      setDisconnectingEmail(false);
+    }
+  };
 
   const handleSaveProfile = async () => {
     if (!name.trim()) {
@@ -160,6 +220,71 @@ export default function ProfileSettingsPage() {
               {saving ? 'Saving...' : 'Save Changes'}
             </button>
           </div>
+        </div>
+
+        {/* Connect Email — used to send team invites from the user's own address
+            instead of a system mailbox (see routes/emailSettings.ts, lib/email.ts) */}
+        <div className="bg-white dark:bg-[#1e1e30] rounded-2xl border border-gray-200 dark:border-gray-700 p-6 mb-6">
+          <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-1 flex items-center gap-1.5">
+            <HiOutlineMail size={16} /> Connect Your Email
+          </h3>
+          <p className="text-xs text-gray-400 mb-4">
+            Connect your email so team invitations are sent from your own address instead of a generic one.
+          </p>
+
+          {emailSettings?.connected ? (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between px-4 py-2.5 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl">
+                <span className="text-sm text-green-700 dark:text-green-400 flex items-center gap-1.5">
+                  <HiOutlineCheck size={16} /> Connected as {emailSettings.email}
+                </span>
+                <button onClick={handleDisconnectEmail} disabled={disconnectingEmail} className="text-xs text-gray-400 hover:text-red-500 disabled:opacity-50">
+                  {disconnectingEmail ? 'Disconnecting…' : 'Disconnect'}
+                </button>
+              </div>
+              <button
+                onClick={handleTestEmail}
+                disabled={testingEmail}
+                className="px-4 py-2 text-sm font-medium border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 transition-colors"
+              >
+                {testingEmail ? 'Sending…' : 'Send test email'}
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs font-medium text-gray-500 mb-1 block">Your Email</label>
+                <input
+                  type="email"
+                  value={smtpEmail}
+                  onChange={(e) => setSmtpEmail(e.target.value)}
+                  placeholder="you@gmail.com"
+                  className="w-full px-4 py-2.5 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#7B2FBE]/30 text-gray-900 dark:text-white"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 mb-1 block">App Password</label>
+                <input
+                  type="password"
+                  value={smtpAppPassword}
+                  onChange={(e) => setSmtpAppPassword(e.target.value)}
+                  placeholder="16-character app password"
+                  className="w-full px-4 py-2.5 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#7B2FBE]/30 text-gray-900 dark:text-white"
+                />
+                <p className="text-[11px] text-gray-400 mt-1">
+                  For Gmail, generate one at myaccount.google.com/apppasswords (requires 2-Step Verification). This is not your regular password.
+                </p>
+              </div>
+              <button
+                onClick={handleConnectEmail}
+                disabled={connectingEmail || !smtpEmail.trim() || !smtpAppPassword.trim()}
+                className="px-6 py-2.5 bg-[#7B2FBE] text-white rounded-xl text-sm font-medium hover:bg-[#6A25A8] disabled:opacity-50 transition-colors flex items-center gap-2"
+              >
+                <HiOutlineMail size={16} />
+                {connectingEmail ? 'Connecting…' : 'Connect'}
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Change Password */}

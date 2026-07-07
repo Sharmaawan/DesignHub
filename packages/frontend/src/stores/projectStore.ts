@@ -62,7 +62,17 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   updateProject: (id, data) => {
     set((s) => ({
-      projects: s.projects.map((p) => p.id === id ? { ...p, ...data, updatedAt: new Date().toISOString() } : p),
+      projects: s.projects.map((p) => p.id === id ? {
+        ...p, ...data,
+        // Mirror canvasData into pages on the local copy too — EditorPage's effect
+        // re-runs setProject(project) whenever this array's identity changes (which
+        // happens on every autosave), and it reads project.pages. Leaving pages stale
+        // here meant every autosave tick reset the live editor back to whatever was
+        // last loaded, silently wiping anything added since (new pages, a background
+        // photo, in-progress edits).
+        ...(data.canvasData ? { pages: data.canvasData } : {}),
+        updatedAt: new Date().toISOString(),
+      } : p),
     }));
     // Persist to MySQL for real DB projects (local-only projects have id starting with 'proj-')
     if (!id.startsWith('proj-')) {
@@ -113,6 +123,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         tags: Array.isArray(t.tags) ? t.tags : [],
         data: t.data || t.templateData,
         isPro: t.isPremium,
+        ownerId: t.ownerId,
       }));
       set({ templates });
     } catch {
@@ -124,11 +135,17 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set({ isLoading: true });
     try {
       const { data } = await projectAPI.list();
+      // canvasData (a JSON snapshot of the full pages array, written by the editor's
+      // own save paths) is the real source of truth — nothing currently populates the
+      // structured Page/Element tables for hand-authored designs, so that relation is
+      // kept only as a fallback for rows that do have it (e.g. duplicated projects).
       const projects: Project[] = data.map((p: any) => ({
         id: p.id,
         name: p.name,
         description: p.description,
-        pages: p.pages?.map((pg: any) => ({
+        pages: (Array.isArray(p.canvasData) && p.canvasData.length > 0)
+          ? p.canvasData
+          : p.pages?.map((pg: any) => ({
           id: pg.id,
           name: pg.name,
           elements: pg.elements?.map((el: any) => ({

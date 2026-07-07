@@ -2,7 +2,9 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { useTeamStore } from '../stores/teamStore';
-import { HiOutlineArrowLeft, HiOutlineUserGroup, HiOutlinePlus, HiOutlineTrash, HiOutlineCog, HiOutlineShieldCheck, HiOutlineGlobe, HiOutlineBell } from 'react-icons/hi';
+import { HiOutlineArrowLeft, HiOutlineUserGroup, HiOutlinePlus, HiOutlineTrash, HiOutlineCog, HiOutlineShieldCheck, HiOutlineGlobe, HiOutlineBell, HiOutlineRefresh } from 'react-icons/hi';
+import { templateAPI } from '../utils/api';
+import { Template } from '../types';
 import toast from 'react-hot-toast';
 
 export default function WorkspaceSettingsPage() {
@@ -15,10 +17,45 @@ export default function WorkspaceSettingsPage() {
   const [autoSave, setAutoSave] = useState(true);
   const [defaultView, setDefaultView] = useState('grid');
   const [language, setLanguage] = useState('en');
+  const [trashItems, setTrashItems] = useState<Template[]>([]);
+  const [trashLoading, setTrashLoading] = useState(false);
 
   useEffect(() => {
     loadTeams();
+    loadTrash();
   }, []);
+
+  const loadTrash = async () => {
+    setTrashLoading(true);
+    try {
+      const { data } = await templateAPI.trash();
+      setTrashItems(data);
+    } catch {
+      toast.error('Failed to load recycle bin');
+    } finally {
+      setTrashLoading(false);
+    }
+  };
+
+  const handleRestoreTemplate = async (id: string) => {
+    try {
+      await templateAPI.restore(id);
+      toast.success('Template restored');
+      loadTrash();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to restore template');
+    }
+  };
+
+  const handlePermanentDelete = async (id: string) => {
+    try {
+      await templateAPI.deletePermanent(id);
+      toast.success('Deleted permanently');
+      loadTrash();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to delete template');
+    }
+  };
 
   const handleCreateTeam = async () => {
     if (!teamName.trim()) return;
@@ -180,6 +217,48 @@ export default function WorkspaceSettingsPage() {
               </div>
             ))}
           </div>
+        </div>
+
+        {/* Templates Recycle Bin — only ever shows templates this user uploaded and
+            deleted themselves; the shared built-in catalog is never deletable. */}
+        <div className="bg-white dark:bg-[#1e1e30] rounded-2xl border border-gray-200 dark:border-gray-700 p-6 mb-6">
+          <div className="flex items-center gap-3 mb-4">
+            <HiOutlineTrash size={20} className="text-[#7B2FBE]" />
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Templates Recycle Bin</h3>
+          </div>
+          {trashLoading && <p className="text-xs text-gray-400 text-center py-6">Loading…</p>}
+          {!trashLoading && trashItems.length === 0 && (
+            <p className="text-xs text-gray-400 text-center py-6">Nothing here — templates you uploaded and deleted will show up in this bin.</p>
+          )}
+          {!trashLoading && trashItems.length > 0 && (
+            <div className="space-y-2">
+              {trashItems.map((t) => (
+                <div key={t.id} className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-xl">
+                  <div className="w-11 h-11 rounded-lg overflow-hidden flex-shrink-0 bg-gray-200 dark:bg-gray-700">
+                    {t.thumbnail && <img src={t.thumbnail} alt="" className="w-full h-full object-cover" />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{t.name}</p>
+                    <p className="text-[11px] text-gray-400">{t.category}</p>
+                  </div>
+                  <button
+                    onClick={() => handleRestoreTemplate(t.id)}
+                    title="Restore"
+                    className="p-2 rounded-lg text-gray-400 hover:text-[#7B2FBE] hover:bg-[#7B2FBE]/10"
+                  >
+                    <HiOutlineRefresh size={16} />
+                  </button>
+                  <button
+                    onClick={() => handlePermanentDelete(t.id)}
+                    title="Delete forever"
+                    className="p-2 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20"
+                  >
+                    <HiOutlineTrash size={16} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Privacy & Security */}

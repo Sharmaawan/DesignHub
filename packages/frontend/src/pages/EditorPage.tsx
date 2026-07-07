@@ -17,6 +17,8 @@ import ElementAnimations from '../components/editor/ElementAnimations';
 import SettingsModal from '../components/editor/SettingsModal';
 import ShareModal from '../components/editor/ShareModal';
 import ExportModal from '../components/editor/ExportModal';
+import PublishModal from '../components/editor/PublishModal';
+import PreviewMode from '../components/editor/PreviewMode';
 import toast from 'react-hot-toast';
 
 export default function EditorPage() {
@@ -36,6 +38,9 @@ export default function EditorPage() {
   const [showSettings, setShowSettings] = useState(false);
   const [showShare, setShowShare] = useState(false);
   const [showExport, setShowExport] = useState(false);
+  const [showPublish, setShowPublish] = useState(false);
+  const [publishAccountId, setPublishAccountId] = useState<string | null>(null);
+  const [showPreview, setShowPreview] = useState(false);
   const autosaveTimerRef = useRef<ReturnType<typeof setInterval>>();
 
   useEffect(() => { loadProjects(); }, []);
@@ -55,7 +60,7 @@ export default function EditorPage() {
         if (state.pages.length > 0) {
           setSaving(true);
           setTimeout(() => {
-            updateProject(projectId, { pages: state.pages, name: state.project?.name || 'Untitled' });
+            updateProject(projectId, { canvasData: state.pages, name: state.project?.name || 'Untitled' });
             setSaving(false);
             setLastSaved(new Date().toISOString());
           }, 500);
@@ -95,7 +100,7 @@ export default function EditorPage() {
       e.preventDefault();
       if (projectId) {
         setSaving(true);
-        updateProject(projectId, { pages: state.pages });
+        updateProject(projectId, { canvasData: state.pages });
         setTimeout(() => { setSaving(false); setLastSaved(new Date().toISOString()); toast.success('Saved!'); }, 500);
       }
     }
@@ -116,7 +121,9 @@ export default function EditorPage() {
         onShowShortcuts={() => setShowShortcuts(true)}
         onOpenShare={() => setShowShare(true)}
         onOpenExport={() => setShowExport(true)}
+        onOpenPublish={() => setShowPublish(true)}
         onOpenSettings={() => setShowSettings(true)}
+        onOpenPreview={() => setShowPreview(true)}
       />
 
       <div className="flex-1 flex overflow-hidden relative">
@@ -203,8 +210,18 @@ export default function EditorPage() {
 
       {/* Modals */}
       <SettingsModal open={showSettings} onClose={() => setShowSettings(false)} />
-      <ShareModal open={showShare} onClose={() => setShowShare(false)} />
+      <ShareModal
+        open={showShare}
+        onClose={() => setShowShare(false)}
+        onPublish={(accountId) => { setShowShare(false); setPublishAccountId(accountId); setShowPublish(true); }}
+      />
       <ExportModal open={showExport} onClose={() => setShowExport(false)} />
+      <PublishModal
+        open={showPublish}
+        onClose={() => { setShowPublish(false); setPublishAccountId(null); }}
+        initialAccountId={publishAccountId}
+      />
+      <PreviewMode open={showPreview} onClose={() => setShowPreview(false)} />
 
       {/* Keyboard Shortcuts Modal */}
       {showShortcuts && (

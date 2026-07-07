@@ -7,7 +7,7 @@ import {
   HiOutlineHome, HiOutlineFolder, HiOutlineTemplate, HiOutlineCollection,
   HiOutlineBell, HiOutlineDotsHorizontal, HiOutlineChevronLeft, HiOutlineChevronRight,
   HiOutlineSearch, HiOutlineSun, HiOutlineMoon,
-  HiOutlineLogout, HiOutlineUser, HiOutlineGlobe,
+  HiOutlineLogout, HiOutlineUser, HiOutlineGlobe, HiOutlineShare,
 } from 'react-icons/hi';
 
 interface NavItem {
@@ -40,6 +40,7 @@ export default function DashboardSidebar({ collapsed, onToggle, activeSection, o
     { id: 'projects', label: 'Projects', icon: HiOutlineFolder, route: '/projects' },
     { id: 'templates', label: 'Templates', icon: HiOutlineTemplate, route: '/templates' },
     { id: 'brand', label: 'Brand Hub', icon: HiOutlineCollection, route: '/brand' },
+    { id: 'social', label: 'Social Publishing', icon: HiOutlineShare, route: '/social' },
     { id: 'notifications', label: 'Notifications', icon: HiOutlineBell, badge: unreadCount, action: () => setNotifOpen(!notifOpen) },
   ];
 

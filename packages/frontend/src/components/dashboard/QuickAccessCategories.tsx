@@ -1,8 +1,7 @@
 import { useRef, useState, useEffect } from 'react';
 import { HiOutlineChevronLeft, HiOutlineChevronRight } from 'react-icons/hi';
 import { useNavigate } from 'react-router-dom';
-import { useEditorStore } from '../../stores/editorStore';
-import { useAuthStore } from '../../stores/authStore';
+import { projectAPI } from '../../utils/api';
 import toast from 'react-hot-toast';
 
 interface Category {
@@ -50,8 +49,6 @@ export default function QuickAccessCategories() {
   const [customH, setCustomH] = useState('1080');
   const [customUnit, setCustomUnit] = useState<'px' | 'mm' | 'in'>('px');
   const navigate = useNavigate();
-  const { setProject } = useEditorStore();
-  const { user } = useAuthStore();
 
   const UNIT_TO_PX: Record<string, number> = { px: 1, mm: 3.7795, in: 96 };
 
@@ -88,7 +85,7 @@ export default function QuickAccessCategories() {
     scrollRef.current.scrollBy({ left: direction === 'left' ? -300 : 300, behavior: 'smooth' });
   };
 
-  const handleCategoryClick = (cat: Category) => {
+  const handleCategoryClick = async (cat: Category) => {
     if (cat.id === 'templates') {
       navigate('/templates');
       return;
@@ -107,28 +104,27 @@ export default function QuickAccessCategories() {
           const reader = new FileReader();
           reader.onload = (ev) => {
             const img = new Image();
-            img.onload = () => {
-              setProject({
-                id: `proj-${Date.now()}`,
-                name: file.name.replace(/\.[^/.]+$/, ''),
-                pages: [{
-                  id: `page-${Date.now()}`,
-                  name: 'Page 1',
-                  elements: [{
-                    id: `el-${Date.now()}`,
-                    type: 'image', x: 0, y: 0,
-                    width: Math.min(img.width, 1920), height: Math.min(img.height, 1080),
-                    rotation: 0, opacity: 1, visible: true, locked: false,
-                    zIndex: 0, name: 'Uploaded Image',
-                    data: { type: 'image', src: ev.target?.result as string, objectFit: 'contain', borderRadius: 0, brightness: 100, contrast: 100, saturation: 100, hue: 0, blur: 0, filters: [], cropX: 0, cropY: 0, cropWidth: 100, cropHeight: 100 },
-                  }],
-                  backgroundColor: '#FFFFFF',
+            img.onload = async () => {
+              const pages = [{
+                id: `page-${Date.now()}`,
+                name: 'Page 1',
+                elements: [{
+                  id: `el-${Date.now()}`,
+                  type: 'image', x: 0, y: 0,
                   width: Math.min(img.width, 1920), height: Math.min(img.height, 1080),
+                  rotation: 0, opacity: 1, visible: true, locked: false,
+                  zIndex: 0, name: 'Uploaded Image',
+                  data: { type: 'image', src: ev.target?.result as string, objectFit: 'contain', borderRadius: 0, brightness: 100, contrast: 100, saturation: 100, hue: 0, blur: 0, filters: [], cropX: 0, cropY: 0, cropWidth: 100, cropHeight: 100 },
                 }],
-                ownerId: '1', collaborators: [], isFavorite: false, isTemplate: false,
-                createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-              });
-              navigate('/editor');
+                backgroundColor: '#FFFFFF',
+                width: Math.min(img.width, 1920), height: Math.min(img.height, 1080),
+              }];
+              try {
+                const { data } = await projectAPI.create({ name: file.name.replace(/\.[^/.]+$/, ''), canvasData: pages });
+                navigate(`/editor/${data.id}`);
+              } catch {
+                toast.error('Failed to create design');
+              }
             };
             img.src = ev.target?.result as string;
           };
@@ -143,40 +139,38 @@ export default function QuickAccessCategories() {
       return;
     }
     if (cat.width && cat.height) {
-      setProject({
-        id: `proj-${Date.now()}`,
-        name: `Untitled ${cat.label}`,
-        pages: [{
-          id: `page-${Date.now()}`,
-          name: 'Page 1',
-          elements: [],
-          backgroundColor: '#FFFFFF',
-          width: cat.width, height: cat.height,
-        }],
-        ownerId: '1', collaborators: [], isFavorite: false, isTemplate: false,
-        createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-      });
-      toast.success(`Created ${cat.label}`);
-      navigate('/editor');
+      const pages = [{
+        id: `page-${Date.now()}`,
+        name: 'Page 1',
+        elements: [],
+        backgroundColor: '#FFFFFF',
+        width: cat.width, height: cat.height,
+      }];
+      try {
+        const { data } = await projectAPI.create({ name: `Untitled ${cat.label}`, canvasData: pages });
+        toast.success(`Created ${cat.label}`);
+        navigate(`/editor/${data.id}`);
+      } catch {
+        toast.error('Failed to create design');
+      }
     }
   };
 
-  const handleCreateCustom = () => {
+  const handleCreateCustom = async () => {
     const factor = UNIT_TO_PX[customUnit];
     const w = Math.round(parseFloat(customW) * factor) || 1920;
     const h = Math.round(parseFloat(customH) * factor) || 1080;
     if (w < 100 || h < 100) { toast.error('Minimum size is 100 × 100 px'); return; }
     if (w > 8000 || h > 8000) { toast.error('Maximum size is 8000 × 8000 px'); return; }
-    setProject({
-      id: `proj-${Date.now()}`,
-      name: `Custom ${customW}×${customH}${customUnit}`,
-      pages: [{ id: `page-${Date.now()}`, name: 'Page 1', elements: [], backgroundColor: '#FFFFFF', width: w, height: h }],
-      ownerId: user?.id || '1', collaborators: [], isFavorite: false, isTemplate: false,
-      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-    });
-    setShowCustomModal(false);
-    toast.success(`Custom canvas ${w}×${h}px created`);
-    navigate('/editor');
+    const pages = [{ id: `page-${Date.now()}`, name: 'Page 1', elements: [], backgroundColor: '#FFFFFF', width: w, height: h }];
+    try {
+      const { data } = await projectAPI.create({ name: `Custom ${customW}×${customH}${customUnit}`, canvasData: pages });
+      setShowCustomModal(false);
+      toast.success(`Custom canvas ${w}×${h}px created`);
+      navigate(`/editor/${data.id}`);
+    } catch {
+      toast.error('Failed to create design');
+    }
   };
 
   return (

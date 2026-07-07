@@ -1,14 +1,30 @@
 import nodemailer from 'nodemailer';
 
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: Number(process.env.SMTP_PORT) || 587,
-  secure: false,
-  auth: {
-    user: process.env.SMTP_USER || '',
-    pass: process.env.SMTP_PASS || '',
-  },
-});
+interface SmtpCreds { host: string; port: number; user: string; pass: string }
+
+// Per-user SMTP (connected via Settings > Email, see routes/emailSettings.ts) always
+// wins when present — that's the whole point of that feature, invites should come from
+// the inviter's own address. Falls back to a system-wide SMTP_* env var only if the
+// inviter never connected one; if neither exists, sending is skipped (not a crash).
+function resolveTransporter(userSmtp?: SmtpCreds | null) {
+  if (userSmtp?.user && userSmtp?.pass) {
+    return nodemailer.createTransport({
+      host: userSmtp.host || 'smtp.gmail.com',
+      port: userSmtp.port || 587,
+      secure: false,
+      auth: { user: userSmtp.user, pass: userSmtp.pass },
+    });
+  }
+  if (process.env.SMTP_USER) {
+    return nodemailer.createTransport({
+      host: process.env.SMTP_HOST || 'smtp.gmail.com',
+      port: Number(process.env.SMTP_PORT) || 587,
+      secure: false,
+      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS || '' },
+    });
+  }
+  return null;
+}
 
 export async function sendInviteEmail({
   to,
@@ -17,6 +33,7 @@ export async function sendInviteEmail({
   teamName,
   inviteLink,
   role,
+  userSmtp,
 }: {
   to: string;
   inviterName: string;
@@ -24,16 +41,18 @@ export async function sendInviteEmail({
   teamName: string;
   inviteLink: string;
   role: string;
+  userSmtp?: SmtpCreds | null;
 }) {
-  const hasSystemSmtp = !!process.env.SMTP_USER;
+  const transporter = resolveTransporter(userSmtp);
+  const fromAddress = userSmtp?.user || process.env.SMTP_USER;
 
-  if (!hasSystemSmtp) {
-    console.log(`[Email skipped] No SMTP configured. Invite link for ${to}: ${inviteLink}`);
+  if (!transporter) {
+    console.log(`[Email skipped] No SMTP configured (neither the inviter's connected email nor a system SMTP_USER). Invite link for ${to}: ${inviteLink}`);
     return false;
   }
 
   const mailOptions = {
-    from: `"${inviterName} via DesignHub" <${process.env.SMTP_USER}>`,
+    from: `"${inviterName} via DesignHub" <${fromAddress}>`,
     replyTo: inviterEmail,
     to,
     subject: `${inviterName} invited you to join "${teamName}" on DesignHub`,
@@ -100,7 +119,8 @@ export async function sendNotificationEmail({
   subject: string;
   message: string;
 }) {
-  if (!process.env.SMTP_USER) {
+  const transporter = resolveTransporter(null);
+  if (!transporter) {
     console.log(`[Email skipped] SMTP not configured. Subject: ${subject}`);
     return false;
   }

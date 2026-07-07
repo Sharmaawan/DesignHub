@@ -46,6 +46,10 @@ export const templateAPI = {
   list: (params?: { category?: string; search?: string }) => api.get('/templates', { params }),
   get: (id: string) => api.get(`/templates/${id}`),
   create: (data: any) => api.post('/templates', data),
+  delete: (id: string) => api.delete(`/templates/${id}`),
+  trash: () => api.get('/templates/trash'),
+  restore: (id: string) => api.post(`/templates/${id}/restore`),
+  deletePermanent: (id: string) => api.delete(`/templates/${id}/permanent`),
 };
 
 export const categoryAPI = {
@@ -155,7 +159,7 @@ export const productUpdateAPI = {
 };
 
 export const aiAPI = {
-  generate: (data: { provider: string; prompt: string; type: string }) => api.post('/ai/generate', data),
+  generate: (data: { provider: string; prompt: string; type: string; referenceImages?: string[] }) => api.post('/ai/generate', data),
   history: () => api.get('/ai/history'),
   stats: () => api.get('/ai/stats'),
 };
@@ -183,6 +187,26 @@ export const emailSettingsAPI = {
     api.post('/email-settings/connect', data),
   disconnect: () => api.post('/email-settings/disconnect'),
   test: () => api.post('/email-settings/test'),
+};
+
+export const socialAPI = {
+  platforms: () => api.get('/social/platforms'),
+  accounts: () => api.get('/social/accounts'),
+  disconnect: (id: string) => api.delete(`/social/accounts/${id}`),
+  connect: (platform: string) => api.get(`/social/connect/${platform}`),
+  pending: (pendingId: string) => api.get(`/social/pending/${pendingId}`),
+  selectPending: (pendingId: string, platformUserIds: string[]) => api.post(`/social/pending/${pendingId}/select`, { platformUserIds }),
+  createPost: (data: {
+    socialAccountId: string; projectId?: string; action: 'now' | 'schedule' | 'draft';
+    mediaType: 'image' | 'video' | 'carousel' | 'story'; mediaUrls: string[];
+    caption?: string; hashtags?: string[]; altText?: string; firstComment?: string;
+    linkUrl?: string; scheduledFor?: string;
+  }) => api.post('/social/posts', data),
+  posts: () => api.get('/social/posts'),
+  post: (id: string) => api.get(`/social/posts/${id}`),
+  updatePost: (id: string, data: any) => api.put(`/social/posts/${id}`, data),
+  deletePost: (id: string) => api.delete(`/social/posts/${id}`),
+  analytics: (id: string) => api.get(`/social/posts/${id}/analytics`),
 };
 
 export default api;

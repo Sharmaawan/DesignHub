@@ -39,6 +39,9 @@ interface EditorState {
   pageTransitions: PageTransition[];
   elementAnimations: Record<string, ElementAnimation>;
   elementNames: Record<string, string>;
+  activeTool: 'select' | 'pen' | 'highlighter' | 'eraser';
+  drawColor: string;
+  drawWidth: number;
 
   setProject: (project: Project) => void;
   addPage: () => void;
@@ -52,6 +55,10 @@ interface EditorState {
   updateElement: (id: string, data: Partial<CanvasElement>) => void;
   removeElements: (ids: string[]) => void;
   duplicateElements: (ids: string[]) => void;
+  setActiveTool: (tool: EditorState['activeTool']) => void;
+  setDrawColor: (color: string) => void;
+  setDrawWidth: (width: number) => void;
+  addDrawing: (points: number[], tool: 'pen' | 'highlighter' | 'eraser', stroke: string, strokeWidth: number) => void;
   selectElement: (id: string | null, multi?: boolean) => void;
   selectAll: () => void;
   deselectAll: () => void;
@@ -163,6 +170,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   pageTransitions: [{ type: 'none', duration: 0.5, delay: 0 }],
   elementAnimations: {},
   elementNames: {},
+  activeTool: 'select',
+  drawColor: '#1E1E1E',
+  drawWidth: 4,
 
   setProject: (project) => {
     set({
@@ -402,6 +412,35 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       rightPanelOpen: true,
     });
     get().pushHistory();
+  },
+
+  setActiveTool: (tool) => set({ activeTool: tool, selectedElementIds: [] }),
+  setDrawColor: (color) => set({ drawColor: color }),
+  setDrawWidth: (width) => set({ drawWidth: width }),
+
+  addDrawing: (points, tool, stroke, strokeWidth) => {
+    if (points.length < 4) return; // fewer than 2 points — not a real stroke
+    const xs = points.filter((_, i) => i % 2 === 0);
+    const ys = points.filter((_, i) => i % 2 === 1);
+    const minX = Math.min(...xs);
+    const minY = Math.min(...ys);
+    const maxX = Math.max(...xs);
+    const maxY = Math.max(...ys);
+    // Points are stored relative to the element's own bounding box (matching every
+    // other element's x/y-relative convention), padded by the stroke width so thick
+    // strokes don't get visually clipped right at the edge of their own bounding box.
+    const pad = strokeWidth;
+    const relativePoints = points.map((v, i) => (i % 2 === 0 ? v - minX + pad : v - minY + pad));
+
+    get().addElement({
+      type: 'drawing',
+      x: minX - pad,
+      y: minY - pad,
+      width: maxX - minX + pad * 2,
+      height: maxY - minY + pad * 2,
+      name: tool === 'pen' ? 'Drawing' : tool === 'highlighter' ? 'Highlight' : 'Eraser',
+      data: { type: 'drawing', tool, points: relativePoints, stroke, strokeWidth } as any,
+    });
   },
 
   updateElement: (id, data) => {

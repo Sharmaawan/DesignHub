@@ -14,6 +14,7 @@ import WhatsNew from '../components/dashboard/WhatsNew';
 import RecommendedDesigns from '../components/dashboard/RecommendedDesigns';
 import NotificationCenter from '../components/dashboard/NotificationCenter';
 import { formatDate, CANVAS_PRESETS } from '../utils/cn';
+import { projectAPI } from '../utils/api';
 import {
   HiOutlinePlus, HiOutlineTemplate, HiOutlineBell, HiOutlineHeart,
   HiOutlineFolder, HiOutlineDotsHorizontal, HiOutlineSearch, HiOutlineViewGrid,
@@ -59,28 +60,23 @@ export default function DashboardPage({ initialSection }: { initialSection?: str
     localStorage.setItem('designhub-sidebar-collapsed', String(sidebarCollapsed));
   }, [sidebarCollapsed]);
 
-  const handleNewDesign = (preset: any) => {
-    setProject({
-      id: `proj-${Date.now()}`,
-      name: preset.name,
-      pages: [{
-        id: `page-${Date.now()}`,
-        name: 'Page 1',
-        elements: [],
-        backgroundColor: '#FFFFFF',
-        width: preset.width,
-        height: preset.height,
-      }],
-      ownerId: user?.id || '1',
-      collaborators: [],
-      isFavorite: false,
-      isTemplate: false,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    });
-    toast.success(`Created ${preset.name}`);
-    navigate('/editor');
-    setShowNewDesignModal(false);
+  const handleNewDesign = async (preset: any) => {
+    const pages = [{
+      id: `page-${Date.now()}`,
+      name: 'Page 1',
+      elements: [],
+      backgroundColor: '#FFFFFF',
+      width: preset.width,
+      height: preset.height,
+    }];
+    try {
+      const { data } = await projectAPI.create({ name: preset.name, canvasData: pages });
+      toast.success(`Created ${preset.name}`);
+      navigate(`/editor/${data.id}`);
+      setShowNewDesignModal(false);
+    } catch {
+      toast.error('Failed to create design');
+    }
   };
 
   const handleOpenProject = (project: any) => {
@@ -236,27 +232,24 @@ export default function DashboardPage({ initialSection }: { initialSection?: str
                     {/* Right: quick-action cards */}
                     <div className="flex gap-3 flex-wrap">
                       {[
-                        { emoji: '✍️', label: 'Magic Write', desc: 'AI copywriting', color: 'from-violet-500 to-purple-600' },
-                        { emoji: '🖼️', label: 'Image Ideas', desc: 'Visual concepts', color: 'from-pink-500 to-rose-600' },
-                        { emoji: '💡', label: 'Design Ideas', desc: 'Inspiration', color: 'from-amber-500 to-orange-600' },
-                        { emoji: '🎨', label: 'Color Palette', desc: 'AI colors', color: 'from-teal-500 to-cyan-600' },
+                        { emoji: '✍️', label: 'Magic Write', desc: 'AI copywriting', color: 'from-violet-500 to-purple-600', aiTab: 'write' },
+                        { emoji: '🖼️', label: 'Image Ideas', desc: 'Visual concepts', color: 'from-pink-500 to-rose-600', aiTab: 'image' },
+                        { emoji: '💡', label: 'Design Ideas', desc: 'Inspiration', color: 'from-amber-500 to-orange-600', aiTab: 'suggest' },
+                        { emoji: '🎨', label: 'Color Palette', desc: 'AI colors', color: 'from-teal-500 to-cyan-600', aiTab: 'suggest' },
                       ].map((action) => (
                         <button
                           key={action.label}
-                          onClick={() => {
-                            setProject({
-                              id: `proj-${Date.now()}`,
-                              name: 'AI Design',
-                              pages: [{ id: `page-${Date.now()}`, name: 'Page 1', elements: [], backgroundColor: '#FFFFFF', width: 1920, height: 1080 }],
-                              ownerId: user?.id || '1',
-                              collaborators: [],
-                              isFavorite: false,
-                              isTemplate: false,
-                              createdAt: new Date().toISOString(),
-                              updatedAt: new Date().toISOString(),
-                            });
-                            navigate('/editor');
-                            toast.success(`Open the AI tab in the editor sidebar`);
+                          onClick={async () => {
+                            try {
+                              const pages = [{ id: `page-${Date.now()}`, name: 'Page 1', elements: [], backgroundColor: '#FFFFFF', width: 1920, height: 1080 }];
+                              const { data } = await projectAPI.create({ name: 'AI Design', canvasData: pages });
+                              // ?ai=<mode> tells the editor's LeftSidebar to open straight
+                              // into the matching AI sub-tab instead of landing on a blank
+                              // page with just a toast telling the user to find it themselves.
+                              navigate(`/editor/${data.id}?ai=${action.aiTab}`);
+                            } catch {
+                              toast.error('Failed to create design');
+                            }
                           }}
                           className="flex flex-col items-center gap-1.5 px-4 py-3 rounded-xl bg-gray-50 dark:bg-gray-800/60 hover:bg-gray-100 dark:hover:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 transition-all group min-w-[80px]"
                         >
@@ -291,28 +284,23 @@ export default function DashboardPage({ initialSection }: { initialSection?: str
                   return (
                     <button
                       key={template.id}
-                      onClick={() => {
+                      onClick={async () => {
                         const tmplPage = template.data?.pages?.[0];
                         if (tmplPage) {
-                          setProject({
-                            id: `proj-${Date.now()}`,
-                            name: template.name,
-                            pages: [{
-                              id: `page-${Date.now()}`,
-                              name: 'Page 1',
-                              elements: tmplPage.elements || [],
-                              backgroundColor: tmplPage.backgroundColor || '#FFFFFF',
-                              width: tmplPage.width || 1920,
-                              height: tmplPage.height || 1080,
-                            }],
-                            ownerId: user?.id || '1',
-                            collaborators: [],
-                            isFavorite: false,
-                            isTemplate: false,
-                            createdAt: new Date().toISOString(),
-                            updatedAt: new Date().toISOString(),
-                          });
-                          navigate('/editor');
+                          const pages = [{
+                            id: `page-${Date.now()}`,
+                            name: 'Page 1',
+                            elements: tmplPage.elements || [],
+                            backgroundColor: tmplPage.backgroundColor || '#FFFFFF',
+                            width: tmplPage.width || 1920,
+                            height: tmplPage.height || 1080,
+                          }];
+                          try {
+                            const { data } = await projectAPI.create({ name: template.name, canvasData: pages });
+                            navigate(`/editor/${data.id}`);
+                          } catch {
+                            toast.error('Failed to create design');
+                          }
                         }
                       }}
                       className="group cursor-pointer text-left"
@@ -325,6 +313,22 @@ export default function DashboardPage({ initialSection }: { initialSection?: str
                           <span className="absolute top-2 left-2 px-1.5 py-0.5 text-[9px] font-bold bg-amber-500 text-white rounded-full">PRO</span>
                         )}
                         {page?.elements?.slice(0, 3).map((el: any, i: number) => {
+                          if (el.type === 'image') {
+                            return (
+                              <img
+                                key={i}
+                                src={el.data?.src}
+                                alt=""
+                                className="absolute object-cover"
+                                style={{
+                                  left: `${(el.x / (page.width || 1920)) * 100}%`,
+                                  top: `${(el.y / (page.height || 1080)) * 100}%`,
+                                  width: `${(el.width / (page.width || 1920)) * 100}%`,
+                                  height: `${(el.height / (page.height || 1080)) * 100}%`,
+                                }}
+                              />
+                            );
+                          }
                           if (el.type === 'text') {
                             return (
                               <div key={i} className="absolute overflow-hidden" style={{

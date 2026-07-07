@@ -33,7 +33,11 @@ router.get('/', authMiddleware, async (req: AuthRequest, res: Response) => {
 // Connect / update email credentials
 router.post('/connect', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
-    const { email, appPassword, host, port } = req.body;
+    const { email, appPassword: rawAppPassword, host, port } = req.body;
+    // Google displays app passwords as "abcd efgh ijkl mnop" for readability, but the
+    // real credential has no spaces — pasting it verbatim is the #1 cause of "invalid
+    // credentials" here, so strip whitespace regardless of how the user typed/pasted it.
+    const appPassword = typeof rawAppPassword === 'string' ? rawAppPassword.replace(/\s+/g, '') : rawAppPassword;
 
     if (!email || !appPassword) {
       return res.status(400).json({ error: 'Email and app password are required' });

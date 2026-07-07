@@ -1,7 +1,8 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useEditorStore } from '../../stores/editorStore';
-import { CanvasElement, TextData, ImageData, ShapeData, TableData, ChartData, IconData } from '../../types';
+import { CanvasElement, TextData, ImageData, ShapeData, TableData, ChartData, IconData, VideoData } from '../../types';
 import { COLORS_PALETTE, FONT_FAMILIES, FONT_WEIGHT_MAP, FONT_WEIGHT_LABELS, GRADIENT_PRESETS } from '../../utils/cn';
+import { uploadAPI } from '../../utils/api';
 import {
   HiOutlineX, HiOutlineTrash, HiOutlineDuplicate, HiOutlineLockClosed,
   HiOutlineLockOpen, HiOutlineEye, HiOutlineEyeOff,
@@ -230,6 +231,9 @@ export default function RightSidebar() {
         {/* Image Properties */}
         {element.type === 'image' && <ImageProperties element={element} handleDataUpdate={handleDataUpdate} />}
 
+        {/* Video Properties */}
+        {element.type === 'video' && <VideoProperties element={element} handleDataUpdate={handleDataUpdate} />}
+
         {/* Shape Properties */}
         {element.type === 'shape' && <ShapeProperties element={element} handleDataUpdate={handleDataUpdate} />}
 
@@ -286,7 +290,6 @@ export default function RightSidebar() {
 function TextProperties({ element, handleDataUpdate }: { element: CanvasElement; handleDataUpdate: (data: Record<string, unknown>) => void }) {
   const data = element.data as TextData;
   const availableWeights = FONT_WEIGHT_MAP[data.fontFamily] || [400, 700];
-  const weightOptions = [300, 400, 500, 600, 700, 800, 900];
 
   return (
     <>
@@ -309,14 +312,9 @@ function TextProperties({ element, handleDataUpdate }: { element: CanvasElement;
               onChange={(e) => handleDataUpdate({ fontWeight: Number(e.target.value) })}
               className="input-field"
             >
-              {weightOptions.map((w) => {
-                const supported = availableWeights.includes(w);
-                return (
-                  <option key={w} value={w} disabled={!supported}>
-                    {FONT_WEIGHT_LABELS[w] || w}{!supported ? ' (unsupported)' : ''}
-                  </option>
-                );
-              })}
+              {availableWeights.map((w) => (
+                <option key={w} value={w}>{FONT_WEIGHT_LABELS[w] || w}</option>
+              ))}
             </select>
           </div>
         </div>
@@ -340,19 +338,57 @@ function TextProperties({ element, handleDataUpdate }: { element: CanvasElement;
             S
           </button>
           <div className="h-6 w-px bg-gray-200 dark:bg-gray-700 mx-1" />
-          {(['left', 'center', 'right'] as const).map((align) => (
+          {(['left', 'center', 'right', 'justify'] as const).map((align) => (
             <button
               key={align}
               onClick={() => handleDataUpdate({ textAlign: align })}
               className={`w-8 h-8 rounded-lg border flex items-center justify-center text-[10px] ${data.textAlign === align ? 'bg-canva-purple text-white border-canva-purple' : 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700'}`}
             >
-              {align === 'left' ? '⫷' : align === 'center' ? '☰' : '⫸'}
+              {align === 'left' ? '⫷' : align === 'center' ? '☰' : align === 'right' ? '⫸' : '☱'}
             </button>
           ))}
         </div>
-        <div className="grid grid-cols-2 gap-2 mt-2">
+        <div className="mt-2">
           <Slider label="Line H" value={data.lineHeight} onChange={(v) => handleDataUpdate({ lineHeight: v })} min={0.5} max={3} step={0.1} />
           <Slider label="Spacing" value={data.letterSpacing} onChange={(v) => handleDataUpdate({ letterSpacing: v })} min={-5} max={20} />
+        </div>
+      </Section>
+      <Section title="Typography">
+        <label className="text-xs text-gray-500 mb-1 block">Text case</label>
+        <div className="grid grid-cols-4 gap-1 mb-3">
+          {([
+            { v: 'none', label: 'Aa' },
+            { v: 'uppercase', label: 'AA' },
+            { v: 'lowercase', label: 'aa' },
+            { v: 'capitalize', label: 'Aa Bb' },
+          ] as const).map((opt) => (
+            <button
+              key={opt.v}
+              onClick={() => handleDataUpdate({ textTransform: opt.v })}
+              className={`h-8 rounded-lg border text-[10px] font-medium transition-colors ${(data.textTransform || 'none') === opt.v ? 'border-canva-purple bg-canva-purple/10 text-canva-purple' : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'}`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={!!data.outline}
+            onChange={(e) => handleDataUpdate({ outline: e.target.checked ? { color: '#000000', width: 2 } : undefined })}
+            className="w-4 h-4 rounded border-gray-300 text-canva-purple focus:ring-canva-purple"
+          />
+          <span className="text-sm text-gray-700 dark:text-gray-300">Text outline</span>
+        </label>
+        {data.outline && (
+          <div className="space-y-2 mt-3 ml-6">
+            <ColorPicker label="Color" value={data.outline.color} onChange={(v) => handleDataUpdate({ outline: { ...data.outline!, color: v } })} />
+            <Slider label="Width" value={data.outline.width} onChange={(v) => handleDataUpdate({ outline: { ...data.outline!, width: v } })} min={0} max={20} />
+          </div>
+        )}
+        <div className="mt-3">
+          <Slider label="Curve" value={data.curvature || 0} onChange={(v) => handleDataUpdate({ curvature: v })} min={-100} max={100} />
+          <p className="text-[10px] text-gray-400 mt-0.5">Bends text along an arc — positive arches up, negative dips down.</p>
         </div>
       </Section>
       <Section title="Text Color">
@@ -455,9 +491,6 @@ function ImageProperties({ element, handleDataUpdate }: { element: CanvasElement
   const data = element.data as ImageData;
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const flipH = !!(element.data as any).flipH;
-  const flipV = !!(element.data as any).flipV;
-
   const aspectRatios = [
     { label: 'Free', ratio: null },
     { label: '1:1', ratio: 1 },
@@ -516,31 +549,8 @@ function ImageProperties({ element, handleDataUpdate }: { element: CanvasElement
       <div className="h-px bg-gray-200 dark:bg-gray-700 my-4" />
 
       <Section title="Image Editing">
-        {/* Flip Controls */}
-        <div className="flex items-center gap-2 mb-3">
-          <span className="text-xs text-gray-500 w-14 flex-shrink-0">Flip</span>
-          <button
-            onClick={() => handleDataUpdate({ flipH: !flipH })}
-            className={`flex-1 h-8 rounded-lg border flex items-center justify-center gap-1 text-xs font-medium transition-colors ${
-              flipH
-                ? 'border-canva-purple bg-canva-purple/10 text-canva-purple'
-                : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
-            }`}
-            title="Flip Horizontal"
-          >
-            <HiOutlineArrowRight size={14} /> H
-          </button>
-          <button
-            onClick={() => handleDataUpdate({ flipV: !flipV })}
-            className={`flex-1 h-8 rounded-lg border flex items-center justify-center gap-1 text-xs font-medium transition-colors ${
-              flipV
-                ? 'border-canva-purple bg-canva-purple/10 text-canva-purple'
-                : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
-            }`}
-            title="Flip Vertical"
-          >
-            <HiOutlineArrowDown size={14} /> V
-          </button>
+        <div className="mb-3">
+          <FlipControls data={data} handleDataUpdate={handleDataUpdate} />
         </div>
 
         {/* Aspect Ratio */}
@@ -635,6 +645,99 @@ function ImageProperties({ element, handleDataUpdate }: { element: CanvasElement
   );
 }
 
+function VideoProperties({ element, handleDataUpdate }: { element: CanvasElement; handleDataUpdate: (data: Record<string, unknown>) => void }) {
+  const data = element.data as VideoData;
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+
+  const handleReplaceVideo = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('video/')) { toast.error('Choose a video file'); return; }
+    setUploading(true);
+    try {
+      const { data: uploaded } = await uploadAPI.upload(file);
+      const BACKEND = import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:3001';
+      handleDataUpdate({ src: `${BACKEND}${uploaded.url}` });
+      toast.success('Video replaced!');
+    } catch {
+      toast.error('Failed to upload video');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <Section title="Video">
+      <label className="flex items-center justify-between py-1.5 cursor-pointer">
+        <span className="text-sm text-gray-700 dark:text-gray-300">Autoplay</span>
+        <button
+          onClick={() => handleDataUpdate({ autoplay: !(data.autoplay ?? true) })}
+          className={`w-9 h-5 rounded-full transition-colors relative ${(data.autoplay ?? true) ? 'bg-canva-purple' : 'bg-gray-300 dark:bg-gray-600'}`}
+        >
+          <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${(data.autoplay ?? true) ? 'translate-x-4' : 'translate-x-0.5'}`} />
+        </button>
+      </label>
+      <label className="flex items-center justify-between py-1.5 cursor-pointer">
+        <span className="text-sm text-gray-700 dark:text-gray-300">Loop</span>
+        <button
+          onClick={() => handleDataUpdate({ loop: !(data.loop ?? true) })}
+          className={`w-9 h-5 rounded-full transition-colors relative ${(data.loop ?? true) ? 'bg-canva-purple' : 'bg-gray-300 dark:bg-gray-600'}`}
+        >
+          <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${(data.loop ?? true) ? 'translate-x-4' : 'translate-x-0.5'}`} />
+        </button>
+      </label>
+      <label className="flex items-center justify-between py-1.5 cursor-pointer">
+        <span className="text-sm text-gray-700 dark:text-gray-300">Muted</span>
+        <button
+          onClick={() => handleDataUpdate({ muted: !(data.muted ?? true) })}
+          className={`w-9 h-5 rounded-full transition-colors relative ${(data.muted ?? true) ? 'bg-canva-purple' : 'bg-gray-300 dark:bg-gray-600'}`}
+        >
+          <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${(data.muted ?? true) ? 'translate-x-4' : 'translate-x-0.5'}`} />
+        </button>
+      </label>
+
+      <input ref={fileInputRef} type="file" accept="video/*" className="hidden" onChange={handleReplaceVideo} />
+      <button
+        onClick={() => fileInputRef.current?.click()}
+        disabled={uploading}
+        className="mt-3 w-full flex items-center justify-center gap-1.5 py-2 rounded-lg border border-gray-200 dark:border-gray-700 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
+      >
+        <HiOutlinePhotograph size={14} /> {uploading ? 'Uploading…' : 'Replace Video'}
+      </button>
+    </Section>
+  );
+}
+
+function FlipControls({ data, handleDataUpdate }: { data: any; handleDataUpdate: (data: Record<string, unknown>) => void }) {
+  const flipH = !!data.flipH;
+  const flipV = !!data.flipV;
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-xs text-gray-500 w-14 flex-shrink-0">Flip</span>
+      <button
+        onClick={() => handleDataUpdate({ flipH: !flipH })}
+        className={`flex-1 h-8 rounded-lg border flex items-center justify-center gap-1 text-xs font-medium transition-colors ${
+          flipH ? 'border-canva-purple bg-canva-purple/10 text-canva-purple' : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
+        }`}
+        title="Flip Horizontal"
+      >
+        <HiOutlineArrowRight size={14} /> H
+      </button>
+      <button
+        onClick={() => handleDataUpdate({ flipV: !flipV })}
+        className={`flex-1 h-8 rounded-lg border flex items-center justify-center gap-1 text-xs font-medium transition-colors ${
+          flipV ? 'border-canva-purple bg-canva-purple/10 text-canva-purple' : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
+        }`}
+        title="Flip Vertical"
+      >
+        <HiOutlineArrowDown size={14} /> V
+      </button>
+    </div>
+  );
+}
+
 function ShapeProperties({ element, handleDataUpdate }: { element: CanvasElement; handleDataUpdate: (data: Record<string, unknown>) => void }) {
   const data = element.data as ShapeData;
   return (
@@ -645,6 +748,9 @@ function ShapeProperties({ element, handleDataUpdate }: { element: CanvasElement
       </div>
       <NumberInput label="Stroke W" value={data.strokeWidth} onChange={(v) => handleDataUpdate({ strokeWidth: v })} min={0} max={50} />
       <NumberInput label="Corner R" value={data.cornerRadius} onChange={(v) => handleDataUpdate({ cornerRadius: v })} min={0} max={500} />
+      <div className="mt-3">
+        <FlipControls data={data} handleDataUpdate={handleDataUpdate} />
+      </div>
     </Section>
   );
 }
@@ -654,9 +760,10 @@ function IconProperties({ element, handleDataUpdate }: { element: CanvasElement;
   return (
     <Section title="Icon Style">
       <ColorPicker label="Recolor" value={data.fill || '#000000'} onChange={(v) => handleDataUpdate({ fill: v })} />
-      <p className="text-[10px] text-gray-400 mt-2">
+      <p className="text-[10px] text-gray-400 mt-2 mb-3">
         Only applies to single-color paths — multi-color icons keep their original per-path colors.
       </p>
+      <FlipControls data={data} handleDataUpdate={handleDataUpdate} />
     </Section>
   );
 }
@@ -863,17 +970,47 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 function NumberInput({ label, value, onChange, min, max }: {
   label: string; value: number; onChange: (v: number) => void; min?: number; max?: number;
 }) {
+  // Local text buffer instead of a native <input type="number"> — lets someone clear
+  // the field and type freely (e.g. "8" then "0") without every keystroke round-tripping
+  // through Number() and the browser's own number-input formatting, which is what was
+  // producing values like "080" instead of "80".
+  const [text, setText] = useState(String(value));
+  useEffect(() => { setText(String(value)); }, [value]);
+
+  const commit = () => {
+    const n = Number(text);
+    if (!Number.isNaN(n)) {
+      const clamped = Math.min(max ?? Infinity, Math.max(min ?? -Infinity, n));
+      onChange(clamped);
+      setText(String(clamped));
+    } else {
+      setText(String(value));
+    }
+  };
+
+  const step = (delta: number) => {
+    const clamped = Math.min(max ?? Infinity, Math.max(min ?? -Infinity, value + delta));
+    onChange(clamped);
+  };
+
   return (
     <div className="flex items-center gap-2">
       <label className="text-xs text-gray-500 w-8 flex-shrink-0">{label}</label>
-      <input
-        type="number"
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        min={min}
-        max={max}
-        className="w-full px-2 py-1.5 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-canva-purple/30 text-gray-900 dark:text-white"
-      />
+      <div className="relative w-full">
+        <input
+          type="text"
+          inputMode="numeric"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+          className="w-full pl-2 pr-6 py-1.5 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-canva-purple/30 text-gray-900 dark:text-white"
+        />
+        <div className="absolute right-1 top-1/2 -translate-y-1/2 flex flex-col">
+          <button type="button" onClick={() => step(1)} className="text-gray-400 hover:text-canva-purple leading-none"><HiOutlineChevronUp size={10} /></button>
+          <button type="button" onClick={() => step(-1)} className="text-gray-400 hover:text-canva-purple leading-none"><HiOutlineChevronDown size={10} /></button>
+        </div>
+      </div>
     </div>
   );
 }

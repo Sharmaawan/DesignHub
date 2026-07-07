@@ -1,30 +1,25 @@
 import { Router, Response } from 'express';
+import fs from 'fs';
+import path from 'path';
+import { v4 as uuidv4 } from 'uuid';
 import prisma from '../lib/prisma';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
-import crypto from 'crypto';
+import { decryptSecret as decryptKey } from '../lib/crypto';
+import { remapUpstreamStatus as upstreamStatus } from '../lib/http';
 
 const router = Router();
 
-const ENCRYPTION_KEY = process.env.API_KEY_SECRET || 'designhub-api-key-secret-2024!';
-
-function decryptKey(encrypted: string): string {
-  const decipher = crypto.createDecipheriv('aes-256-cbc', Buffer.alloc(32, ENCRYPTION_KEY.slice(0, 32)), Buffer.alloc(16));
-  let decrypted = decipher.update(encrypted, 'hex', 'utf8');
-  decrypted += decipher.final('utf8');
-  return decrypted;
-}
-
-// Never forward an upstream provider's 401/403 as-is — the frontend treats any 401/403
-// from our API as "your session expired" and force-logs the user out. An invalid AI
-// provider key is a different failure and must not trigger that.
-function upstreamStatus(status: number): number {
-  return status === 401 || status === 403 ? 502 : status;
+// Decodes a `data:<mime>;base64,<data>` URL into a Buffer + mime type.
+function decodeDataUrl(dataUrl: string): { buffer: Buffer; mime: string } {
+  const match = /^data:(.+);base64,(.+)$/.exec(dataUrl);
+  if (!match) throw new Error('Invalid reference image data');
+  return { buffer: Buffer.from(match[2], 'base64'), mime: match[1] };
 }
 
 // Generate text content
 router.post('/generate', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
-    const { provider, prompt, type } = req.body;
+    const { provider, prompt, type, referenceImages } = req.body;
     console.log(`[ai/generate] request received userId=${req.userId} provider=${provider} type=${type || 'text'}`);
 
     if (!provider || !prompt) {
@@ -72,19 +67,42 @@ router.post('/generate', authMiddleware, async (req: AuthRequest, res: Response)
     });
 
     if (provider === 'openai' && type === 'image') {
-      const response = await fetch('https://api.openai.com/v1/images/generations', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: 'dall-e-3',
-          prompt,
-          n: 1,
-          size: '1024x1024',
-        }),
-      });
+      // With reference images (logo/template uploads) attached, use the edits endpoint
+      // so the model incorporates their content instead of ignoring it.
+      const refImages: string[] = Array.isArray(referenceImages)
+        ? referenceImages.filter((r) => typeof r === 'string' && r.startsWith('data:'))
+        : [];
+      const useReference = refImages.length > 0;
+      const response = useReference
+        ? await (async () => {
+            const form = new FormData();
+            form.append('model', 'gpt-image-1');
+            form.append('prompt', prompt);
+            form.append('n', '1');
+            form.append('size', '1024x1024');
+            refImages.forEach((ref, i) => {
+              const { buffer, mime } = decodeDataUrl(ref);
+              form.append('image[]', new Blob([new Uint8Array(buffer)], { type: mime }), `reference-${i}.png`);
+            });
+            return fetch('https://api.openai.com/v1/images/edits', {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${apiKey}` },
+              body: form,
+            });
+          })()
+        : await fetch('https://api.openai.com/v1/images/generations', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify({
+              model: 'gpt-image-1',
+              prompt,
+              n: 1,
+              size: '1024x1024',
+            }),
+          });
 
       if (!response.ok) {
         const err = await response.json() as any;
@@ -94,8 +112,16 @@ router.post('/generate', authMiddleware, async (req: AuthRequest, res: Response)
       }
 
       const data = await response.json() as any;
-      const imageUrl = data.data?.[0]?.url || '';
-      console.log(`[ai/generate] openai image generated userId=${req.userId}`);
+      let imageUrl = data.data?.[0]?.url || '';
+      const b64 = data.data?.[0]?.b64_json;
+      if (!imageUrl && b64) {
+        // gpt-image-1 (edits) only returns base64 — persist it to disk so we
+        // return a stable URL instead of storing a huge base64 blob in the DB.
+        const filename = `${uuidv4()}.png`;
+        fs.writeFileSync(path.join('uploads', filename), Buffer.from(b64, 'base64'));
+        imageUrl = `/uploads/${filename}`;
+      }
+      console.log(`[ai/generate] openai image generated userId=${req.userId} withReference=${useReference}`);
 
       await prisma.aIRequest.update({ where: { id: aiRequest.id }, data: { status: 'completed' } });
       const generation = await prisma.aIGeneration.create({

@@ -13,6 +13,9 @@ export interface Project {
   name: string;
   thumbnail?: string;
   pages: Page[];
+  // Write-only mirror of `pages` sent to the backend's `canvasData` JSON column —
+  // see stores/projectStore.ts's loadProjects for how it's read back into `pages`.
+  canvasData?: Page[];
   ownerId: string;
   collaborators: string[];
   folderId?: string;
@@ -35,7 +38,7 @@ export interface Page {
 
 export interface CanvasElement {
   id: string;
-  type: 'text' | 'image' | 'shape' | 'icon' | 'sticker' | 'chart' | 'table' | 'video' | 'group';
+  type: 'text' | 'image' | 'shape' | 'icon' | 'sticker' | 'chart' | 'table' | 'video' | 'group' | 'drawing';
   x: number;
   y: number;
   width: number;
@@ -52,7 +55,7 @@ export interface CanvasElement {
   filters?: ImageFilter[];
   zIndex: number;
   groupId?: string;
-  data: TextData | ImageData | ShapeData | IconData | ChartData | TableData | VideoData;
+  data: TextData | ImageData | ShapeData | IconData | ChartData | TableData | VideoData | DrawingData;
 }
 
 export interface TextData {
@@ -148,6 +151,17 @@ export interface VideoData {
   endTime: number;
 }
 
+export interface DrawingData {
+  type: 'drawing';
+  tool: 'pen' | 'highlighter' | 'eraser';
+  // Points are stored relative to the element's own x/y (not absolute page coords),
+  // matching how every other element type positions itself — keeps drag/resize/rotate
+  // working on drawings the same way they already work on everything else.
+  points: number[];
+  stroke: string;
+  strokeWidth: number;
+}
+
 export interface ElementShadow {
   color: string;
   blur: number;
@@ -213,6 +227,8 @@ export interface Template {
   tags: string[];
   data: Project;
   isPro: boolean;
+  ownerId?: string | null;
+  deletedAt?: string | null;
 }
 
 export interface ChatMessage {

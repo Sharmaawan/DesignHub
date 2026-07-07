@@ -1,10 +1,10 @@
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useEditorStore } from '../../stores/editorStore';
 import { HiOutlinePlus, HiOutlineX } from 'react-icons/hi';
 import { CANVAS_PRESETS } from '../../utils/cn';
 import { DesignType } from '../../types';
 import toast from 'react-hot-toast';
+import { projectAPI } from '../../utils/api';
 
 const DESIGN_TYPES: DesignType[] = [
   { id: 'presentation', label: 'Presentation', icon: '📊', width: 1920, height: 1080, category: 'Presentations', description: '16:9 widescreen' },
@@ -43,7 +43,6 @@ export default function CreateButton() {
   const [customWidth, setCustomWidth] = useState(1080);
   const [customHeight, setCustomHeight] = useState(1080);
   const navigate = useNavigate();
-  const { setProject } = useEditorStore();
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -57,7 +56,7 @@ export default function CreateButton() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isOpen]);
 
-  const handleCreateDesign = (type: DesignType) => {
+  const handleCreateDesign = async (type: DesignType) => {
     if (type.id === 'upload') {
       const input = document.createElement('input');
       input.type = 'file';
@@ -68,31 +67,30 @@ export default function CreateButton() {
           const reader = new FileReader();
           reader.onload = (ev) => {
             const img = new Image();
-            img.onload = () => {
-              setProject({
-                id: `proj-${Date.now()}`,
-                name: file.name.replace(/\.[^/.]+$/, ''),
-                pages: [{
-                  id: `page-${Date.now()}`,
-                  name: 'Page 1',
-                  elements: [{
-                    id: `el-${Date.now()}`,
-                    type: 'image',
-                    x: 0, y: 0,
-                    width: Math.min(img.width, 1920),
-                    height: Math.min(img.height, 1080),
-                    rotation: 0, opacity: 1, visible: true, locked: false,
-                    zIndex: 0, name: 'Uploaded Image',
-                    data: { type: 'image', src: ev.target?.result as string, objectFit: 'contain', borderRadius: 0, brightness: 100, contrast: 100, saturation: 100, hue: 0, blur: 0, filters: [], cropX: 0, cropY: 0, cropWidth: 100, cropHeight: 100 },
-                  }],
-                  backgroundColor: '#FFFFFF',
+            img.onload = async () => {
+              const pages = [{
+                id: `page-${Date.now()}`,
+                name: 'Page 1',
+                elements: [{
+                  id: `el-${Date.now()}`,
+                  type: 'image',
+                  x: 0, y: 0,
                   width: Math.min(img.width, 1920),
                   height: Math.min(img.height, 1080),
+                  rotation: 0, opacity: 1, visible: true, locked: false,
+                  zIndex: 0, name: 'Uploaded Image',
+                  data: { type: 'image', src: ev.target?.result as string, objectFit: 'contain', borderRadius: 0, brightness: 100, contrast: 100, saturation: 100, hue: 0, blur: 0, filters: [], cropX: 0, cropY: 0, cropWidth: 100, cropHeight: 100 },
                 }],
-                ownerId: '1', collaborators: [], isFavorite: false, isTemplate: false,
-                createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-              });
-              navigate('/editor');
+                backgroundColor: '#FFFFFF',
+                width: Math.min(img.width, 1920),
+                height: Math.min(img.height, 1080),
+              }];
+              try {
+                const { data } = await projectAPI.create({ name: file.name.replace(/\.[^/.]+$/, ''), canvasData: pages });
+                navigate(`/editor/${data.id}`);
+              } catch {
+                toast.error('Failed to create design');
+              }
             };
             img.src = ev.target?.result as string;
           };
@@ -111,42 +109,40 @@ export default function CreateButton() {
 
     const width = type.width;
     const height = type.height;
-    setProject({
-      id: `proj-${Date.now()}`,
-      name: `Untitled ${type.label}`,
-      pages: [{
-        id: `page-${Date.now()}`,
-        name: 'Page 1',
-        elements: [],
-        backgroundColor: '#FFFFFF',
-        width, height,
-      }],
-      ownerId: '1', collaborators: [], isFavorite: false, isTemplate: false,
-      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-    });
-    toast.success(`Created ${type.label} (${width}x${height})`);
-    navigate('/editor');
-    setIsOpen(false);
+    const pages = [{
+      id: `page-${Date.now()}`,
+      name: 'Page 1',
+      elements: [],
+      backgroundColor: '#FFFFFF',
+      width, height,
+    }];
+    try {
+      const { data } = await projectAPI.create({ name: `Untitled ${type.label}`, canvasData: pages });
+      toast.success(`Created ${type.label} (${width}x${height})`);
+      navigate(`/editor/${data.id}`);
+      setIsOpen(false);
+    } catch {
+      toast.error('Failed to create design');
+    }
   };
 
-  const handleCustomCreate = () => {
-    setProject({
-      id: `proj-${Date.now()}`,
-      name: 'Untitled Design',
-      pages: [{
-        id: `page-${Date.now()}`,
-        name: 'Page 1',
-        elements: [],
-        backgroundColor: '#FFFFFF',
-        width: customWidth, height: customHeight,
-      }],
-      ownerId: '1', collaborators: [], isFavorite: false, isTemplate: false,
-      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-    });
-    toast.success(`Created custom design (${customWidth}x${customHeight})`);
-    navigate('/editor');
-    setIsOpen(false);
-    setShowCustomSize(false);
+  const handleCustomCreate = async () => {
+    const pages = [{
+      id: `page-${Date.now()}`,
+      name: 'Page 1',
+      elements: [],
+      backgroundColor: '#FFFFFF',
+      width: customWidth, height: customHeight,
+    }];
+    try {
+      const { data } = await projectAPI.create({ name: 'Untitled Design', canvasData: pages });
+      toast.success(`Created custom design (${customWidth}x${customHeight})`);
+      navigate(`/editor/${data.id}`);
+      setIsOpen(false);
+      setShowCustomSize(false);
+    } catch {
+      toast.error('Failed to create design');
+    }
   };
 
   return (
