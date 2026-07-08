@@ -104,10 +104,14 @@ export default function DashboardPage({ initialSection }: { initialSection?: str
     setRenamingId(null);
   };
 
-  const handleDeleteProject = (projectId: string) => {
-    deleteProject(projectId);
+  const handleDeleteProject = async (projectId: string) => {
     setContextMenu(null);
-    toast.success('Project deleted');
+    try {
+      await deleteProject(projectId);
+      toast.success('Project deleted');
+    } catch {
+      toast.error('Failed to delete project');
+    }
   };
 
   const handleDuplicateProject = (project: any) => {
@@ -205,10 +209,13 @@ export default function DashboardPage({ initialSection }: { initialSection?: str
             </div>
           )}
 
-          {/* Quick Access Categories */}
-          <section className="mb-10">
-            <QuickAccessCategories />
-          </section>
+          {/* Quick Access Categories — home only, already shown there; the
+              Projects section should show just the project list itself. */}
+          {activeSection === 'home' && (
+            <section className="mb-10">
+              <QuickAccessCategories />
+            </section>
+          )}
 
           {/* Magic AI Studio — home only */}
           {activeSection === 'home' && (
@@ -366,23 +373,27 @@ export default function DashboardPage({ initialSection }: { initialSection?: str
             </section>
           )}
 
-          {/* Recent Projects Section */}
-          <section className="mb-10">
-            <RecommendedDesigns />
-          </section>
+          {/* Recent Projects Section — home only */}
+          {activeSection === 'home' && (
+            <section className="mb-10">
+              <RecommendedDesigns />
+            </section>
+          )}
 
-          {/* Two-column layout for side sections */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-10">
-            {/* Team Requests */}
-            <div className="lg:col-span-1">
-              <TeamRequests />
-            </div>
+          {/* Two-column layout for side sections — home only */}
+          {activeSection === 'home' && (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-10">
+              {/* Team Requests */}
+              <div className="lg:col-span-1">
+                <TeamRequests />
+              </div>
 
-            {/* What's New */}
-            <div className="lg:col-span-2">
-              <WhatsNew />
+              {/* What's New */}
+              <div className="lg:col-span-2">
+                <WhatsNew />
+              </div>
             </div>
-          </div>
+          )}
 
           {/* All Projects (when viewing projects section) */}
           {activeSection === 'projects' && (
@@ -458,6 +469,13 @@ export default function DashboardPage({ initialSection }: { initialSection?: str
                           className="absolute top-2 left-2 p-1.5 rounded-full bg-white/80 dark:bg-gray-800/80 text-gray-400 opacity-0 group-hover:opacity-100 transition-all"
                         >
                           <HiOutlineDotsHorizontal size={12} />
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleDeleteProject(project.id); }}
+                          title="Delete project"
+                          className="absolute bottom-2 right-2 p-1.5 rounded-full bg-white/80 dark:bg-gray-800/80 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
+                        >
+                          <HiOutlineTrash size={12} />
                         </button>
                       </div>
                       <div className="mt-2 px-1">

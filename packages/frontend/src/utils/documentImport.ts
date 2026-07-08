@@ -191,6 +191,72 @@ export async function importXLSX(file: File): Promise<ParsedTable> {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Paragraph pagination — splits long text across multiple pages, and   */
+/*  keeps each paragraph as its own separately positioned block (instead */
+/*  of merging a whole page's worth into one text string) so every       */
+/*  section/bullet lands as its own independently editable text element  */
+/*  on the canvas, not one giant uneditable-by-section blob.             */
+/* ------------------------------------------------------------------ */
+
+export interface PaginatedParagraph { text: string; y: number; height: number }
+
+export function paginateParagraphs(
+  paragraphs: string[],
+  boxWidthPx: number,
+  availableHeightPx: number,
+  fontSize = 16,
+  lineHeightMultiplier = 1.7,
+): PaginatedParagraph[][] {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d')!;
+  ctx.font = `${fontSize}px Inter, sans-serif`;
+  const lineHeightPx = fontSize * lineHeightMultiplier;
+  const paragraphGapPx = lineHeightPx * 0.6;
+
+  // Mirrors how the canvas text element will actually word-wrap, so the page
+  // break (and each paragraph's own box height) lands where the text will
+  // really flow instead of guessing.
+  const countWrappedLines = (text: string): number => {
+    const words = text.split(/\s+/).filter(Boolean);
+    if (words.length === 0) return 1;
+    let lines = 1;
+    let lineWidth = 0;
+    for (const word of words) {
+      const wordWidth = ctx.measureText(word + ' ').width;
+      if (lineWidth > 0 && lineWidth + wordWidth > boxWidthPx) {
+        lines++;
+        lineWidth = wordWidth;
+      } else {
+        lineWidth += wordWidth;
+      }
+    }
+    return lines;
+  };
+
+  const pages: PaginatedParagraph[][] = [];
+  let currentPage: PaginatedParagraph[] = [];
+  let cursorY = 0;
+
+  for (const para of paragraphs) {
+    const paraHeight = countWrappedLines(para) * lineHeightPx;
+    const gapIfAdded = currentPage.length > 0 ? paragraphGapPx : 0;
+
+    if (currentPage.length > 0 && cursorY + gapIfAdded + paraHeight > availableHeightPx) {
+      pages.push(currentPage);
+      currentPage = [];
+      cursorY = 0;
+    } else {
+      cursorY += gapIfAdded;
+    }
+
+    currentPage.push({ text: para, y: cursorY, height: paraHeight });
+    cursorY += paraHeight;
+  }
+  if (currentPage.length > 0) pages.push(currentPage);
+  return pages.length > 0 ? pages : [[{ text: '(No readable text found)', y: 0, height: fontSize * lineHeightMultiplier }]];
+}
+
+/* ------------------------------------------------------------------ */
 /*  DOCX → paragraphs using JSZip to read the ZIP contents            */
 /* ------------------------------------------------------------------ */
 

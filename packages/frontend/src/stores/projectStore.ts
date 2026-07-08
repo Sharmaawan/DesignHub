@@ -15,7 +15,7 @@ interface ProjectState {
   setProjects: (projects: Project[]) => void;
   addProject: (project: Partial<Project>) => Project;
   updateProject: (id: string, data: Partial<Project>) => void;
-  deleteProject: (id: string) => void;
+  deleteProject: (id: string) => Promise<void>;
   toggleFavorite: (id: string) => void;
 
   addFolder: (name: string, parentId?: string) => Folder;
@@ -80,7 +80,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   },
 
-  deleteProject: (id) => {
+  deleteProject: async (id) => {
+    // proj- prefixed ids are local-only leftovers (e.g. from duplicateProject,
+    // which still doesn't call the API) — nothing to delete server-side for those.
+    if (!id.startsWith('proj-')) {
+      await projectAPI.delete(id);
+    }
     set((s) => ({ projects: s.projects.filter((p) => p.id !== id) }));
   },
 

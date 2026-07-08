@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs';
 import prisma from '../lib/prisma';
 import { OAuth2Client } from 'google-auth-library';
 import { JWT_SECRET } from '../lib/secrets';
+import { isAllowedEmailDomain, ALLOWED_DOMAINS_MESSAGE } from '../lib/allowedDomains';
 
 const router = Router();
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
@@ -18,6 +19,9 @@ router.post('/register', async (req: Request, res: Response) => {
     }
     if (password.length < 6) {
       return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    }
+    if (!isAllowedEmailDomain(email)) {
+      return res.status(403).json({ error: ALLOWED_DOMAINS_MESSAGE });
     }
     const existing = await prisma.user.findUnique({ where: { email } });
     if (existing) {
@@ -39,6 +43,9 @@ router.post('/register', async (req: Request, res: Response) => {
 router.post('/login', async (req: Request, res: Response) => {
   try {
     const { email, password } = req.body;
+    if (!isAllowedEmailDomain(email)) {
+      return res.status(403).json({ error: ALLOWED_DOMAINS_MESSAGE });
+    }
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user || !user.passwordHash) {
       return res.status(401).json({ error: 'Invalid credentials' });
@@ -109,6 +116,9 @@ router.post('/google', async (req: Request, res: Response) => {
 
     if (!googleUser.email) {
       return res.status(400).json({ error: 'No email found in Google account' });
+    }
+    if (!isAllowedEmailDomain(googleUser.email)) {
+      return res.status(403).json({ error: ALLOWED_DOMAINS_MESSAGE });
     }
 
     // Find existing user by googleId or email

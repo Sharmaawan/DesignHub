@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { uploadAPI, aiAPI, aiSettingsAPI } from '../../utils/api';
-import { importPDF, importSVG, importCSV, importXLSX, importDOCX, importPPTX } from '../../utils/documentImport';
+import { importPDF, importSVG, importCSV, importXLSX, importDOCX, importPPTX, paginateParagraphs } from '../../utils/documentImport';
 import { useEditorStore } from '../../stores/editorStore';
 import { COLORS_PALETTE } from '../../utils/cn';
 import {
@@ -1014,32 +1014,45 @@ export default function LeftSidebar() {
         return;
       }
 
-      // ── DOCX → new canvas page with extracted text ───────────────────
+      // ── DOCX → one canvas page per page-worth of text, one text element
+      //    PER PARAGRAPH ──────────────────────────────────────────────
+      // A long document (e.g. a multi-page resume) used to land as a single
+      // text box sized for one page, with every paragraph crammed into one
+      // giant merged string — the box doesn't clip, so it overflowed way
+      // past the page edges, AND even once paginated, the whole page was
+      // still one uneditable-by-section blob (couldn't click into just the
+      // summary, or just one bullet, without touching everything else).
+      // Each paragraph now becomes its own independently selectable, movable,
+      // resizable text element, positioned by its own measured height so
+      // they still stack exactly where the merged text used to flow.
       if (cat === 'doc') {
         toast.loading(`Extracting text from ${file.name}…`, { id: matchId });
         const paragraphs = await importDOCX(file);
         toast.dismiss(matchId);
-        const content = paragraphs.join('\n\n') || '(No readable text found)';
         const DOC_W = 794; // A4 px at 96dpi
         const DOC_H = 1123;
-        importDocumentPages([{
-          name: file.name,
+        const MARGIN = 72;
+        const boxWidth = DOC_W - MARGIN * 2;
+        const boxHeight = DOC_H - MARGIN * 2;
+        const pages = paginateParagraphs(paragraphs, boxWidth, boxHeight);
+        importDocumentPages(pages.map((pageParagraphs, i) => ({
+          name: pages.length > 1 ? `${file.name} – Page ${i + 1}` : file.name,
           width: DOC_W, height: DOC_H,
           backgroundColor: '#FFFFFF',
-          elements: [{
+          elements: pageParagraphs.map((para, j) => ({
             type: 'text' as const,
-            x: 72, y: 72, width: DOC_W - 144, height: DOC_H - 144,
-            rotation: 0, opacity: 1, visible: true, locked: false, name: file.name, zIndex: 0,
+            x: MARGIN, y: MARGIN + para.y, width: boxWidth, height: para.height,
+            rotation: 0, opacity: 1, visible: true, locked: false, name: `Paragraph ${j + 1}`, zIndex: j,
             data: {
-              type: 'text' as const, content,
+              type: 'text' as const, content: para.text,
               fontFamily: 'Inter', fontSize: 16, fontWeight: 400,
               fontStyle: 'normal' as const, textDecoration: 'none' as const, textAlign: 'left' as const,
               color: '#111827', lineHeight: 1.7, letterSpacing: 0, textTransform: 'none' as const,
             },
-          }],
-        }]);
+          })),
+        })));
         setUploadedFiles((prev) => prev.map((f) => f.id === matchId ? { ...f, progress: 100, canvasable: true } : f));
-        toast.success(`${file.name} imported. Edit the text on canvas.`);
+        toast.success(pages.length > 1 ? `${file.name} imported across ${pages.length} pages. Edit the text on canvas.` : `${file.name} imported. Edit the text on canvas.`);
         return;
       }
 

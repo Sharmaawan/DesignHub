@@ -27,8 +27,8 @@ export default function RegisterPage() {
       await register(name, email, password);
       toast.success('Account created! Welcome to DesignHub');
       navigate('/');
-    } catch {
-      toast.error('Registration failed');
+    } catch (error: any) {
+      toast.error(error.message || 'Registration failed');
     }
   };
 

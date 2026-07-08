@@ -295,19 +295,286 @@ const SAMPLE_TEMPLATES = [
     tags: ['logo', 'brand', 'minimal'],
     isPremium: false,
   },
+  {
+    name: 'Resume - Modern Sidebar',
+    category: 'Resume',
+    thumbnail: '',
+    data: {
+      pages: [{
+        id: 'tpl-13', name: 'Page 1',
+        backgroundColor: '#FFFFFF',
+        width: 816, height: 1056,
+        elements: [
+          { id: 'el-1', type: 'shape', x: 0, y: 0, width: 280, height: 1056, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 0, name: 'Sidebar',
+            data: { type: 'shape', shapeType: 'rectangle', fill: '#1E293B', stroke: 'transparent', strokeWidth: 0, cornerRadius: 0 } },
+          { id: 'el-2', type: 'text', x: 30, y: 50, width: 220, height: 40, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 1, name: 'Name',
+            data: { type: 'text', content: 'Sarah Mitchell', fontFamily: 'Montserrat', fontSize: 26, fontWeight: 700, fontStyle: 'normal', textDecoration: 'none', textAlign: 'left', color: '#FFFFFF', lineHeight: 1.2, letterSpacing: 0, textTransform: 'none' } },
+          { id: 'el-3', type: 'text', x: 30, y: 90, width: 220, height: 24, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 2, name: 'Title',
+            data: { type: 'text', content: 'UX/UI Designer', fontFamily: 'Montserrat', fontSize: 13, fontWeight: 400, fontStyle: 'normal', textDecoration: 'none', textAlign: 'left', color: '#94A3B8', lineHeight: 1.4, letterSpacing: 0, textTransform: 'none' } },
+          { id: 'el-4', type: 'shape', x: 30, y: 125, width: 40, height: 3, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 3, name: 'Accent',
+            data: { type: 'shape', shapeType: 'rectangle', fill: '#38BDF8', stroke: 'transparent', strokeWidth: 0, cornerRadius: 0 } },
+          { id: 'el-5', type: 'text', x: 30, y: 165, width: 220, height: 20, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 4, name: 'Contact Header',
+            data: { type: 'text', content: 'CONTACT', fontFamily: 'Montserrat', fontSize: 11, fontWeight: 700, fontStyle: 'normal', textDecoration: 'none', textAlign: 'left', color: '#38BDF8', lineHeight: 1.4, letterSpacing: 2, textTransform: 'uppercase' } },
+          { id: 'el-6', type: 'text', x: 30, y: 190, width: 220, height: 70, rotation: 0, opacity: 0.85, visible: true, locked: false, zIndex: 5, name: 'Contact Body',
+            data: { type: 'text', content: 'sarah.mitchell@email.com\n+1 (555) 123-4567\nSan Francisco, CA', fontFamily: 'Inter', fontSize: 12, fontWeight: 400, fontStyle: 'normal', textDecoration: 'none', textAlign: 'left', color: '#FFFFFF', lineHeight: 1.7, letterSpacing: 0, textTransform: 'none' } },
+          { id: 'el-7', type: 'text', x: 30, y: 285, width: 220, height: 20, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 6, name: 'Skills Header',
+            data: { type: 'text', content: 'SKILLS', fontFamily: 'Montserrat', fontSize: 11, fontWeight: 700, fontStyle: 'normal', textDecoration: 'none', textAlign: 'left', color: '#38BDF8', lineHeight: 1.4, letterSpacing: 2, textTransform: 'uppercase' } },
+          { id: 'el-8', type: 'text', x: 30, y: 310, width: 220, height: 130, rotation: 0, opacity: 0.85, visible: true, locked: false, zIndex: 7, name: 'Skills Body',
+            data: { type: 'text', content: 'Figma & Sketch\nUser Research\nPrototyping\nDesign Systems\nHTML / CSS', fontFamily: 'Inter', fontSize: 12, fontWeight: 400, fontStyle: 'normal', textDecoration: 'none', textAlign: 'left', color: '#FFFFFF', lineHeight: 1.9, letterSpacing: 0, textTransform: 'none' } },
+          { id: 'el-9', type: 'text', x: 320, y: 50, width: 460, height: 24, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 8, name: 'Experience Header',
+            data: { type: 'text', content: 'EXPERIENCE', fontFamily: 'Montserrat', fontSize: 14, fontWeight: 700, fontStyle: 'normal', textDecoration: 'none', textAlign: 'left', color: '#1E293B', lineHeight: 1.4, letterSpacing: 2, textTransform: 'uppercase' } },
+          { id: 'el-10', type: 'shape', x: 320, y: 82, width: 460, height: 2, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 9, name: 'Divider',
+            data: { type: 'shape', shapeType: 'rectangle', fill: '#E2E8F0', stroke: 'transparent', strokeWidth: 0, cornerRadius: 0 } },
+          { id: 'el-11', type: 'text', x: 320, y: 100, width: 460, height: 160, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 10, name: 'Experience Body',
+            data: { type: 'text', content: 'Senior UX Designer — Acme Inc. (2021–Present)\nLed end-to-end design for the flagship mobile app, increasing engagement by 40%.\n\nUX Designer — StartupCo (2018–2021)\nDesigned and shipped 20+ features across web and mobile platforms.', fontFamily: 'Inter', fontSize: 13, fontWeight: 400, fontStyle: 'normal', textDecoration: 'none', textAlign: 'left', color: '#334155', lineHeight: 1.6, letterSpacing: 0, textTransform: 'none' } },
+          { id: 'el-12', type: 'text', x: 320, y: 300, width: 460, height: 24, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 11, name: 'Education Header',
+            data: { type: 'text', content: 'EDUCATION', fontFamily: 'Montserrat', fontSize: 14, fontWeight: 700, fontStyle: 'normal', textDecoration: 'none', textAlign: 'left', color: '#1E293B', lineHeight: 1.4, letterSpacing: 2, textTransform: 'uppercase' } },
+          { id: 'el-13', type: 'shape', x: 320, y: 332, width: 460, height: 2, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 12, name: 'Divider 2',
+            data: { type: 'shape', shapeType: 'rectangle', fill: '#E2E8F0', stroke: 'transparent', strokeWidth: 0, cornerRadius: 0 } },
+          { id: 'el-14', type: 'text', x: 320, y: 350, width: 460, height: 60, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 13, name: 'Education Body',
+            data: { type: 'text', content: 'B.A. in Graphic Design\nRhode Island School of Design, 2018', fontFamily: 'Inter', fontSize: 13, fontWeight: 400, fontStyle: 'normal', textDecoration: 'none', textAlign: 'left', color: '#334155', lineHeight: 1.6, letterSpacing: 0, textTransform: 'none' } },
+        ],
+      }],
+    },
+    tags: ['resume', 'modern', 'sidebar', 'professional'],
+    isPremium: false,
+  },
+  {
+    name: 'Resume - Creative',
+    category: 'Resume',
+    thumbnail: '',
+    data: {
+      pages: [{
+        id: 'tpl-14', name: 'Page 1',
+        backgroundColor: '#FFFFFF',
+        width: 816, height: 1056,
+        elements: [
+          { id: 'el-1', type: 'shape', x: 0, y: 0, width: 816, height: 220, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 0, name: 'Header',
+            data: { type: 'shape', shapeType: 'rectangle', fill: '#7C3AED', stroke: 'transparent', strokeWidth: 0, cornerRadius: 0 } },
+          { id: 'el-2', type: 'shape', x: 550, y: -100, width: 320, height: 320, rotation: 0, opacity: 0.2, visible: true, locked: false, zIndex: 1, name: 'Decorative Circle',
+            data: { type: 'shape', shapeType: 'circle', fill: '#EC4899', stroke: 'transparent', strokeWidth: 0, cornerRadius: 0 } },
+          { id: 'el-3', type: 'shape', x: 640, y: 55, width: 110, height: 110, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 2, name: 'Avatar',
+            data: { type: 'shape', shapeType: 'circle', fill: '#FFFFFF', stroke: 'transparent', strokeWidth: 0, cornerRadius: 0 } },
+          { id: 'el-4', type: 'text', x: 640, y: 92, width: 110, height: 40, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 3, name: 'Avatar Initials',
+            data: { type: 'text', content: 'SM', fontFamily: 'Poppins', fontSize: 32, fontWeight: 700, fontStyle: 'normal', textDecoration: 'none', textAlign: 'center', color: '#7C3AED', lineHeight: 1.2, letterSpacing: 0, textTransform: 'none' } },
+          { id: 'el-5', type: 'text', x: 50, y: 75, width: 500, height: 50, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 4, name: 'Name',
+            data: { type: 'text', content: 'Sarah Mitchell', fontFamily: 'Poppins', fontSize: 34, fontWeight: 700, fontStyle: 'normal', textDecoration: 'none', textAlign: 'left', color: '#FFFFFF', lineHeight: 1.2, letterSpacing: 0, textTransform: 'none' } },
+          { id: 'el-6', type: 'text', x: 50, y: 130, width: 500, height: 30, rotation: 0, opacity: 0.9, visible: true, locked: false, zIndex: 5, name: 'Title',
+            data: { type: 'text', content: 'Creative Director', fontFamily: 'Poppins', fontSize: 17, fontWeight: 400, fontStyle: 'normal', textDecoration: 'none', textAlign: 'left', color: '#FFFFFF', lineHeight: 1.4, letterSpacing: 0, textTransform: 'none' } },
+          { id: 'el-7', type: 'text', x: 50, y: 260, width: 700, height: 20, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 6, name: 'About Header',
+            data: { type: 'text', content: 'ABOUT ME', fontFamily: 'Poppins', fontSize: 13, fontWeight: 700, fontStyle: 'normal', textDecoration: 'none', textAlign: 'left', color: '#7C3AED', lineHeight: 1.4, letterSpacing: 2, textTransform: 'uppercase' } },
+          { id: 'el-8', type: 'text', x: 50, y: 285, width: 700, height: 60, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 7, name: 'About Body',
+            data: { type: 'text', content: 'Award-winning creative director with 10+ years crafting brand identities and campaigns for global clients.', fontFamily: 'Inter', fontSize: 13, fontWeight: 400, fontStyle: 'normal', textDecoration: 'none', textAlign: 'left', color: '#4B5563', lineHeight: 1.6, letterSpacing: 0, textTransform: 'none' } },
+          { id: 'el-9', type: 'text', x: 50, y: 380, width: 380, height: 20, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 8, name: 'Experience Header',
+            data: { type: 'text', content: 'EXPERIENCE', fontFamily: 'Poppins', fontSize: 13, fontWeight: 700, fontStyle: 'normal', textDecoration: 'none', textAlign: 'left', color: '#7C3AED', lineHeight: 1.4, letterSpacing: 2, textTransform: 'uppercase' } },
+          { id: 'el-10', type: 'text', x: 50, y: 405, width: 380, height: 220, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 9, name: 'Experience Body',
+            data: { type: 'text', content: 'Creative Director\nPixel Studio (2019–Present)\n\nArt Director\nBrandWorks Agency (2015–2019)\n\nGraphic Designer\nFreelance (2012–2015)', fontFamily: 'Inter', fontSize: 13, fontWeight: 400, fontStyle: 'normal', textDecoration: 'none', textAlign: 'left', color: '#4B5563', lineHeight: 1.6, letterSpacing: 0, textTransform: 'none' } },
+          { id: 'el-11', type: 'text', x: 460, y: 380, width: 300, height: 20, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 10, name: 'Skills Header',
+            data: { type: 'text', content: 'SKILLS', fontFamily: 'Poppins', fontSize: 13, fontWeight: 700, fontStyle: 'normal', textDecoration: 'none', textAlign: 'left', color: '#7C3AED', lineHeight: 1.4, letterSpacing: 2, textTransform: 'uppercase' } },
+          { id: 'el-12', type: 'text', x: 460, y: 405, width: 300, height: 180, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 11, name: 'Skills Body',
+            data: { type: 'text', content: 'Brand Strategy\nAdobe Creative Suite\nArt Direction\nTeam Leadership\nCampaign Design', fontFamily: 'Inter', fontSize: 13, fontWeight: 400, fontStyle: 'normal', textDecoration: 'none', textAlign: 'left', color: '#4B5563', lineHeight: 1.9, letterSpacing: 0, textTransform: 'none' } },
+        ],
+      }],
+    },
+    tags: ['resume', 'creative', 'colorful', 'design'],
+    isPremium: false,
+  },
+  {
+    name: 'Resume - Executive',
+    category: 'Resume',
+    thumbnail: '',
+    data: {
+      pages: [{
+        id: 'tpl-15', name: 'Page 1',
+        backgroundColor: '#0F172A',
+        width: 816, height: 1056,
+        elements: [
+          { id: 'el-1', type: 'text', x: 60, y: 60, width: 696, height: 50, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 0, name: 'Name',
+            data: { type: 'text', content: 'Sarah Mitchell', fontFamily: 'Playfair Display', fontSize: 40, fontWeight: 700, fontStyle: 'normal', textDecoration: 'none', textAlign: 'left', color: '#F1F5F9', lineHeight: 1.2, letterSpacing: 0, textTransform: 'none' } },
+          { id: 'el-2', type: 'text', x: 60, y: 118, width: 696, height: 30, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 1, name: 'Title',
+            data: { type: 'text', content: 'Chief Operating Officer', fontFamily: 'Playfair Display', fontSize: 18, fontWeight: 400, fontStyle: 'italic', textDecoration: 'none', textAlign: 'left', color: '#D4AF37', lineHeight: 1.4, letterSpacing: 0, textTransform: 'none' } },
+          { id: 'el-3', type: 'shape', x: 60, y: 165, width: 200, height: 2, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 2, name: 'Gold Divider',
+            data: { type: 'shape', shapeType: 'rectangle', fill: '#D4AF37', stroke: 'transparent', strokeWidth: 0, cornerRadius: 0 } },
+          { id: 'el-4', type: 'text', x: 60, y: 210, width: 696, height: 20, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 3, name: 'Experience Header',
+            data: { type: 'text', content: 'EXPERIENCE', fontFamily: 'Playfair Display', fontSize: 14, fontWeight: 700, fontStyle: 'normal', textDecoration: 'none', textAlign: 'left', color: '#D4AF37', lineHeight: 1.4, letterSpacing: 3, textTransform: 'uppercase' } },
+          { id: 'el-5', type: 'text', x: 60, y: 240, width: 696, height: 150, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 4, name: 'Experience Body',
+            data: { type: 'text', content: 'Chief Operating Officer — Meridian Group (2020–Present)\nOversee operations across 12 offices and 400+ employees, driving 25% YoY growth.\n\nVP of Operations — Horizon Partners (2014–2020)\nScaled operational infrastructure through a period of rapid company growth.', fontFamily: 'Inter', fontSize: 13, fontWeight: 400, fontStyle: 'normal', textDecoration: 'none', textAlign: 'left', color: '#CBD5E1', lineHeight: 1.7, letterSpacing: 0, textTransform: 'none' } },
+          { id: 'el-6', type: 'text', x: 60, y: 420, width: 696, height: 20, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 5, name: 'Education Header',
+            data: { type: 'text', content: 'EDUCATION', fontFamily: 'Playfair Display', fontSize: 14, fontWeight: 700, fontStyle: 'normal', textDecoration: 'none', textAlign: 'left', color: '#D4AF37', lineHeight: 1.4, letterSpacing: 3, textTransform: 'uppercase' } },
+          { id: 'el-7', type: 'text', x: 60, y: 450, width: 696, height: 50, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 6, name: 'Education Body',
+            data: { type: 'text', content: 'MBA, Finance — Wharton School, 2014\nB.S. Business Administration — UC Berkeley, 2010', fontFamily: 'Inter', fontSize: 13, fontWeight: 400, fontStyle: 'normal', textDecoration: 'none', textAlign: 'left', color: '#CBD5E1', lineHeight: 1.7, letterSpacing: 0, textTransform: 'none' } },
+        ],
+      }],
+    },
+    tags: ['resume', 'executive', 'elegant', 'dark'],
+    isPremium: false,
+  },
+  {
+    name: 'Resume - Classic ATS',
+    category: 'Resume',
+    thumbnail: '',
+    data: {
+      pages: [{
+        id: 'tpl-16', name: 'Page 1',
+        backgroundColor: '#FFFFFF',
+        width: 816, height: 1056,
+        elements: [
+          { id: 'el-1', type: 'text', x: 60, y: 50, width: 696, height: 40, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 0, name: 'Name',
+            data: { type: 'text', content: 'Sarah Mitchell', fontFamily: 'Georgia', fontSize: 28, fontWeight: 700, fontStyle: 'normal', textDecoration: 'none', textAlign: 'left', color: '#111827', lineHeight: 1.2, letterSpacing: 0, textTransform: 'none' } },
+          { id: 'el-2', type: 'text', x: 60, y: 92, width: 696, height: 26, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 1, name: 'Contact Line',
+            data: { type: 'text', content: 'sarah.mitchell@email.com  |  +1 (555) 123-4567  |  San Francisco, CA', fontFamily: 'Georgia', fontSize: 13, fontWeight: 400, fontStyle: 'italic', textDecoration: 'none', textAlign: 'left', color: '#4B5563', lineHeight: 1.4, letterSpacing: 0, textTransform: 'none' } },
+          { id: 'el-3', type: 'shape', x: 60, y: 130, width: 696, height: 1, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 2, name: 'Rule',
+            data: { type: 'shape', shapeType: 'rectangle', fill: '#111827', stroke: 'transparent', strokeWidth: 0, cornerRadius: 0 } },
+          { id: 'el-4', type: 'text', x: 60, y: 160, width: 696, height: 20, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 3, name: 'Experience Header',
+            data: { type: 'text', content: 'EXPERIENCE', fontFamily: 'Georgia', fontSize: 14, fontWeight: 700, fontStyle: 'normal', textDecoration: 'none', textAlign: 'left', color: '#111827', lineHeight: 1.4, letterSpacing: 1, textTransform: 'uppercase' } },
+          { id: 'el-5', type: 'text', x: 60, y: 190, width: 696, height: 140, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 4, name: 'Experience Body',
+            data: { type: 'text', content: 'Operations Manager — Acme Corp (2020–Present)\nManage daily operations for a team of 30, reduced costs by 18% through process improvements.\n\nOperations Coordinator — Beta Inc (2017–2020)\nCoordinated logistics and vendor relationships across three regional offices.', fontFamily: 'Georgia', fontSize: 12, fontWeight: 400, fontStyle: 'normal', textDecoration: 'none', textAlign: 'left', color: '#1F2937', lineHeight: 1.6, letterSpacing: 0, textTransform: 'none' } },
+          { id: 'el-6', type: 'text', x: 60, y: 360, width: 696, height: 20, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 5, name: 'Education Header',
+            data: { type: 'text', content: 'EDUCATION', fontFamily: 'Georgia', fontSize: 14, fontWeight: 700, fontStyle: 'normal', textDecoration: 'none', textAlign: 'left', color: '#111827', lineHeight: 1.4, letterSpacing: 1, textTransform: 'uppercase' } },
+          { id: 'el-7', type: 'text', x: 60, y: 390, width: 696, height: 40, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 6, name: 'Education Body',
+            data: { type: 'text', content: 'B.S. in Business Administration — San Francisco State University, 2017', fontFamily: 'Georgia', fontSize: 12, fontWeight: 400, fontStyle: 'normal', textDecoration: 'none', textAlign: 'left', color: '#1F2937', lineHeight: 1.6, letterSpacing: 0, textTransform: 'none' } },
+          { id: 'el-8', type: 'text', x: 60, y: 450, width: 696, height: 20, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 7, name: 'Skills Header',
+            data: { type: 'text', content: 'SKILLS', fontFamily: 'Georgia', fontSize: 14, fontWeight: 700, fontStyle: 'normal', textDecoration: 'none', textAlign: 'left', color: '#111827', lineHeight: 1.4, letterSpacing: 1, textTransform: 'uppercase' } },
+          { id: 'el-9', type: 'text', x: 60, y: 480, width: 696, height: 30, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 8, name: 'Skills Body',
+            data: { type: 'text', content: 'Project Management, Budgeting, Vendor Relations, Process Improvement, MS Excel', fontFamily: 'Georgia', fontSize: 12, fontWeight: 400, fontStyle: 'normal', textDecoration: 'none', textAlign: 'left', color: '#1F2937', lineHeight: 1.6, letterSpacing: 0, textTransform: 'none' } },
+        ],
+      }],
+    },
+    tags: ['resume', 'classic', 'ats-friendly', 'simple'],
+    isPremium: false,
+  },
+  {
+    name: 'Certificate - Modern Blue',
+    category: 'Certificates',
+    thumbnail: '',
+    data: {
+      pages: [{
+        id: 'tpl-17', name: 'Page 1',
+        backgroundColor: '#FFFFFF',
+        width: 1200, height: 850,
+        elements: [
+          { id: 'el-1', type: 'shape', x: 0, y: 0, width: 1200, height: 14, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 0, name: 'Top Bar',
+            data: { type: 'shape', shapeType: 'rectangle', fill: '#1E3A8A', stroke: 'transparent', strokeWidth: 0, cornerRadius: 0 } },
+          { id: 'el-2', type: 'shape', x: 0, y: 836, width: 1200, height: 14, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 0, name: 'Bottom Bar',
+            data: { type: 'shape', shapeType: 'rectangle', fill: '#1E3A8A', stroke: 'transparent', strokeWidth: 0, cornerRadius: 0 } },
+          { id: 'el-3', type: 'shape', x: 980, y: -60, width: 220, height: 220, rotation: 45, opacity: 0.06, visible: true, locked: false, zIndex: 1, name: 'Corner Accent',
+            data: { type: 'shape', shapeType: 'rectangle', fill: '#1E3A8A', stroke: 'transparent', strokeWidth: 0, cornerRadius: 0 } },
+          { id: 'el-4', type: 'text', x: 150, y: 130, width: 900, height: 60, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 2, name: 'Title',
+            data: { type: 'text', content: 'CERTIFICATE OF ACHIEVEMENT', fontFamily: 'Montserrat', fontSize: 40, fontWeight: 700, fontStyle: 'normal', textDecoration: 'none', textAlign: 'center', color: '#1E3A8A', lineHeight: 1.2, letterSpacing: 2, textTransform: 'none' } },
+          { id: 'el-5', type: 'text', x: 150, y: 220, width: 900, height: 30, rotation: 0, opacity: 0.7, visible: true, locked: false, zIndex: 3, name: 'Presented To',
+            data: { type: 'text', content: 'This certificate is proudly presented to', fontFamily: 'Inter', fontSize: 15, fontWeight: 400, fontStyle: 'italic', textDecoration: 'none', textAlign: 'center', color: '#4B5563', lineHeight: 1.4, letterSpacing: 0, textTransform: 'none' } },
+          { id: 'el-6', type: 'text', x: 150, y: 270, width: 900, height: 60, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 4, name: 'Recipient',
+            data: { type: 'text', content: 'Jordan Lee', fontFamily: 'Playfair Display', fontSize: 46, fontWeight: 700, fontStyle: 'normal', textDecoration: 'none', textAlign: 'center', color: '#111827', lineHeight: 1.2, letterSpacing: 0, textTransform: 'none' } },
+          { id: 'el-7', type: 'shape', x: 450, y: 352, width: 300, height: 2, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 5, name: 'Divider',
+            data: { type: 'shape', shapeType: 'rectangle', fill: '#1E3A8A', stroke: 'transparent', strokeWidth: 0, cornerRadius: 0 } },
+          { id: 'el-8', type: 'text', x: 250, y: 385, width: 700, height: 60, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 6, name: 'Description',
+            data: { type: 'text', content: 'For outstanding performance and dedication in completing the Advanced Data Analytics Program', fontFamily: 'Inter', fontSize: 15, fontWeight: 400, fontStyle: 'normal', textDecoration: 'none', textAlign: 'center', color: '#4B5563', lineHeight: 1.6, letterSpacing: 0, textTransform: 'none' } },
+          { id: 'el-9', type: 'shape', x: 560, y: 590, width: 80, height: 80, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 7, name: 'Seal',
+            data: { type: 'shape', shapeType: 'circle', fill: '#1E3A8A', stroke: 'transparent', strokeWidth: 0, cornerRadius: 0 } },
+          { id: 'el-10', type: 'text', x: 560, y: 620, width: 80, height: 24, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 8, name: 'Seal Year',
+            data: { type: 'text', content: '2026', fontFamily: 'Montserrat', fontSize: 14, fontWeight: 700, fontStyle: 'normal', textDecoration: 'none', textAlign: 'center', color: '#FFFFFF', lineHeight: 1.2, letterSpacing: 0, textTransform: 'none' } },
+          { id: 'el-11', type: 'shape', x: 200, y: 660, width: 220, height: 1, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 9, name: 'Signature Line',
+            data: { type: 'shape', shapeType: 'rectangle', fill: '#9CA3AF', stroke: 'transparent', strokeWidth: 0, cornerRadius: 0 } },
+          { id: 'el-12', type: 'text', x: 200, y: 670, width: 220, height: 24, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 10, name: 'Signature Label',
+            data: { type: 'text', content: 'Signature', fontFamily: 'Inter', fontSize: 12, fontWeight: 400, fontStyle: 'normal', textDecoration: 'none', textAlign: 'center', color: '#6B7280', lineHeight: 1.4, letterSpacing: 1, textTransform: 'uppercase' } },
+          { id: 'el-13', type: 'shape', x: 780, y: 660, width: 220, height: 1, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 11, name: 'Date Line',
+            data: { type: 'shape', shapeType: 'rectangle', fill: '#9CA3AF', stroke: 'transparent', strokeWidth: 0, cornerRadius: 0 } },
+          { id: 'el-14', type: 'text', x: 780, y: 670, width: 220, height: 24, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 12, name: 'Date Label',
+            data: { type: 'text', content: 'Date', fontFamily: 'Inter', fontSize: 12, fontWeight: 400, fontStyle: 'normal', textDecoration: 'none', textAlign: 'center', color: '#6B7280', lineHeight: 1.4, letterSpacing: 1, textTransform: 'uppercase' } },
+        ],
+      }],
+    },
+    tags: ['certificate', 'modern', 'blue', 'formal'],
+    isPremium: false,
+  },
+  {
+    name: 'Certificate - Elegant Navy',
+    category: 'Certificates',
+    thumbnail: '',
+    data: {
+      pages: [{
+        id: 'tpl-18', name: 'Page 1',
+        backgroundColor: '#0F172A',
+        width: 1200, height: 850,
+        elements: [
+          { id: 'el-1', type: 'shape', x: 40, y: 40, width: 1120, height: 770, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 0, name: 'Outer Border',
+            data: { type: 'shape', shapeType: 'rectangle', fill: 'transparent', stroke: '#D4AF37', strokeWidth: 3, cornerRadius: 0 } },
+          { id: 'el-2', type: 'shape', x: 56, y: 56, width: 1088, height: 738, rotation: 0, opacity: 0.5, visible: true, locked: false, zIndex: 1, name: 'Inner Border',
+            data: { type: 'shape', shapeType: 'rectangle', fill: 'transparent', stroke: '#D4AF37', strokeWidth: 1, cornerRadius: 0 } },
+          { id: 'el-3', type: 'text', x: 150, y: 140, width: 900, height: 60, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 2, name: 'Title',
+            data: { type: 'text', content: 'CERTIFICATE OF EXCELLENCE', fontFamily: 'Playfair Display', fontSize: 42, fontWeight: 700, fontStyle: 'normal', textDecoration: 'none', textAlign: 'center', color: '#D4AF37', lineHeight: 1.2, letterSpacing: 2, textTransform: 'none' } },
+          { id: 'el-4', type: 'shape', x: 500, y: 215, width: 200, height: 1, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 3, name: 'Divider',
+            data: { type: 'shape', shapeType: 'rectangle', fill: '#D4AF37', stroke: 'transparent', strokeWidth: 0, cornerRadius: 0 } },
+          { id: 'el-5', type: 'text', x: 150, y: 250, width: 900, height: 30, rotation: 0, opacity: 0.8, visible: true, locked: false, zIndex: 4, name: 'Certify',
+            data: { type: 'text', content: 'This is to certify that', fontFamily: 'Inter', fontSize: 15, fontWeight: 400, fontStyle: 'italic', textDecoration: 'none', textAlign: 'center', color: '#CBD5E1', lineHeight: 1.4, letterSpacing: 0, textTransform: 'none' } },
+          { id: 'el-6', type: 'text', x: 150, y: 295, width: 900, height: 60, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 5, name: 'Recipient',
+            data: { type: 'text', content: 'Alex Morgan', fontFamily: 'Playfair Display', fontSize: 44, fontWeight: 700, fontStyle: 'normal', textDecoration: 'none', textAlign: 'center', color: '#F1F5F9', lineHeight: 1.2, letterSpacing: 0, textTransform: 'none' } },
+          { id: 'el-7', type: 'text', x: 250, y: 390, width: 700, height: 60, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 6, name: 'Description',
+            data: { type: 'text', content: 'has successfully completed the requirements of the Leadership Excellence Program with distinction', fontFamily: 'Inter', fontSize: 14, fontWeight: 400, fontStyle: 'normal', textDecoration: 'none', textAlign: 'center', color: '#94A3B8', lineHeight: 1.6, letterSpacing: 0, textTransform: 'none' } },
+          { id: 'el-8', type: 'shape', x: 200, y: 660, width: 220, height: 1, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 7, name: 'Signature Line',
+            data: { type: 'shape', shapeType: 'rectangle', fill: '#D4AF37', stroke: 'transparent', strokeWidth: 0, cornerRadius: 0 } },
+          { id: 'el-9', type: 'text', x: 200, y: 670, width: 220, height: 24, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 8, name: 'Signature Label',
+            data: { type: 'text', content: 'Signature', fontFamily: 'Inter', fontSize: 12, fontWeight: 400, fontStyle: 'normal', textDecoration: 'none', textAlign: 'center', color: '#D4AF37', lineHeight: 1.4, letterSpacing: 1, textTransform: 'uppercase' } },
+          { id: 'el-10', type: 'shape', x: 780, y: 660, width: 220, height: 1, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 9, name: 'Date Line',
+            data: { type: 'shape', shapeType: 'rectangle', fill: '#D4AF37', stroke: 'transparent', strokeWidth: 0, cornerRadius: 0 } },
+          { id: 'el-11', type: 'text', x: 780, y: 670, width: 220, height: 24, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 10, name: 'Date Label',
+            data: { type: 'text', content: 'Date', fontFamily: 'Inter', fontSize: 12, fontWeight: 400, fontStyle: 'normal', textDecoration: 'none', textAlign: 'center', color: '#D4AF37', lineHeight: 1.4, letterSpacing: 1, textTransform: 'uppercase' } },
+        ],
+      }],
+    },
+    tags: ['certificate', 'elegant', 'navy', 'gold', 'formal'],
+    isPremium: false,
+  },
+  {
+    name: 'Certificate - Completion Green',
+    category: 'Certificates',
+    thumbnail: '',
+    data: {
+      pages: [{
+        id: 'tpl-19', name: 'Page 1',
+        backgroundColor: '#FFFFFF',
+        width: 1200, height: 850,
+        elements: [
+          { id: 'el-1', type: 'shape', x: 0, y: 0, width: 1200, height: 110, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 0, name: 'Ribbon',
+            data: { type: 'shape', shapeType: 'rectangle', fill: '#0D9488', stroke: 'transparent', strokeWidth: 0, cornerRadius: 0 } },
+          { id: 'el-2', type: 'text', x: 150, y: 40, width: 900, height: 50, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 1, name: 'Title',
+            data: { type: 'text', content: 'CERTIFICATE OF COMPLETION', fontFamily: 'Montserrat', fontSize: 34, fontWeight: 700, fontStyle: 'normal', textDecoration: 'none', textAlign: 'center', color: '#FFFFFF', lineHeight: 1.2, letterSpacing: 3, textTransform: 'none' } },
+          { id: 'el-3', type: 'text', x: 150, y: 175, width: 900, height: 30, rotation: 0, opacity: 0.7, visible: true, locked: false, zIndex: 2, name: 'Presented To',
+            data: { type: 'text', content: 'This certificate is awarded to', fontFamily: 'Inter', fontSize: 15, fontWeight: 400, fontStyle: 'italic', textDecoration: 'none', textAlign: 'center', color: '#4B5563', lineHeight: 1.4, letterSpacing: 0, textTransform: 'none' } },
+          { id: 'el-4', type: 'text', x: 150, y: 220, width: 900, height: 60, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 3, name: 'Recipient',
+            data: { type: 'text', content: 'Taylor Brooks', fontFamily: 'Playfair Display', fontSize: 46, fontWeight: 700, fontStyle: 'normal', textDecoration: 'none', textAlign: 'center', color: '#111827', lineHeight: 1.2, letterSpacing: 0, textTransform: 'none' } },
+          { id: 'el-5', type: 'shape', x: 450, y: 300, width: 300, height: 2, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 4, name: 'Divider',
+            data: { type: 'shape', shapeType: 'rectangle', fill: '#0D9488', stroke: 'transparent', strokeWidth: 0, cornerRadius: 0 } },
+          { id: 'el-6', type: 'text', x: 250, y: 335, width: 700, height: 60, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 5, name: 'Description',
+            data: { type: 'text', content: 'For successfully completing the 40-hour Web Development Bootcamp with a final score of 95%', fontFamily: 'Inter', fontSize: 15, fontWeight: 400, fontStyle: 'normal', textDecoration: 'none', textAlign: 'center', color: '#4B5563', lineHeight: 1.6, letterSpacing: 0, textTransform: 'none' } },
+          { id: 'el-7', type: 'shape', x: 560, y: 470, width: 80, height: 80, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 6, name: 'Badge',
+            data: { type: 'shape', shapeType: 'star', fill: '#0D9488', stroke: 'transparent', strokeWidth: 0, cornerRadius: 0 } },
+          { id: 'el-8', type: 'shape', x: 200, y: 660, width: 220, height: 1, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 7, name: 'Signature Line',
+            data: { type: 'shape', shapeType: 'rectangle', fill: '#9CA3AF', stroke: 'transparent', strokeWidth: 0, cornerRadius: 0 } },
+          { id: 'el-9', type: 'text', x: 200, y: 670, width: 220, height: 24, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 8, name: 'Signature Label',
+            data: { type: 'text', content: 'Instructor', fontFamily: 'Inter', fontSize: 12, fontWeight: 400, fontStyle: 'normal', textDecoration: 'none', textAlign: 'center', color: '#6B7280', lineHeight: 1.4, letterSpacing: 1, textTransform: 'uppercase' } },
+          { id: 'el-10', type: 'shape', x: 780, y: 660, width: 220, height: 1, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 9, name: 'Date Line',
+            data: { type: 'shape', shapeType: 'rectangle', fill: '#9CA3AF', stroke: 'transparent', strokeWidth: 0, cornerRadius: 0 } },
+          { id: 'el-11', type: 'text', x: 780, y: 670, width: 220, height: 24, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 10, name: 'Date Label',
+            data: { type: 'text', content: 'Date', fontFamily: 'Inter', fontSize: 12, fontWeight: 400, fontStyle: 'normal', textDecoration: 'none', textAlign: 'center', color: '#6B7280', lineHeight: 1.4, letterSpacing: 1, textTransform: 'uppercase' } },
+        ],
+      }],
+    },
+    tags: ['certificate', 'completion', 'green', 'course'],
+    isPremium: false,
+  },
 ];
 
 async function main() {
   console.log('Seeding templates...');
 
-  // Check if templates already exist
-  const count = await prisma.template.count();
-  if (count > 0) {
-    console.log(`${count} templates already exist. Skipping seed.`);
-    return;
-  }
-
+  // Per-template existence check (by name) instead of bailing out entirely when
+  // any template exists — that all-or-nothing guard meant this script could
+  // only ever run once, with no way to add new seed templates to an existing DB.
+  let created = 0;
   for (const template of SAMPLE_TEMPLATES) {
+    const existing = await prisma.template.findFirst({ where: { name: template.name } });
+    if (existing) continue;
     await prisma.template.create({
       data: {
         name: template.name,
@@ -319,9 +586,10 @@ async function main() {
       },
     });
     console.log(`  Created template: ${template.name}`);
+    created++;
   }
 
-  console.log(`Seeded ${SAMPLE_TEMPLATES.length} templates.`);
+  console.log(created > 0 ? `Seeded ${created} new template(s).` : 'No new templates to seed — all already exist.');
 }
 
 main()

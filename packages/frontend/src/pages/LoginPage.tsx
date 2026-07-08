@@ -22,8 +22,8 @@ export default function LoginPage() {
       await login(email, password);
       toast.success('Welcome back!');
       navigate('/');
-    } catch {
-      toast.error('Invalid credentials');
+    } catch (error: any) {
+      toast.error(error.message || 'Invalid credentials');
     }
   };
 
