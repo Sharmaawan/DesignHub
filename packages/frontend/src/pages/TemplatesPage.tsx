@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useProjectStore } from '../stores/projectStore';
 import { useAuthStore } from '../stores/authStore';
 import DashboardSidebar from '../components/dashboard/DashboardSidebar';
@@ -29,8 +29,19 @@ export default function TemplatesPage() {
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [showUploadModal, setShowUploadModal] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   useEffect(() => { loadTemplates(); loadNotifications(); }, []);
+
+  // Landed here from HeroSearch's "Enter" on the dashboard (?search=...) — one-shot
+  // signal read once then cleared, same pattern used for the editor's ?ai= deep link.
+  useEffect(() => {
+    const q = searchParams.get('search');
+    if (q) {
+      setSearchQuery(q);
+      setSearchParams({}, { replace: true });
+    }
+  }, [searchParams]);
 
   const handleDeleteTemplate = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();

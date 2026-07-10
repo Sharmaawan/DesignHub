@@ -93,6 +93,11 @@ export interface ImageData {
   cropY: number;
   cropWidth: number;
   cropHeight: number;
+  // Animated stickers/GIFs — rendered via a live looping <img> sampled every
+  // animation frame instead of the static cached bitmap used for photos, since
+  // Konva's image cache() (needed for the brightness/contrast/etc. filters above)
+  // bakes in a single frame and would otherwise freeze the animation.
+  animated?: boolean;
 }
 
 export interface ShapeData {

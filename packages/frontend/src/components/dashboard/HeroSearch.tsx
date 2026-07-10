@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { HiOutlineSearch, HiOutlineClock, HiOutlineTrendingUp, HiOutlineTemplate, HiOutlineX } from 'react-icons/hi';
 import { SearchSuggestion } from '../../types';
 import { useProjectStore } from '../../stores/projectStore';
+import { projectAPI } from '../../utils/api';
+import toast from 'react-hot-toast';
 
 const POPULAR_SEARCHES = [
   'Instagram story', 'Business presentation', 'Resume template', 'YouTube thumbnail',
@@ -46,17 +48,18 @@ export default function HeroSearch() {
     const q = query.toLowerCase();
     const results: SearchSuggestion[] = [];
 
-    projects.slice(0, 3).forEach((p) => {
-      if (p.name.toLowerCase().includes(q)) {
-        results.push({ id: p.id, text: p.name, type: 'project', thumbnail: p.thumbnail });
-      }
-    });
+    // Filter first, *then* take the first 3 matches — slicing before filtering
+    // (the previous order) only ever checked the first 3 items in the whole
+    // list, so anything past that could never match no matter what you typed.
+    projects
+      .filter((p) => p.name.toLowerCase().includes(q))
+      .slice(0, 3)
+      .forEach((p) => results.push({ id: p.id, text: p.name, type: 'project', thumbnail: p.thumbnail }));
 
-    templates.slice(0, 3).forEach((t) => {
-      if (t.name.toLowerCase().includes(q) || t.category.toLowerCase().includes(q)) {
-        results.push({ id: t.id, text: t.name, type: 'template', thumbnail: t.thumbnail });
-      }
-    });
+    templates
+      .filter((t) => t.name.toLowerCase().includes(q) || t.category.toLowerCase().includes(q))
+      .slice(0, 3)
+      .forEach((t) => results.push({ id: t.id, text: t.name, type: 'template', thumbnail: t.thumbnail }));
 
     return results;
   };
@@ -67,6 +70,33 @@ export default function HeroSearch() {
     setRecentSearches(updated);
     localStorage.setItem('designhub-recent-searches', JSON.stringify(updated));
     setIsFocused(false);
+  };
+
+  // Clicking a result previously only saved it to "recent searches" and closed
+  // the dropdown — it never actually opened the project or template, so a
+  // search that *did* find something still looked like nothing happened.
+  const handleSuggestionClick = async (s: SearchSuggestion) => {
+    handleSearch(s.text);
+    if (s.type === 'project') {
+      navigate(`/editor/${s.id}`);
+      return;
+    }
+    const template = templates.find((t) => t.id === s.id);
+    const page = (template as any)?.data?.pages?.[0];
+    if (!page) { toast.error('Failed to open template'); return; }
+    try {
+      const { data } = await projectAPI.create({
+        name: template!.name,
+        canvasData: [{
+          id: `page-${Date.now()}`, name: 'Page 1',
+          elements: page.elements || [], backgroundColor: page.backgroundColor || '#FFFFFF',
+          width: page.width || 1920, height: page.height || 1080,
+        }],
+      });
+      navigate(`/editor/${data.id}`);
+    } catch {
+      toast.error('Failed to create design');
+    }
   };
 
   const clearRecentSearches = () => {
@@ -88,7 +118,14 @@ export default function HeroSearch() {
           onChange={(e) => setQuery(e.target.value)}
           onFocus={() => setIsFocused(true)}
           onBlur={() => setTimeout(() => setIsFocused(false), 200)}
-          onKeyDown={(e) => { if (e.key === 'Enter') handleSearch(query); }}
+          onKeyDown={(e) => {
+            if (e.key !== 'Enter' || !query.trim()) return;
+            // The dropdown only ever shows the top 3 matches — Enter takes you to
+            // the full Templates page (with this search applied) to see everything,
+            // previously it just saved to "recent searches" and did nothing else.
+            handleSearch(query);
+            navigate(`/templates?search=${encodeURIComponent(query)}`);
+          }}
           placeholder="What will you design today?"
           className="w-full pl-14 pr-24 py-4.5 text-lg bg-white dark:bg-[#1e1e30] rounded-2xl border-2 border-gray-200 dark:border-gray-700 focus:outline-none focus:border-[#7B2FBE] focus:ring-4 focus:ring-[#7B2FBE]/10 text-gray-900 dark:text-white placeholder-gray-400 shadow-lg shadow-gray-200/50 dark:shadow-black/20 transition-all"
         />
@@ -114,7 +151,7 @@ export default function HeroSearch() {
               {suggestions.map((s) => (
                 <button
                   key={s.id}
-                  onClick={() => { handleSearch(s.text); setIsFocused(false); }}
+                  onClick={() => handleSuggestionClick(s)}
                   className="w-full flex items-center gap-3 p-2 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors text-left"
                 >
                   {s.type === 'project' ? (
@@ -126,6 +163,15 @@ export default function HeroSearch() {
                   <span className="text-[10px] text-gray-400 ml-auto capitalize">{s.type}</span>
                 </button>
               ))}
+            </div>
+          )}
+
+          {/* Previously silent when nothing matched — looked identical to the
+              search being broken, since nothing else in the dropdown said so. */}
+          {query.trim() && suggestions.length === 0 && (
+            <div className="p-4 text-center border-b border-gray-100 dark:border-gray-800">
+              <p className="text-sm text-gray-400">No matches for "{query}"</p>
+              <p className="text-[11px] text-gray-400 mt-0.5">Try a different word, or browse all templates</p>
             </div>
           )}
 

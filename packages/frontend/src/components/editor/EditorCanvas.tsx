@@ -18,6 +18,40 @@ interface EditorCanvasProps {
   onCursorMove?: (x: number, y: number) => void;
 }
 
+// Page backgrounds can be a plain color OR a CSS `linear-gradient(...)` string (set
+// by the Background panel's gradient swatches). Konva's `fill` prop is passed
+// straight to canvas fillStyle, which can't parse CSS gradient syntax and silently
+// falls back to black — so gradients need Konva's native fillLinearGradient* props
+// instead, computed from the parsed angle/stops.
+function parseLinearGradient(css: string): { angleDeg: number; stops: { offset: number; color: string }[] } | null {
+  const match = /^linear-gradient\(\s*([\d.]+)deg\s*,\s*(.+)\)$/i.exec(css.trim());
+  if (!match) return null;
+  const angleDeg = parseFloat(match[1]);
+  const parts = match[2].split(',').map((p) => p.trim());
+  const stops = parts.map((part, i) => {
+    const stopMatch = /^(.+?)\s+([\d.]+)%$/.exec(part);
+    if (stopMatch) {
+      return { offset: parseFloat(stopMatch[2]) / 100, color: stopMatch[1].trim() };
+    }
+    return { offset: parts.length > 1 ? i / (parts.length - 1) : 0, color: part };
+  });
+  return { angleDeg, stops };
+}
+
+function getGradientLine(angleDeg: number, width: number, height: number) {
+  const rad = (angleDeg * Math.PI) / 180;
+  const dx = Math.sin(rad);
+  const dy = -Math.cos(rad);
+  const length = Math.abs(width * dx) + Math.abs(height * dy);
+  const cx = width / 2;
+  const cy = height / 2;
+  const half = length / 2;
+  return {
+    start: { x: cx - dx * half, y: cy - dy * half },
+    end: { x: cx + dx * half, y: cy + dy * half },
+  };
+}
+
 // "Show rulers" toggle existed in the store and the Settings UI but nothing ever
 // rendered a ruler — this is that missing piece. Ticks are drawn in world (page)
 // coordinates transformed by the same zoom/pan the Stage itself uses, so they line
@@ -98,6 +132,17 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
   const showGuides = hideChrome ? false : storeShowGuides;
   const showRulers = hideChrome ? false : storeShowRulers;
 
+  const bgGradient = useMemo(() => {
+    const parsed = parseLinearGradient(page.backgroundColor);
+    if (!parsed) return null;
+    const line = getGradientLine(parsed.angleDeg, page.width, page.height);
+    return {
+      start: line.start,
+      end: line.end,
+      colorStops: parsed.stops.flatMap((s) => [s.offset, s.color]),
+    };
+  }, [page.backgroundColor, page.width, page.height]);
+
   const sortedElements = [...page.elements]
     .sort((a, b) => a.zIndex - b.zIndex)
     .filter((e) => e.visible);
@@ -170,6 +215,19 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
 
   const handleWheel = useCallback((e: Konva.KonvaEventObject<WheelEvent>) => {
     e.evt.preventDefault();
+
+    // Plain scroll/trackpad swipe pans instead of zooming — previously every
+    // wheel event zoomed, with no way to just scroll around, so reaching a
+    // part of the design that had scrolled out of view after zooming out
+    // meant zooming back in or holding the middle mouse button every time.
+    // Ctrl/Cmd+scroll still zooms (browsers also report trackpad pinch-zoom
+    // gestures as a wheel event with ctrlKey set, so pinch-to-zoom keeps working).
+    const isZoomGesture = e.evt.ctrlKey || e.evt.metaKey;
+    if (!isZoomGesture) {
+      setPan(panX - e.evt.deltaX, panY - e.evt.deltaY);
+      return;
+    }
+
     const scaleBy = 1.1;
     const oldScale = zoom;
     const newScale = Math.max(0.1, Math.min(5, e.evt.deltaY > 0 ? oldScale / scaleBy : oldScale * scaleBy));
@@ -632,7 +690,10 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
             y={0}
             width={page.width}
             height={page.height}
-            fill={page.backgroundColor}
+            fill={bgGradient ? undefined : page.backgroundColor}
+            fillLinearGradientStartPoint={bgGradient?.start}
+            fillLinearGradientEndPoint={bgGradient?.end}
+            fillLinearGradientColorStops={bgGradient?.colorStops}
             shadowColor="rgba(0,0,0,0.15)"
             shadowBlur={20}
             shadowOffsetX={0}
@@ -994,7 +1055,18 @@ function IconElement({ element, commonProps: rawCommonProps, data }: { element: 
   );
 }
 
+// Dispatches to a static (cached, filterable) render for ordinary photos, or a
+// continuously-sampled live one for animated stickers/GIFs — kept as two
+// separate components (rather than branching inside one) so this stays a
+// stable per-element choice and never trips the rules-of-hooks.
 function ImageElement({ element, commonProps, data }: { element: CanvasElement; commonProps: any; data: ImageData }) {
+  if (data.animated) {
+    return <AnimatedStickerElement element={element} commonProps={commonProps} data={data} />;
+  }
+  return <StaticImageElement element={element} commonProps={commonProps} data={data} />;
+}
+
+function StaticImageElement({ element, commonProps, data }: { element: CanvasElement; commonProps: any; data: ImageData }) {
   const [image, setImage] = useState<HTMLImageElement | null>(null);
   const imageRef = useRef<any>(null);
 
@@ -1079,6 +1151,130 @@ function ImageElement({ element, commonProps, data }: { element: CanvasElement; 
       hue={data.hue || 0}
       blurRadius={data.blur || 0}
       saturation={((data.saturation || 100) - 100) / 100}
+    />
+  );
+}
+
+// The video trick (hand a live element to Konva.Image and keep redrawing) does NOT
+// work for GIFs: canvas drawImage() of an animated <img> only ever captures its first
+// frame — GIF animation is a feature of the browser's own native image renderer, not
+// something canvas hooks into the way it does for <video>. This actually decodes every
+// frame (via gifuct-js) up front, composites each one onto the running frame the way a
+// real GIF player does (respecting each frame's disposal method), and swaps the Konva
+// node's image imperatively on a timer matched to each frame's own delay.
+function AnimatedStickerElement({ element, commonProps, data }: { element: CanvasElement; commonProps: any; data: ImageData }) {
+  const imageNodeRef = useRef<Konva.Image>(null);
+  const framesRef = useRef<{ canvas: HTMLCanvasElement; delay: number }[]>([]);
+  const [ready, setReady] = useState(false);
+  const [firstFrame, setFirstFrame] = useState<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setReady(false);
+    setFirstFrame(null);
+    framesRef.current = [];
+
+    (async () => {
+      try {
+        const { parseGIF, decompressFrames } = await import('gifuct-js');
+        const res = await fetch(data.src);
+        const buffer = await res.arrayBuffer();
+        const gif = parseGIF(buffer);
+        const rawFrames = decompressFrames(gif, true);
+        const w = gif.lsd.width;
+        const h = gif.lsd.height;
+
+        // One persistent canvas accumulates frames in place, same as a real GIF
+        // decoder — each built frame is a snapshot of it at that point.
+        const composite = document.createElement('canvas');
+        composite.width = w;
+        composite.height = h;
+        const cctx = composite.getContext('2d')!;
+
+        const built: { canvas: HTMLCanvasElement; delay: number }[] = [];
+        for (const frame of rawFrames) {
+          if (frame.disposalType === 2) cctx.clearRect(0, 0, w, h);
+          const patch = document.createElement('canvas');
+          patch.width = frame.dims.width;
+          patch.height = frame.dims.height;
+          patch.getContext('2d')!.putImageData(
+            // window.ImageData — this file's own ImageData type (image element data)
+            // shadows the DOM/Canvas API's global ImageData constructor.
+            new window.ImageData(new Uint8ClampedArray(frame.patch), frame.dims.width, frame.dims.height), 0, 0,
+          );
+          cctx.drawImage(patch, frame.dims.left, frame.dims.top);
+
+          const snapshot = document.createElement('canvas');
+          snapshot.width = w;
+          snapshot.height = h;
+          snapshot.getContext('2d')!.drawImage(composite, 0, 0);
+          // GIF delay is in centiseconds; a 0 delay is common and means "as fast as
+          // possible", which browsers themselves clamp to a sane minimum.
+          built.push({ canvas: snapshot, delay: Math.max(20, (frame.delay || 10) * 10) });
+        }
+
+        if (cancelled || built.length === 0) return;
+        framesRef.current = built;
+        setFirstFrame(built[0].canvas);
+        setReady(true);
+      } catch (err) {
+        console.error('[sticker] failed to decode GIF', err);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [data.src]);
+
+  useEffect(() => {
+    if (!ready || !imageNodeRef.current || framesRef.current.length < 2) return;
+    const node = imageNodeRef.current;
+    const layer = node.getLayer();
+    if (!layer) return;
+    let frameIndex = 0;
+    let elapsed = 0;
+    const anim = new Konva.Animation((frameObj) => {
+      if (!frameObj) return;
+      elapsed += frameObj.timeDiff;
+      if (elapsed >= framesRef.current[frameIndex].delay) {
+        elapsed = 0;
+        frameIndex = (frameIndex + 1) % framesRef.current.length;
+        node.image(framesRef.current[frameIndex].canvas);
+      }
+    }, layer);
+    anim.start();
+    return () => { anim.stop(); };
+  }, [ready]);
+
+  const flipH = !!(data as any).flipH;
+  const flipV = !!(data as any).flipV;
+  const flipProps = (flipH || flipV) ? {
+    ...commonProps,
+    x: commonProps.x + (flipH ? element.width : 0),
+    y: commonProps.y + (flipV ? element.height : 0),
+    scaleX: flipH ? -1 : 1,
+    scaleY: flipV ? -1 : 1,
+  } : commonProps;
+
+  if (!ready || !firstFrame) {
+    return (
+      <Rect
+        {...commonProps}
+        width={element.width}
+        height={element.height}
+        fill="#F3F4F6"
+        cornerRadius={data.borderRadius}
+      />
+    );
+  }
+
+  return (
+    <KonvaImage
+      ref={imageNodeRef}
+      {...flipProps}
+      image={firstFrame}
+      width={element.width}
+      height={element.height}
+      cornerRadius={data.borderRadius}
     />
   );
 }

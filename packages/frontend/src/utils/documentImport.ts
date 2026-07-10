@@ -11,6 +11,20 @@ export interface PageImage { dataUrl: string; width: number; height: number; tex
 export interface PdfTextLine { x: number; y: number; width: number; height: number; fontSize: number; text: string; }
 export interface ParsedTable { rows: number; cols: number; cells: string[][]; }
 
+// DOCX/PPTX text runs come out of raw XML with entities still escaped (e.g.
+// "Java &amp; Python" instead of "Java & Python") — the regex-based extraction
+// below strips tags but was never decoding these, so they showed up literally.
+function decodeXmlEntities(text: string): string {
+  return text
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, code) => String.fromCharCode(parseInt(code, 16)))
+    .replace(/&amp;/g, '&'); // must run last so it doesn't re-decode e.g. "&amp;lt;" into "<"
+}
+
 /* ------------------------------------------------------------------ */
 /*  PDF → array of page images (one per PDF page)                      */
 /* ------------------------------------------------------------------ */
@@ -274,7 +288,7 @@ export async function importDOCX(file: File): Promise<string[]> {
     const paraMatches = xml.match(/<w:p[ >][\s\S]*?<\/w:p>/g) || [];
     for (const para of paraMatches) {
       const runs = para.match(/<w:t[^>]*>([^<]*)<\/w:t>/g) || [];
-      const text = runs.map((r) => r.replace(/<[^>]+>/g, '')).join('').trim();
+      const text = decodeXmlEntities(runs.map((r) => r.replace(/<[^>]+>/g, '')).join('')).trim();
       if (text) paragraphs.push(text);
     }
     return paragraphs.slice(0, 300);
@@ -285,7 +299,7 @@ export async function importDOCX(file: File): Promise<string[]> {
     let raw = '';
     for (let i = 0; i < bytes.length; i++) raw += String.fromCharCode(bytes[i]);
     const matches = raw.match(/<w:t[^>]*>([^<]{1,500})<\/w:t>/g) || [];
-    return matches.map((m) => m.replace(/<[^>]+>/g, '').trim()).filter(Boolean).slice(0, 100);
+    return matches.map((m) => decodeXmlEntities(m.replace(/<[^>]+>/g, '')).trim()).filter(Boolean).slice(0, 100);
   }
 }
 
@@ -322,7 +336,7 @@ export async function importPPTX(
 
       for (const shape of shapeMatches) {
         const texts: string[] = (shape.match(/<a:t>([^<]*)<\/a:t>/g) || [])
-          .map((t) => t.replace(/<[^>]+>/g, '').trim())
+          .map((t) => decodeXmlEntities(t.replace(/<[^>]+>/g, '')).trim())
           .filter(Boolean);
         if (!texts.length) continue;
         const text = texts.join(' ');
@@ -343,7 +357,7 @@ export async function importPPTX(
     let raw = '';
     for (let i = 0; i < bytes.length; i++) raw += String.fromCharCode(bytes[i]);
     const texts = (raw.match(/<a:t>([^<]{1,300})<\/a:t>/g) || [])
-      .map((t) => t.replace(/<[^>]+>/g, '').trim())
+      .map((t) => decodeXmlEntities(t.replace(/<[^>]+>/g, '')).trim())
       .filter(Boolean);
     const chunkSize = Math.max(1, Math.ceil(texts.length / 10));
     return Array.from({ length: Math.ceil(texts.length / chunkSize) }, (_, i) => {

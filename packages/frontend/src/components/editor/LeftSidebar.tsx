@@ -143,6 +143,8 @@ const ICON_LIBRARY = [
 
 const ICON_CATEGORIES = ['All', ...Array.from(new Set(ICON_LIBRARY.map((i) => i.cat)))];
 
+const STICKER_CATEGORIES = ['Trending', 'Arrow', 'Word', 'Food', 'Love', 'Shape', 'Nature', 'Emoji', 'Weather', 'Business'];
+
 // Canonical canvas sizes per template category — matches Canva's real presets.
 const CATEGORY_SIZE: Record<string, { width: number; height: number }> = {
   Birthday:       { width: 1080, height: 1350 }, // Invitation-card style
@@ -269,8 +271,6 @@ const BUILT_IN_TEMPLATES = [
   { id: 'yt-travel',       cat: 'YouTube',    name: 'Travel Thumbnail',  bg: '#052E16', accent: '#FACC15', text: '#FFFFFF', photoId: '1043' },
 ].map((t) => ({ ...t, width: (t as any).width ?? CATEGORY_SIZE[t.cat]?.width, height: (t as any).height ?? CATEGORY_SIZE[t.cat]?.height }));
 
-const TEMPLATE_CATS = ['All', ...Array.from(new Set(BUILT_IN_TEMPLATES.map((t) => t.cat)))];
-
 const TEXT_PRESETS = [
   { label: 'Add a heading',           fontSize: 48, fontWeight: 700, color: '#111827' },
   { label: 'Add a subheading',        fontSize: 32, fontWeight: 600, color: '#374151' },
@@ -310,7 +310,10 @@ export default function LeftSidebar() {
   const [iconSearch, setIconSearch] = useState('');
   const [iconifyResults, setIconifyResults] = useState<{ name: string; prefix: string; body: string; width: number; height: number }[]>([]);
   const [iconifyLoading, setIconifyLoading] = useState(false);
-  const [templateCat, setTemplateCat] = useState('All');
+  const [stickerCat, setStickerCat] = useState('Trending');
+  const [stickerSearch, setStickerSearch] = useState('');
+  const [stickerResults, setStickerResults] = useState<{ id: string; url: string; thumb: string }[]>([]);
+  const [stickerLoading, setStickerLoading] = useState(false);
   const [showBgColorOptions, setShowBgColorOptions] = useState(false);
   const [bgPhotoCategory, setBgPhotoCategory] = useState<string | null>(null);
   const [bgPhotoResults, setBgPhotoResults] = useState<{ url: string; title: string }[]>([]);
@@ -348,6 +351,15 @@ export default function LeftSidebar() {
         setAiConfiguredProviders(active);
       })
       .catch((err) => console.error('[AI] failed to load configured providers', err));
+  }, [activeTab]);
+
+  // Auto-load Trending once when the Elements tab is first opened — matches the
+  // reference screenshot showing content immediately rather than requiring a
+  // search first. Guarded so revisiting the tab doesn't refetch every time.
+  useEffect(() => {
+    if (activeTab === 'elements' && stickerResults.length === 0 && !stickerLoading && import.meta.env.VITE_TENOR_API_KEY) {
+      handleStickerSearch('Trending');
+    }
   }, [activeTab]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const aiRefFileInputRef = useRef<HTMLInputElement>(null);
@@ -711,6 +723,60 @@ export default function LeftSidebar() {
     } finally {
       setAiGenerating(false);
     }
+  };
+
+  // Tenor's public "demo" key was retired — this genuinely needs a real (free)
+  // key from https://console.cloud.google.com (Tenor API), same pattern as the
+  // other optional integrations (Pexels, LottieFiles) configured via VITE_ env vars.
+  const handleStickerSearch = async (query: string) => {
+    const key = import.meta.env.VITE_TENOR_API_KEY;
+    if (!key) return;
+    setStickerLoading(true);
+    try {
+      const endpoint = query.toLowerCase() === 'trending'
+        ? `https://tenor.googleapis.com/v2/featured?key=${key}&searchfilter=sticker&media_filter=gif&limit=30`
+        : `https://tenor.googleapis.com/v2/search?q=${encodeURIComponent(query)}&key=${key}&searchfilter=sticker&media_filter=gif&limit=30`;
+      const res = await fetch(endpoint);
+      if (!res.ok) throw new Error('Search failed');
+      const data = await res.json();
+      const results = (data.results || [])
+        .map((r: any) => ({
+          id: r.id,
+          url: r.media_formats?.gif?.url || r.media_formats?.tinygif?.url,
+          thumb: r.media_formats?.tinygif?.url || r.media_formats?.gif?.url,
+        }))
+        .filter((r: any) => r.url);
+      setStickerResults(results);
+    } catch {
+      toast.error('Sticker search failed — check your connection');
+      setStickerResults([]);
+    } finally {
+      setStickerLoading(false);
+    }
+  };
+
+  // Sized to the sticker's own aspect ratio (capped) rather than a fixed square,
+  // same reasoning as addVideoToCanvas — most stickers aren't perfectly square.
+  const addStickerToCanvas = (url: string, name: string) => {
+    const probe = new window.Image();
+    probe.crossOrigin = 'anonymous';
+    probe.onload = () => {
+      const nw = probe.naturalWidth || 200;
+      const nh = probe.naturalHeight || 200;
+      const maxSize = 220;
+      const scale = Math.min(1, maxSize / Math.max(nw, nh));
+      const w = Math.round(nw * scale);
+      const h = Math.round(nh * scale);
+      addElement({
+        type: 'image', x: cx, y: cy, width: w, height: h,
+        rotation: 0, opacity: 1, visible: true, locked: false, name, zIndex: 0,
+        data: { type: 'image', src: url, animated: true, objectFit: 'contain', borderRadius: 0, brightness: 100, contrast: 100, saturation: 100, hue: 0, blur: 0, filters: [], cropX: 0, cropY: 0, cropWidth: 100, cropHeight: 100 },
+      });
+      pushHistory();
+      toast.success('Sticker added to canvas');
+    };
+    probe.onerror = () => toast.error('Could not load that sticker');
+    probe.src = url;
   };
 
   const handleIconifySearch = async (query: string) => {
@@ -1294,18 +1360,9 @@ export default function LeftSidebar() {
                   </button>
                 </div>
 
-                {/* Category chips */}
-                <div className="flex gap-1 flex-wrap mb-3">
-                  {TEMPLATE_CATS.map((cat) => (
-                    <button key={cat} onClick={() => setTemplateCat(cat)}
-                      className={`px-2 py-0.5 rounded-full text-[9px] font-medium transition-colors flex-shrink-0 ${templateCat === cat ? 'bg-canva-purple text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'}`}>
-                      {cat}
-                    </button>
-                  ))}
-                </div>
                 <div className="grid grid-cols-2 gap-2">
                   {BUILT_IN_TEMPLATES
-                    .filter((t) => (templateCat === 'All' || t.cat === templateCat) && (!search || t.name.toLowerCase().includes(search.toLowerCase())))
+                    .filter((t) => !search || t.name.toLowerCase().includes(search.toLowerCase()) || t.cat.toLowerCase().includes(search.toLowerCase()))
                     .map((tpl) => (
                     <button key={tpl.id} onClick={() => handleApplyTemplate(tpl)}
                       className="group relative self-start rounded-lg overflow-hidden border-2 border-transparent hover:border-canva-purple transition-all shadow-sm"
@@ -1427,6 +1484,62 @@ export default function LeftSidebar() {
                       </button>
                     ))}
                   </div>
+                </div>
+
+                {/* Animated Stickers */}
+                <div className="border-t border-gray-100 dark:border-gray-800 pt-3">
+                  <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-2">Animated Stickers</p>
+
+                  {!import.meta.env.VITE_TENOR_API_KEY ? (
+                    <div className="text-center py-4 px-2 rounded-lg bg-gray-50 dark:bg-gray-800/60">
+                      <p className="text-[10px] text-gray-500 dark:text-gray-400">Add a free Tenor API key as <code className="text-[9px]">VITE_TENOR_API_KEY</code> to enable animated stickers.</p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-1.5 mb-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-2.5 py-1.5">
+                        <HiOutlineSearch size={12} className="text-gray-400 flex-shrink-0" />
+                        <input
+                          type="text"
+                          value={stickerSearch}
+                          onChange={(e) => setStickerSearch(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter' && stickerSearch.trim()) { setStickerCat(''); handleStickerSearch(stickerSearch); } }}
+                          placeholder="Search animated stickers (press Enter)…"
+                          className="flex-1 bg-transparent text-[10px] text-gray-700 dark:text-gray-300 placeholder-gray-400 outline-none"
+                        />
+                        {stickerSearch && (
+                          <button onClick={() => { setStickerSearch(''); setStickerCat('Trending'); handleStickerSearch('Trending'); }} className="text-gray-300 hover:text-gray-500">×</button>
+                        )}
+                      </div>
+
+                      <div className="flex gap-1 flex-wrap mb-2">
+                        {STICKER_CATEGORIES.map((cat) => (
+                          <button key={cat}
+                            onClick={() => { setStickerCat(cat); setStickerSearch(''); handleStickerSearch(cat); }}
+                            className={`px-2 py-0.5 rounded-full text-[9px] font-medium transition-colors flex-shrink-0 ${stickerCat === cat ? 'bg-canva-purple text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'}`}>
+                            {cat}
+                          </button>
+                        ))}
+                      </div>
+
+                      {stickerLoading ? (
+                        <div className="flex items-center justify-center py-4 text-[10px] text-gray-400">
+                          <svg className="animate-spin h-4 w-4 mr-1.5" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                          Loading stickers…
+                        </div>
+                      ) : stickerResults.length > 0 ? (
+                        <div className="grid grid-cols-3 gap-1.5">
+                          {stickerResults.map((s) => (
+                            <button key={s.id} onClick={() => addStickerToCanvas(s.url, 'Sticker')}
+                              className="rounded-lg overflow-hidden bg-gray-100 dark:bg-gray-800 hover:ring-2 hover:ring-canva-purple transition-all aspect-square">
+                              <img src={s.thumb} alt="" loading="lazy" className="w-full h-full object-contain" />
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-center text-[10px] text-gray-400 py-4">No stickers found — try a different search</p>
+                      )}
+                    </>
+                  )}
                 </div>
               </div>
             )}
