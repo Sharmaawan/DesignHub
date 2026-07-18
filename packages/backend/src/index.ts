@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 // vars by default), so editing .env appeared to do nothing.
 dotenv.config({ override: true });
 
+import fs from 'fs';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -34,6 +35,11 @@ import backgroundRemovalRoutes from './routes/backgroundRemoval';
 import emailSettingsRoutes from './routes/emailSettings';
 import socialRoutes from './routes/social';
 import { startScheduler } from './lib/scheduler';
+
+// uploads/ is gitignored (user content, not source) so a fresh clone/deploy never
+// has it — every route that writes here (ai.ts, upload.ts) assumes it already
+// exists rather than creating it, so it must exist before any of them run.
+fs.mkdirSync('uploads/backgrounds', { recursive: true });
 
 const app = express();
 const httpServer = createServer(app);
