@@ -700,8 +700,17 @@ export default function LeftSidebar() {
         ...(isImage && aiReferenceImages.length > 0 ? { referenceImages: aiReferenceImages.map((r) => r.dataUrl) } : {}),
       });
       console.log('[AI] generate response received', { hasContent: !!data.content, contentType: data.contentType });
-      const content: string = data.content || '';
+      let content: string = data.content || '';
       if (!content) throw new Error('AI provider returned no content');
+
+      // Image generation (gpt-image-1) always returns base64, which the backend
+      // persists to disk and hands back as a relative /uploads/... path — resolve
+      // it against the backend's own origin, same as every other /uploads/ URL in
+      // this file, or it 404s against the frontend's origin instead.
+      if (isImage && content.startsWith('/uploads/')) {
+        const BACKEND = import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:3001';
+        content = `${BACKEND}${content}`;
+      }
 
       setAiResult(content);
 
