@@ -46,6 +46,20 @@ router.post('/generate', authMiddleware, async (req: AuthRequest, res: Response)
     res.status(status).json(body);
   };
 
+  // Structured error shape — success:false + message for programmatic
+  // handling, plus the pre-existing top-level `error` field so the frontend
+  // (which reads err.response.data.error) keeps working unchanged. `stack`
+  // is only ever included outside production — it's an internals leak to
+  // send to a client otherwise.
+  const sendError = (status: number, message: string, err?: unknown) => {
+    send(status, {
+      success: false,
+      message,
+      error: message,
+      ...(process.env.NODE_ENV !== 'production' && err instanceof Error ? { stack: err.stack } : {}),
+    });
+  };
+
   let aiRequestId: string | null = null;
 
   try {
@@ -53,11 +67,11 @@ router.post('/generate', authMiddleware, async (req: AuthRequest, res: Response)
     console.log(`[ai/generate] request received userId=${req.userId} provider=${provider} type=${type || 'text'}`);
 
     if (!provider || !prompt) {
-      return send(400, { error: 'Provider and prompt are required' });
+      return sendError(400, 'Provider and prompt are required');
     }
 
     if (type === 'image' && provider !== 'openai') {
-      return send(400, { error: `${provider} does not support image generation. Add an OpenAI API key in Settings to generate images.` });
+      return sendError(400, `${provider} does not support image generation. Add an OpenAI API key in Settings to generate images.`);
     }
 
     let apiKey = '';
@@ -80,7 +94,7 @@ router.post('/generate', authMiddleware, async (req: AuthRequest, res: Response)
 
     if (!apiKey) {
       console.error(`[ai/generate] no API key found for provider=${provider} userId=${req.userId}`);
-      return send(404, { error: `No API key found for ${provider}. Add one in Settings or .env file.` });
+      return sendError(404, `No API key found for ${provider}. Add one in Settings or .env file.`);
     }
 
     const aiRequest = await prisma.aIRequest.create({
@@ -141,20 +155,50 @@ router.post('/generate', authMiddleware, async (req: AuthRequest, res: Response)
         console.error(`[ai/generate] openai image request failed status=${response.status}`, err);
         await prisma.aIRequest.update({ where: { id: aiRequest.id }, data: { status: 'failed', error: err.error?.message || 'Image generation failed' } })
           .catch((e) => console.error('[ai/generate] failed to update request status', e));
-        return send(upstreamStatus(response.status), { error: err.error?.message || 'Image generation failed' });
+        return sendError(upstreamStatus(response.status), err.error?.message || 'Image generation failed');
       }
 
       const data = await response.json() as any;
-      let imageUrl = data.data?.[0]?.url || '';
-      const b64 = data.data?.[0]?.b64_json;
+      const firstResult = data.data?.[0];
+      // Log the response's shape, not its content — b64_json alone can be
+      // several MB of base64 text; dumping it to logs is noise, not signal.
+      console.log('[ai/generate] openai image response shape', {
+        hasDataArray: Array.isArray(data.data),
+        resultCount: data.data?.length ?? 0,
+        hasUrl: !!firstResult?.url,
+        hasB64: !!firstResult?.b64_json,
+        b64Length: firstResult?.b64_json?.length ?? 0,
+      });
+
+      let imageUrl = firstResult?.url || '';
+      const b64 = firstResult?.b64_json;
       if (!imageUrl && b64) {
         // gpt-image-1 (edits) only returns base64 — persist it to disk so we
         // return a stable URL instead of storing a huge base64 blob in the DB.
         const filename = `${uuidv4()}.png`;
-        fs.writeFileSync(path.join('uploads', filename), Buffer.from(b64, 'base64'));
+        try {
+          fs.writeFileSync(path.join('uploads', filename), Buffer.from(b64, 'base64'));
+        } catch (writeErr: any) {
+          console.error('[ai/generate] failed to write generated image to disk', writeErr);
+          await prisma.aIRequest.update({ where: { id: aiRequest.id }, data: { status: 'failed', error: 'Failed to save generated image' } })
+            .catch((e) => console.error('[ai/generate] failed to update request status', e));
+          return sendError(500, 'Failed to save the generated image on the server', writeErr);
+        }
         imageUrl = `/uploads/${filename}`;
       }
-      console.log(`[ai/generate] openai image generated userId=${req.userId} withReference=${useReference}`);
+
+      // OpenAI returned 200 but neither a URL nor base64 data — a genuinely
+      // malformed/unexpected response shape. Without this check this fell
+      // through as a "successful" response with an empty content string,
+      // which is exactly the "backend says success but nothing displays" bug.
+      if (!imageUrl) {
+        console.error('[ai/generate] openai returned 200 but no image url/b64_json', JSON.stringify(data).slice(0, 1000));
+        await prisma.aIRequest.update({ where: { id: aiRequest.id }, data: { status: 'failed', error: 'OpenAI returned no image data' } })
+          .catch((e) => console.error('[ai/generate] failed to update request status', e));
+        return sendError(502, 'The AI provider returned no image data. Please try again.');
+      }
+
+      console.log(`[ai/generate] openai image generated userId=${req.userId} withReference=${useReference} url=${imageUrl}`);
 
       await prisma.aIRequest.update({ where: { id: aiRequest.id }, data: { status: 'completed' } });
       const generation = await prisma.aIGeneration.create({
@@ -164,7 +208,7 @@ router.post('/generate', authMiddleware, async (req: AuthRequest, res: Response)
         data: { userId: req.userId!, activityType: 'ai_generation', referenceId: generation.id },
       }).catch((e) => console.error('[ai/generate] failed to log recent activity', e));
 
-      return send(200, { content: imageUrl, contentType: 'image' });
+      return send(200, { success: true, content: imageUrl, contentType: 'image' });
     }
 
     if (provider === 'openai') {
@@ -189,10 +233,11 @@ router.post('/generate', authMiddleware, async (req: AuthRequest, res: Response)
         console.error(`[ai/generate] openai request failed status=${response.status}`, err);
         await prisma.aIRequest.update({ where: { id: aiRequest.id }, data: { status: 'failed', error: err.error?.message || 'AI request failed' } })
           .catch((e) => console.error('[ai/generate] failed to update request status', e));
-        return send(upstreamStatus(response.status), { error: err.error?.message || 'AI request failed' });
+        return sendError(upstreamStatus(response.status), err.error?.message || 'AI request failed');
       }
 
       const data = await response.json() as any;
+      console.log('[ai/generate] openai text response shape', { hasChoices: Array.isArray(data.choices), choiceCount: data.choices?.length ?? 0 });
       const content = data.choices?.[0]?.message?.content || 'No content generated';
       const tokens = Number(data.usage?.total_tokens || 0);
       console.log(`[ai/generate] openai text generated userId=${req.userId} tokens=${tokens}`);
@@ -205,7 +250,7 @@ router.post('/generate', authMiddleware, async (req: AuthRequest, res: Response)
         data: { userId: req.userId!, activityType: 'ai_generation', referenceId: generation.id },
       }).catch((e) => console.error('[ai/generate] failed to log recent activity', e));
 
-      return send(200, { content, contentType: type || 'text', usage: data.usage });
+      return send(200, { success: true, content, contentType: type || 'text', usage: data.usage });
     }
 
     if (provider === 'anthropic') {
@@ -230,10 +275,11 @@ router.post('/generate', authMiddleware, async (req: AuthRequest, res: Response)
         console.error(`[ai/generate] anthropic request failed status=${response.status}`, err);
         await prisma.aIRequest.update({ where: { id: aiRequest.id }, data: { status: 'failed', error: err.error?.message || 'AI request failed' } })
           .catch((e) => console.error('[ai/generate] failed to update request status', e));
-        return send(upstreamStatus(response.status), { error: err.error?.message || 'AI request failed' });
+        return sendError(upstreamStatus(response.status), err.error?.message || 'AI request failed');
       }
 
       const data = await response.json() as any;
+      console.log('[ai/generate] anthropic response shape', { hasContent: Array.isArray(data.content), blockCount: data.content?.length ?? 0 });
       const content = data.content?.[0]?.text || 'No content generated';
       const tokens = Number(data.usage?.input_tokens || 0) + Number(data.usage?.output_tokens || 0);
       console.log(`[ai/generate] anthropic text generated userId=${req.userId} tokens=${tokens}`);
@@ -246,10 +292,10 @@ router.post('/generate', authMiddleware, async (req: AuthRequest, res: Response)
         data: { userId: req.userId!, activityType: 'ai_generation', referenceId: generation.id },
       }).catch((e) => console.error('[ai/generate] failed to log recent activity', e));
 
-      return send(200, { content, contentType: type || 'text', usage: data.usage });
+      return send(200, { success: true, content, contentType: type || 'text', usage: data.usage });
     }
 
-    return send(400, { error: 'Unsupported provider' });
+    return sendError(400, 'Unsupported provider');
   } catch (err: any) {
     const aborted = err?.name === 'AbortError';
     const clientGone = req.destroyed;
@@ -263,7 +309,11 @@ router.post('/generate', authMiddleware, async (req: AuthRequest, res: Response)
         data: { status: 'failed', error: aborted ? 'Timed out waiting for the AI provider' : (err.message || 'AI generation failed') },
       }).catch((e) => console.error('[ai/generate] failed to update request status', e));
     }
-    send(aborted ? 504 : 500, { error: aborted ? 'The AI provider took too long to respond. Please try again.' : (err.message || 'AI generation failed') });
+    sendError(
+      aborted ? 504 : 500,
+      aborted ? 'The AI provider took too long to respond. Please try again.' : (err.message || 'AI generation failed'),
+      err,
+    );
   } finally {
     clearTimeout(upstreamTimer);
     req.off('close', onClose);

@@ -1071,17 +1071,22 @@ function StaticImageElement({ element, commonProps, data }: { element: CanvasEle
   const imageRef = useRef<any>(null);
 
   useEffect(() => {
+    let cancelled = false;
     setImage(null);
     if (data.src) {
       const img = new window.Image();
       img.crossOrigin = 'anonymous';
-      img.onload = () => setImage(img);
+      img.onload = () => { if (!cancelled) setImage(img); };
       // Without this, a failed load (bad URL, CORS rejection, 404) just leaves
       // `image` null forever with no trace — the element quietly stays a gray
       // placeholder and there's nothing in the console to explain why.
-      img.onerror = () => console.error('[ImageElement] failed to load', data.src);
+      img.onerror = () => { if (!cancelled) console.error('[ImageElement] failed to load', data.src); };
       img.src = data.src;
     }
+    // If the element is deleted/unmounted (or data.src changes again) while a
+    // load is in flight, drop the callbacks instead of setState-ing a
+    // component that no longer cares — a real, if minor, leak source.
+    return () => { cancelled = true; };
   }, [data.src]);
 
   useEffect(() => {

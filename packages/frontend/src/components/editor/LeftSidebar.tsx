@@ -695,13 +695,15 @@ export default function LeftSidebar() {
     setAiGenerating(true);
     setAiResult('');
     try {
-      const { data } = await aiAPI.generate({
+      const response = await aiAPI.generate({
         provider, prompt, type: isImage ? 'image' : 'text',
         ...(isImage && aiReferenceImages.length > 0 ? { referenceImages: aiReferenceImages.map((r) => r.dataUrl) } : {}),
       });
-      console.log('[AI] generate response received', { hasContent: !!data.content, contentType: data.contentType });
+      const data = response?.data;
+      if (!data) throw new Error('Empty response from server');
+      console.log('[AI] generate response received', { hasContent: !!data.content, contentType: data.contentType, success: data.success });
       let content: string = data.content || '';
-      if (!content) throw new Error('AI provider returned no content');
+      if (!content) throw new Error(data.message || 'AI provider returned no content');
 
       // Image generation (gpt-image-1) always returns base64, which the backend
       // persists to disk and hands back as a relative /uploads/... path — resolve
@@ -726,7 +728,7 @@ export default function LeftSidebar() {
         toast.success(isImage ? 'Image generated' : 'Ideas generated');
       }
     } catch (err: any) {
-      const message = err.response?.data?.error || err.message || 'AI generation failed';
+      const message = err.response?.data?.message || err.response?.data?.error || err.message || 'AI generation failed';
       console.error('[AI] generate failed', err);
       toast.error(message);
     } finally {
@@ -902,14 +904,32 @@ export default function LeftSidebar() {
   const fmtSize = (bytes: number) =>
     bytes > 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${(bytes / 1024).toFixed(0)} KB`;
 
-  const addImageToCanvas = (url: string, name: string, w = 500, h = 375) => {
-    addElement({
-      type: 'image', x: cx, y: cy, width: w, height: h,
-      rotation: 0, opacity: 1, visible: true, locked: false, name, zIndex: 0,
-      data: { type: 'image', src: url, objectFit: 'cover', borderRadius: 0, brightness: 100, contrast: 100, saturation: 100, hue: 0, blur: 0, filters: [], cropX: 0, cropY: 0, cropWidth: 100, cropHeight: 100 },
-    });
-    pushHistory();
-    toast.success(`${name} added to canvas`);
+  // Validates the image actually loads before placing it — without this, a
+  // broken/expired URL silently added a permanently-empty gray placeholder
+  // to the canvas with no indication anything went wrong. Also sizes it to
+  // its real aspect ratio instead of a fixed 500x375 that could distort it.
+  const addImageToCanvas = (url: string, name: string, maxSize = 500) => {
+    const probe = new window.Image();
+    probe.crossOrigin = 'anonymous';
+    probe.onload = () => {
+      const nw = probe.naturalWidth || maxSize;
+      const nh = probe.naturalHeight || maxSize * 0.75;
+      const scale = Math.min(1, maxSize / Math.max(nw, nh));
+      const w = Math.round(nw * scale);
+      const h = Math.round(nh * scale);
+      addElement({
+        type: 'image', x: cx, y: cy, width: w, height: h,
+        rotation: 0, opacity: 1, visible: true, locked: false, name, zIndex: 0,
+        data: { type: 'image', src: url, objectFit: 'cover', borderRadius: 0, brightness: 100, contrast: 100, saturation: 100, hue: 0, blur: 0, filters: [], cropX: 0, cropY: 0, cropWidth: 100, cropHeight: 100 },
+      });
+      pushHistory();
+      toast.success(`${name} added to canvas`);
+    };
+    probe.onerror = () => {
+      console.error('[addImageToCanvas] failed to load image', url);
+      toast.error('Could not load that image — it may have expired or the URL is invalid.');
+    };
+    probe.src = url;
   };
 
   // Reads the video's real dimensions first (same technique as loadImageSize for
