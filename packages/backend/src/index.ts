@@ -41,6 +41,21 @@ import { startScheduler } from './lib/scheduler';
 // exists rather than creating it, so it must exist before any of them run.
 fs.mkdirSync('uploads/backgrounds', { recursive: true });
 
+// Without these, a single uncaught error in any request handler (e.g. writing
+// a response to a socket the client already closed) crashes the entire Node
+// process — every other in-flight request dies with it, and PM2 has to spin
+// up a fresh process before the app works again. That's what produced the
+// "long wait then everything breaks until refresh" symptom: one bad AI
+// generation request was taking the whole server down. Logging and staying up
+// is the correct behavior for a stateless HTTP server — the alternative
+// (crashing) turns one bad request into an outage for every user.
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err);
+});
+
 const app = express();
 const httpServer = createServer(app);
 const FRONTEND_ORIGIN = process.env.FRONTEND_URL || 'http://localhost:5173';

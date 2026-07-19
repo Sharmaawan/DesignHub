@@ -1071,10 +1071,15 @@ function StaticImageElement({ element, commonProps, data }: { element: CanvasEle
   const imageRef = useRef<any>(null);
 
   useEffect(() => {
+    setImage(null);
     if (data.src) {
       const img = new window.Image();
       img.crossOrigin = 'anonymous';
       img.onload = () => setImage(img);
+      // Without this, a failed load (bad URL, CORS rejection, 404) just leaves
+      // `image` null forever with no trace — the element quietly stays a gray
+      // placeholder and there's nothing in the console to explain why.
+      img.onerror = () => console.error('[ImageElement] failed to load', data.src);
       img.src = data.src;
     }
   }, [data.src]);

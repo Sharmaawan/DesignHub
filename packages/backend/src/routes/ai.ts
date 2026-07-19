@@ -9,6 +9,12 @@ import { remapUpstreamStatus as upstreamStatus } from '../lib/http';
 
 const router = Router();
 
+// gpt-image-1 can legitimately take 30-90s; text completions are normally much
+// faster but can still stall on a bad connection. This bounds every upstream
+// call so a hung provider request can never hold a connection (and its DB row)
+// open indefinitely — fetch() has no timeout of its own.
+const UPSTREAM_TIMEOUT_MS = 120_000;
+
 // Decodes a `data:<mime>;base64,<data>` URL into a Buffer + mime type.
 function decodeDataUrl(dataUrl: string): { buffer: Buffer; mime: string } {
   const match = /^data:(.+);base64,(.+)$/.exec(dataUrl);
@@ -16,18 +22,42 @@ function decodeDataUrl(dataUrl: string): { buffer: Buffer; mime: string } {
   return { buffer: Buffer.from(match[2], 'base64'), mime: match[1] };
 }
 
-// Generate text content
+// Generate text or image content
 router.post('/generate', authMiddleware, async (req: AuthRequest, res: Response) => {
+  // The client (axios) has its own ~30s timeout and disconnects on it, but the
+  // upstream OpenAI/Anthropic call keeps running server-side unless told to
+  // stop. Left alone, a slow generation that finishes *after* the client gave
+  // up would still try to write a response to a closed socket — throwing
+  // uncaught, which crashes the whole Node process and takes every other
+  // in-flight request down with it (this is what was causing the "blank page,
+  // stuck until refresh" symptom: the backend died mid-request). One
+  // AbortController tied to both the request's 'close' event and a hard
+  // ceiling covers both "client left" and "provider never responds".
+  const controller = new AbortController();
+  const onClose = () => controller.abort();
+  req.on('close', onClose);
+  const upstreamTimer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
+
+  // Every response goes through this so a late/duplicate send (e.g. the abort
+  // firing after we'd already started writing a success response) is a
+  // harmless no-op instead of an ERR_HTTP_HEADERS_SENT throw.
+  const send = (status: number, body: unknown) => {
+    if (res.headersSent || res.writableEnded) return;
+    res.status(status).json(body);
+  };
+
+  let aiRequestId: string | null = null;
+
   try {
     const { provider, prompt, type, referenceImages } = req.body;
     console.log(`[ai/generate] request received userId=${req.userId} provider=${provider} type=${type || 'text'}`);
 
     if (!provider || !prompt) {
-      return res.status(400).json({ error: 'Provider and prompt are required' });
+      return send(400, { error: 'Provider and prompt are required' });
     }
 
     if (type === 'image' && provider !== 'openai') {
-      return res.status(400).json({ error: `${provider} does not support image generation. Add an OpenAI API key in Settings to generate images.` });
+      return send(400, { error: `${provider} does not support image generation. Add an OpenAI API key in Settings to generate images.` });
     }
 
     let apiKey = '';
@@ -40,22 +70,19 @@ router.post('/generate', authMiddleware, async (req: AuthRequest, res: Response)
     if (setting) {
       apiKey = decryptKey(setting.encryptedKey);
       model = setting.model || '';
-    } else {
-      if (provider === 'anthropic') {
-        apiKey = process.env.ANTHROPIC_API_KEY || '';
-        model = model || 'claude-sonnet-4-6';
-      } else if (provider === 'openai') {
-        apiKey = process.env.OPENAI_API_KEY || '';
-        model = model || 'gpt-3.5-turbo';
-      }
+    } else if (provider === 'anthropic') {
+      apiKey = process.env.ANTHROPIC_API_KEY || '';
+      model = model || 'claude-sonnet-4-6';
+    } else if (provider === 'openai') {
+      apiKey = process.env.OPENAI_API_KEY || '';
+      model = model || 'gpt-3.5-turbo';
     }
 
     if (!apiKey) {
       console.error(`[ai/generate] no API key found for provider=${provider} userId=${req.userId}`);
-      return res.status(404).json({ error: `No API key found for ${provider}. Add one in Settings or .env file.` });
+      return send(404, { error: `No API key found for ${provider}. Add one in Settings or .env file.` });
     }
 
-    // Log the request
     const aiRequest = await prisma.aIRequest.create({
       data: {
         userId: req.userId!,
@@ -65,6 +92,7 @@ router.post('/generate', authMiddleware, async (req: AuthRequest, res: Response)
         status: 'processing',
       },
     });
+    aiRequestId = aiRequest.id;
 
     if (provider === 'openai' && type === 'image') {
       // With reference images (logo/template uploads) attached, use the edits endpoint
@@ -73,6 +101,8 @@ router.post('/generate', authMiddleware, async (req: AuthRequest, res: Response)
         ? referenceImages.filter((r) => typeof r === 'string' && r.startsWith('data:'))
         : [];
       const useReference = refImages.length > 0;
+
+      console.log(`[ai/generate] calling openai images.${useReference ? 'edits' : 'generations'} userId=${req.userId} promptLen=${prompt.length}`);
       const response = useReference
         ? await (async () => {
             const form = new FormData();
@@ -88,6 +118,7 @@ router.post('/generate', authMiddleware, async (req: AuthRequest, res: Response)
               method: 'POST',
               headers: { 'Authorization': `Bearer ${apiKey}` },
               body: form,
+              signal: controller.signal,
             });
           })()
         : await fetch('https://api.openai.com/v1/images/generations', {
@@ -102,13 +133,15 @@ router.post('/generate', authMiddleware, async (req: AuthRequest, res: Response)
               n: 1,
               size: '1024x1024',
             }),
+            signal: controller.signal,
           });
 
       if (!response.ok) {
-        const err = await response.json() as any;
+        const err = await response.json().catch(() => ({} as any)) as any;
         console.error(`[ai/generate] openai image request failed status=${response.status}`, err);
-        await prisma.aIRequest.update({ where: { id: aiRequest.id }, data: { status: 'failed', error: err.error?.message || 'Image generation failed' } });
-        return res.status(upstreamStatus(response.status)).json({ error: err.error?.message || 'Image generation failed' });
+        await prisma.aIRequest.update({ where: { id: aiRequest.id }, data: { status: 'failed', error: err.error?.message || 'Image generation failed' } })
+          .catch((e) => console.error('[ai/generate] failed to update request status', e));
+        return send(upstreamStatus(response.status), { error: err.error?.message || 'Image generation failed' });
       }
 
       const data = await response.json() as any;
@@ -131,8 +164,11 @@ router.post('/generate', authMiddleware, async (req: AuthRequest, res: Response)
         data: { userId: req.userId!, activityType: 'ai_generation', referenceId: generation.id },
       }).catch((e) => console.error('[ai/generate] failed to log recent activity', e));
 
-      return res.json({ content: imageUrl, contentType: 'image' });
-    } else if (provider === 'openai') {
+      return send(200, { content: imageUrl, contentType: 'image' });
+    }
+
+    if (provider === 'openai') {
+      console.log(`[ai/generate] calling openai chat.completions userId=${req.userId} model=${model || 'gpt-3.5-turbo'}`);
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -145,13 +181,15 @@ router.post('/generate', authMiddleware, async (req: AuthRequest, res: Response)
           max_tokens: 1000,
           temperature: 0.7,
         }),
+        signal: controller.signal,
       });
 
       if (!response.ok) {
-        const err = await response.json() as any;
+        const err = await response.json().catch(() => ({} as any)) as any;
         console.error(`[ai/generate] openai request failed status=${response.status}`, err);
-        await prisma.aIRequest.update({ where: { id: aiRequest.id }, data: { status: 'failed', error: err.error?.message || 'AI request failed' } });
-        return res.status(upstreamStatus(response.status)).json({ error: err.error?.message || 'AI request failed' });
+        await prisma.aIRequest.update({ where: { id: aiRequest.id }, data: { status: 'failed', error: err.error?.message || 'AI request failed' } })
+          .catch((e) => console.error('[ai/generate] failed to update request status', e));
+        return send(upstreamStatus(response.status), { error: err.error?.message || 'AI request failed' });
       }
 
       const data = await response.json() as any;
@@ -167,8 +205,11 @@ router.post('/generate', authMiddleware, async (req: AuthRequest, res: Response)
         data: { userId: req.userId!, activityType: 'ai_generation', referenceId: generation.id },
       }).catch((e) => console.error('[ai/generate] failed to log recent activity', e));
 
-      res.json({ content, contentType: type || 'text', usage: data.usage });
-    } else if (provider === 'anthropic') {
+      return send(200, { content, contentType: type || 'text', usage: data.usage });
+    }
+
+    if (provider === 'anthropic') {
+      console.log(`[ai/generate] calling anthropic messages userId=${req.userId} model=${model || 'claude-sonnet-4-6'}`);
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
@@ -181,13 +222,15 @@ router.post('/generate', authMiddleware, async (req: AuthRequest, res: Response)
           max_tokens: 1000,
           messages: [{ role: 'user', content: prompt }],
         }),
+        signal: controller.signal,
       });
 
       if (!response.ok) {
-        const err = await response.json() as any;
+        const err = await response.json().catch(() => ({} as any)) as any;
         console.error(`[ai/generate] anthropic request failed status=${response.status}`, err);
-        await prisma.aIRequest.update({ where: { id: aiRequest.id }, data: { status: 'failed', error: err.error?.message || 'AI request failed' } });
-        return res.status(upstreamStatus(response.status)).json({ error: err.error?.message || 'AI request failed' });
+        await prisma.aIRequest.update({ where: { id: aiRequest.id }, data: { status: 'failed', error: err.error?.message || 'AI request failed' } })
+          .catch((e) => console.error('[ai/generate] failed to update request status', e));
+        return send(upstreamStatus(response.status), { error: err.error?.message || 'AI request failed' });
       }
 
       const data = await response.json() as any;
@@ -203,13 +246,27 @@ router.post('/generate', authMiddleware, async (req: AuthRequest, res: Response)
         data: { userId: req.userId!, activityType: 'ai_generation', referenceId: generation.id },
       }).catch((e) => console.error('[ai/generate] failed to log recent activity', e));
 
-      res.json({ content, contentType: type || 'text', usage: data.usage });
-    } else {
-      res.status(400).json({ error: 'Unsupported provider' });
+      return send(200, { content, contentType: type || 'text', usage: data.usage });
     }
+
+    return send(400, { error: 'Unsupported provider' });
   } catch (err: any) {
-    console.error('[ai/generate] unhandled error', err);
-    res.status(500).json({ error: err.message || 'AI generation failed' });
+    const aborted = err?.name === 'AbortError';
+    const clientGone = req.destroyed;
+    console.error(
+      `[ai/generate] ${aborted ? (clientGone ? 'client disconnected mid-request' : 'upstream timed out') : 'unhandled error'} userId=${req.userId}`,
+      aborted ? '' : err,
+    );
+    if (aiRequestId) {
+      await prisma.aIRequest.update({
+        where: { id: aiRequestId },
+        data: { status: 'failed', error: aborted ? 'Timed out waiting for the AI provider' : (err.message || 'AI generation failed') },
+      }).catch((e) => console.error('[ai/generate] failed to update request status', e));
+    }
+    send(aborted ? 504 : 500, { error: aborted ? 'The AI provider took too long to respond. Please try again.' : (err.message || 'AI generation failed') });
+  } finally {
+    clearTimeout(upstreamTimer);
+    req.off('close', onClose);
   }
 });
 

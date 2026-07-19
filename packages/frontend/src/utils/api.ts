@@ -159,7 +159,11 @@ export const productUpdateAPI = {
 };
 
 export const aiAPI = {
-  generate: (data: { provider: string; prompt: string; type: string; referenceImages?: string[] }) => api.post('/ai/generate', data),
+  // Image generation (gpt-image-1) routinely takes well past the shared 30s
+  // default — overriding just this call avoids either cutting real image
+  // generations off early or loosening the timeout for every other endpoint.
+  generate: (data: { provider: string; prompt: string; type: string; referenceImages?: string[] }) =>
+    api.post('/ai/generate', data, { timeout: data.type === 'image' ? 120000 : 30000 }),
   history: () => api.get('/ai/history'),
   stats: () => api.get('/ai/stats'),
 };
