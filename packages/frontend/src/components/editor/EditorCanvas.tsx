@@ -1108,14 +1108,26 @@ function StaticImageElement({ element, commonProps, data }: { element: CanvasEle
     );
   }
 
-  const brightness = ((data.brightness || 100) - 100) / 100;
-  const contrast = ((data.contrast || 100) - 100) / 100;
+  // All five sliders are 0-200 (100 = unchanged), except hue (0-360) and blur (px).
+  // Each filter below wants a different range, so convert per-filter rather than
+  // sharing one mapping:
+  //   Brighten  -> brightness  -1..1
+  //   Contrast  -> contrast  -100..100  (Konva squares (contrast+100)/100)
+  //   HSL       -> saturation  -1..1, hue 0..360
+  const brightness = ((data.brightness ?? 100) - 100) / 100;
+  const contrast = (data.contrast ?? 100) - 100;
+  const saturation = ((data.saturation ?? 100) - 100) / 100;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const filters: any[] = [];
   if (data.brightness !== undefined && data.brightness !== 100) filters.push(Konva.Filters.Brighten);
   if (data.contrast !== undefined && data.contrast !== 100) filters.push(Konva.Filters.Contrast);
-  if (data.hue !== undefined && data.hue !== 0) filters.push(Konva.Filters.HSL);
+  // Konva's HSL filter drives hue AND saturation, so it has to be enabled when
+  // either one is off its neutral value — keying it on hue alone meant moving
+  // only the Saturation slider did nothing at all.
+  if ((data.hue !== undefined && data.hue !== 0) || (data.saturation !== undefined && data.saturation !== 100)) {
+    filters.push(Konva.Filters.HSL);
+  }
   if (data.blur !== undefined && data.blur > 0) filters.push(Konva.Filters.Blur);
 
   const flipH = !!(data as any).flipH;
@@ -1160,7 +1172,7 @@ function StaticImageElement({ element, commonProps, data }: { element: CanvasEle
       contrast={contrast}
       hue={data.hue || 0}
       blurRadius={data.blur || 0}
-      saturation={((data.saturation || 100) - 100) / 100}
+      saturation={saturation}
     />
   );
 }
