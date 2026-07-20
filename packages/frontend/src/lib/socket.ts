@@ -1,9 +1,6 @@
 import { io, Socket } from 'socket.io-client';
 
-// Same "strip /api off VITE_API_URL" pattern already used everywhere else in this
-// codebase (LeftSidebar.tsx, RightSidebar.tsx, PublishModal.tsx, BrandHubPage.tsx,
-// UploadTemplateModal.tsx) to get the bare backend origin.
-const BACKEND = import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:3001';
+import { BACKEND_ORIGIN as BACKEND } from '../utils/api';
 
 let socket: Socket | null = null;
 

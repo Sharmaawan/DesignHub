@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { HiOutlineX, HiOutlineUpload, HiOutlinePhotograph } from 'react-icons/hi';
-import { uploadAPI, templateAPI } from '../../utils/api';
+import { uploadAPI, templateAPI, BACKEND_ORIGIN as BACKEND } from '../../utils/api';
 import { generateId } from '../../utils/cn';
 import toast from 'react-hot-toast';
 
@@ -10,8 +10,6 @@ interface UploadTemplateModalProps {
   onCreated: () => void;
   categories: string[];
 }
-
-const BACKEND = import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:3001';
 
 function loadImageSize(url: string): Promise<{ width: number; height: number }> {
   return new Promise((resolve) => {

@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useEditorStore } from '../../stores/editorStore';
 import { CanvasElement, TextData, ImageData, ShapeData, TableData, ChartData, IconData, VideoData } from '../../types';
 import { COLORS_PALETTE, FONT_FAMILIES, FONT_WEIGHT_MAP, FONT_WEIGHT_LABELS, GRADIENT_PRESETS } from '../../utils/cn';
-import { uploadAPI } from '../../utils/api';
+import { uploadAPI, BACKEND_ORIGIN as BACKEND } from '../../utils/api';
 import {
   HiOutlineX, HiOutlineTrash, HiOutlineDuplicate, HiOutlineLockClosed,
   HiOutlineLockOpen, HiOutlineEye, HiOutlineEyeOff,
@@ -658,7 +658,6 @@ function VideoProperties({ element, handleDataUpdate }: { element: CanvasElement
     setUploading(true);
     try {
       const { data: uploaded } = await uploadAPI.upload(file);
-      const BACKEND = import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:3001';
       handleDataUpdate({ src: `${BACKEND}${uploaded.url}` });
       toast.success('Video replaced!');
     } catch {

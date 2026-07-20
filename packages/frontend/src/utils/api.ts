@@ -2,6 +2,23 @@ import axios from 'axios';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
 
+// Bare backend origin, for URLs the API returns as server-relative paths
+// (/uploads/...) and for the socket.io connection.
+//
+// This strips a *trailing* /api only. The obvious `.replace('/api', '')`
+// replaces the first match anywhere, which eats the slash out of the scheme
+// when the host itself starts with "api." — "https://api.example.com/api"
+// became "https:/.example.com/api". It happened to work on localhost, so the
+// breakage only ever showed up in deployed builds.
+export const BACKEND_ORIGIN = API_BASE.replace(/\/api\/?$/, '');
+
+/** Resolve a possibly server-relative asset path against the backend origin. */
+export function resolveAssetUrl(url: string): string {
+  if (!url) return url;
+  if (/^(https?:|data:|blob:)/.test(url)) return url;
+  return `${BACKEND_ORIGIN}${url.startsWith('/') ? '' : '/'}${url}`;
+}
+
 const api = axios.create({
   baseURL: API_BASE,
   timeout: 30000,

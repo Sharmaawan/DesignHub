@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { HiOutlineX, HiOutlineCheck, HiOutlineExclamation, HiOutlineLink, HiOutlineChatAlt, HiOutlineClock, HiOutlinePlus } from 'react-icons/hi';
 import { useEditorStore } from '../../stores/editorStore';
 import { useSocialStore, SocialAccount } from '../../stores/socialStore';
-import { uploadAPI } from '../../utils/api';
+import { uploadAPI, BACKEND_ORIGIN as BACKEND } from '../../utils/api';
 import toast from 'react-hot-toast';
 
 interface PublishModalProps {
@@ -107,7 +107,6 @@ export default function PublishModal({ open, onClose, initialAccountId }: Publis
       const dataUrl = canvas.toDataURL('image/png');
       const file = dataUrlToFile(dataUrl, `publish-${Date.now()}.png`);
       const { data: uploaded } = await uploadAPI.upload(file);
-      const BACKEND = import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:3001';
       const mediaUrl = `${BACKEND}${uploaded.url}`;
 
       const hashtags = hashtagsInput.split(/[\s,]+/).map((h) => h.replace(/^#/, '').trim()).filter(Boolean);

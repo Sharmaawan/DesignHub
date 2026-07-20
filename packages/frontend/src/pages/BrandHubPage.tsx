@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useBrandStore } from '../stores/brandStore';
 import { useNotificationStore } from '../stores/notificationStore';
-import { uploadAPI } from '../utils/api';
+import { uploadAPI, BACKEND_ORIGIN as BACKEND } from '../utils/api';
 import DashboardSidebar from '../components/dashboard/DashboardSidebar';
 import CreateButton from '../components/dashboard/CreateButton';
 import NotificationCenter from '../components/dashboard/NotificationCenter';
@@ -53,7 +53,6 @@ export default function BrandHubPage() {
   // uses) and store just the short returned URL — not a base64 data URL. Embedding the
   // whole image as base64 directly in JSON is what caused uploads to fail: it produces a
   // multi-KB/MB string that overflows what the database column was built to hold.
-  const BACKEND = import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:3001';
 
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { uploadAPI, aiAPI, aiSettingsAPI } from '../../utils/api';
+import { uploadAPI, aiAPI, aiSettingsAPI, BACKEND_ORIGIN as BACKEND, resolveAssetUrl } from '../../utils/api';
 import { importPDF, importSVG, importCSV, importXLSX, importDOCX, importPPTX, paginateParagraphs } from '../../utils/documentImport';
 import { useEditorStore } from '../../stores/editorStore';
 import { COLORS_PALETTE } from '../../utils/cn';
@@ -707,12 +707,9 @@ export default function LeftSidebar() {
 
       // Image generation (gpt-image-1) always returns base64, which the backend
       // persists to disk and hands back as a relative /uploads/... path — resolve
-      // it against the backend's own origin, same as every other /uploads/ URL in
-      // this file, or it 404s against the frontend's origin instead.
-      if (isImage && content.startsWith('/uploads/')) {
-        const BACKEND = import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:3001';
-        content = `${BACKEND}${content}`;
-      }
+      // it against the backend's own origin, or it 404s against the frontend's
+      // origin instead. Absolute URLs (dall-e-3) pass through untouched.
+      if (isImage) content = resolveAssetUrl(content);
 
       setAiResult(content);
 
@@ -955,8 +952,6 @@ export default function LeftSidebar() {
     probe.onerror = () => toast.error('Could not read that video file');
     probe.src = url;
   };
-
-  const BACKEND = import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:3001';
 
   // Import categories the editor can turn into editable canvas content, as opposed to
   // video/audio which are just stored and opened externally.
@@ -1277,7 +1272,6 @@ export default function LeftSidebar() {
     const token = localStorage.getItem('designhub-token');
     if (!token) return;
     uploadAPI.list().then(({ data }) => {
-      const BACKEND = import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:3001';
       const fromDB: UploadedFile[] = (data as any[]).map((f) => {
         const cat = getFileCategory(f.fileType || '', f.fileName || '');
         return {
