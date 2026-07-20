@@ -215,7 +215,28 @@ router.post('/pending/:pendingId/select', authMiddleware, async (req: AuthReques
 // ===== POSTS =====
 router.post('/posts', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
-    const { socialAccountId, projectId, action, mediaType, mediaUrls, caption, hashtags, altText, firstComment, linkUrl, scheduledFor } = req.body;
+    const { socialAccountId, projectId, action, mediaType, mediaUrls: rawMediaUrls, caption, hashtags, altText, firstComment, linkUrl, scheduledFor } = req.body;
+
+    // Meta and Pinterest publish by handing the media URL to the *platform*, whose
+    // servers then fetch it — so a relative "/uploads/x.png" (or anything pointing at
+    // localhost) can never work, and the failure surfaces as an opaque upstream error.
+    // Resolve to the deployment's public origin here rather than trusting whatever the
+    // browser sent, so scheduled posts (published later, with no browser involved)
+    // store a fetchable URL too.
+    const PUBLIC_ORIGIN = (process.env.PUBLIC_MEDIA_URL || process.env.FRONTEND_URL || '').replace(/\/$/, '');
+    const mediaUrls: string[] = (Array.isArray(rawMediaUrls) ? rawMediaUrls : []).map((u: string) =>
+      typeof u === 'string' && u.startsWith('/') ? `${PUBLIC_ORIGIN}${u}` : u
+    );
+    if (mediaUrls.some((u) => !/^https?:\/\//.test(u))) {
+      return res.status(400).json({
+        error: 'Media URL is not publicly reachable. Set FRONTEND_URL (or PUBLIC_MEDIA_URL) on the API to this deployment\'s public https origin.',
+      });
+    }
+    if (mediaUrls.some((u) => /^https?:\/\/(localhost|127\.0\.0\.1)/.test(u))) {
+      return res.status(400).json({
+        error: 'Media URL points at localhost, which social platforms cannot fetch. Set FRONTEND_URL (or PUBLIC_MEDIA_URL) to the public origin.',
+      });
+    }
 
     const account = await prisma.socialAccount.findUnique({ where: { id: socialAccountId } });
     if (!account || account.userId !== req.userId) return res.status(404).json({ error: 'Social account not found' });
