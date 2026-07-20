@@ -668,8 +668,13 @@ export default function LeftSidebar() {
     }
   };
 
+  // Reference images carry their own content, so on the image tab they are a
+  // sufficient instruction on their own — "upload the logos, press Generate" has
+  // to work without typing anything. Every other tab still needs a prompt.
+  const canAiGenerate = aiPrompt.trim().length > 0 || (aiTab === 'image' && aiReferenceImages.length > 0);
+
   const handleAiGenerate = async () => {
-    if (!aiPrompt.trim()) { toast.error('Enter a prompt first'); return; }
+    if (!canAiGenerate) { toast.error('Enter a prompt or attach a reference image'); return; }
     const token = localStorage.getItem('designhub-token');
     if (!token) { toast.error('Please log in to use AI generation'); return; }
 
@@ -688,7 +693,14 @@ export default function LeftSidebar() {
       : aiTab === 'suggest'
       ? `Suggest design ideas for: ${aiPrompt}. Give 3 specific visual design suggestions with colors, fonts, and layout ideas. Keep each suggestion to 1-2 sentences.`
       : isImage && aiReferenceImages.length > 0
-      ? `${aiPrompt}. Incorporate the attached logo/reference image${aiReferenceImages.length > 1 ? 's' : ''} naturally into the design.`
+      ? (() => {
+          const plural = aiReferenceImages.length > 1 ? 's' : '';
+          // With no typed prompt the attached images ARE the brief: keep their
+          // own content rather than inventing a new subject around them.
+          return aiPrompt.trim()
+            ? `${aiPrompt.trim()}. Incorporate the attached logo/reference image${plural} naturally into the design.`
+            : `Combine the attached image${plural} into a single polished, professional design. Preserve the content, text and branding of the attached image${plural} as faithfully as possible — compose and arrange them attractively rather than replacing them with new subject matter.`;
+        })()
       : aiPrompt;
 
     console.log('[AI] generate request', { provider, type: isImage ? 'image' : 'text', aiTab });
@@ -1872,7 +1884,13 @@ export default function LeftSidebar() {
                   value={aiPrompt}
                   onChange={(e) => setAiPrompt(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handleAiGenerate(); }}
-                  placeholder={aiTab === 'write' ? 'Catchy headline for a fitness brand…' : aiTab === 'image' ? 'Neon city skyline at dusk…' : 'Birthday card for a 30-year-old…'}
+                  placeholder={aiTab === 'write'
+                    ? 'Catchy headline for a fitness brand…'
+                    : aiTab === 'image'
+                    ? (aiReferenceImages.length > 0
+                        ? 'Optional — describe how to combine the attached image(s), or just press Generate'
+                        : 'Neon city skyline at dusk…')
+                    : 'Birthday card for a 30-year-old…'}
                   rows={6}
                   className="w-full px-3 py-2.5 text-xs border border-gray-200 dark:border-gray-700 rounded-lg resize-y min-h-[110px] bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-canva-purple/30 focus:border-canva-purple"
                 />
@@ -1916,7 +1934,7 @@ export default function LeftSidebar() {
                 {/* Generate */}
                 <button
                   onClick={handleAiGenerate}
-                  disabled={aiGenerating || !aiPrompt.trim()}
+                  disabled={aiGenerating || !canAiGenerate}
                   className="w-full flex items-center justify-center gap-1.5 py-2 bg-canva-purple hover:bg-canva-purple/90 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg text-xs font-semibold transition-all">
                   {aiGenerating
                     ? <><svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Generating…</>
