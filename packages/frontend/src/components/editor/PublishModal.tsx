@@ -44,6 +44,10 @@ export default function PublishModal({ open, onClose, initialAccountId }: Publis
   const [scheduledFor, setScheduledFor] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<'published' | 'scheduled' | 'draft' | 'failed' | null>(null);
+  // The platform's own reason for rejecting the post. Without this the modal showed
+  // a fixed "check the platform is connected" line for every failure, which hid the
+  // actual cause (expired token, missing permission, unfetchable media URL, ...).
+  const [failureReason, setFailureReason] = useState('');
 
   const currentPage = pages[currentPageIndex];
 
@@ -101,6 +105,7 @@ export default function PublishModal({ open, onClose, initialAccountId }: Publis
   const handleSubmit = async () => {
     if (!account) return;
     setSubmitting(true);
+    setFailureReason('');
     try {
       const canvas = document.querySelector('canvas');
       if (!canvas) throw new Error('Could not find the design canvas to export');
@@ -126,6 +131,7 @@ export default function PublishModal({ open, onClose, initialAccountId }: Publis
 
       setResult(post.status === 'published' ? 'published' : post.status === 'failed' ? 'failed' : post.status === 'scheduled' ? 'scheduled' : 'draft');
       if (post.status === 'failed') {
+        setFailureReason(post.errorMessage || '');
         toast.error(post.errorMessage || 'Publish failed');
       } else {
         toast.success(
@@ -134,7 +140,12 @@ export default function PublishModal({ open, onClose, initialAccountId }: Publis
       }
     } catch (err: any) {
       console.error('[Publish] failed', err);
-      toast.error(err.response?.data?.error || err.message || 'Failed to publish');
+      // A publish that the platform rejects comes back as the failed SocialPost
+      // record itself (status 4xx/5xx with `errorMessage`), not as `{ error }` —
+      // check both, or the real reason is lost and only the HTTP status shows.
+      const reason = err.response?.data?.errorMessage || err.response?.data?.error || err.message || 'Failed to publish';
+      setFailureReason(reason);
+      toast.error(reason);
       setResult('failed');
     } finally {
       setSubmitting(false);
@@ -304,14 +315,18 @@ export default function PublishModal({ open, onClose, initialAccountId }: Publis
               )}
 
               {result && (
-                <div className={`flex items-center gap-2 p-3 rounded-xl text-sm ${
+                <div className={`flex items-start gap-2 p-3 rounded-xl text-sm ${
                   result === 'failed' ? 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400' : 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400'
                 }`}>
-                  {result === 'failed' ? <HiOutlineExclamation size={18} /> : <HiOutlineCheck size={18} />}
-                  {result === 'published' && 'Published successfully!'}
-                  {result === 'scheduled' && 'Scheduled — it will publish automatically at the chosen time.'}
-                  {result === 'draft' && 'Saved as a draft. Find it in Social Publishing > History.'}
-                  {result === 'failed' && "Couldn't publish — check the platform is connected and try again."}
+                  <span className="shrink-0 mt-0.5">
+                    {result === 'failed' ? <HiOutlineExclamation size={18} /> : <HiOutlineCheck size={18} />}
+                  </span>
+                  <span className="min-w-0 break-words">
+                    {result === 'published' && 'Published successfully!'}
+                    {result === 'scheduled' && 'Scheduled — it will publish automatically at the chosen time.'}
+                    {result === 'draft' && 'Saved as a draft. Find it in Social Publishing > History.'}
+                    {result === 'failed' && (failureReason || "Couldn't publish — check the platform is connected and try again.")}
+                  </span>
                 </div>
               )}
             </div>
