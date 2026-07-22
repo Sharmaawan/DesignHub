@@ -30,7 +30,7 @@ function dataUrlToFile(dataUrl: string, filename: string): File {
 
 export default function PublishModal({ open, onClose, initialAccountId }: PublishModalProps) {
   const { pages, currentPageIndex } = useEditorStore();
-  const { platforms, accounts, loadPlatforms, loadAccounts, connect, createPost } = useSocialStore();
+  const { platforms, accounts, loadPlatforms, loadAccounts, connect, createPost, approvalContext, loadApprovalContext } = useSocialStore();
 
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
@@ -43,7 +43,11 @@ export default function PublishModal({ open, onClose, initialAccountId }: Publis
   const [action, setAction] = useState<'now' | 'schedule' | 'draft'>('now');
   const [scheduledFor, setScheduledFor] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState<'published' | 'scheduled' | 'draft' | 'failed' | null>(null);
+  const [result, setResult] = useState<'published' | 'scheduled' | 'draft' | 'failed' | 'pending_approval' | null>(null);
+
+  // A maker's post is held for an approver instead of going straight out, so the
+  // primary button and success copy change wording for them.
+  const isMaker = !!approvalContext?.isMaker;
   // The platform's own reason for rejecting the post. Without this the modal showed
   // a fixed "check the platform is connected" line for every failure, which hid the
   // actual cause (expired token, missing permission, unfetchable media URL, ...).
@@ -59,6 +63,7 @@ export default function PublishModal({ open, onClose, initialAccountId }: Publis
     setSubmitting(false);
     loadPlatforms();
     loadAccounts();
+    loadApprovalContext();
   }, [open, initialAccountId]);
 
   if (!open) return null;
@@ -129,13 +134,22 @@ export default function PublishModal({ open, onClose, initialAccountId }: Publis
         scheduledFor: action === 'schedule' && scheduledFor ? new Date(scheduledFor).toISOString() : undefined,
       });
 
-      setResult(post.status === 'published' ? 'published' : post.status === 'failed' ? 'failed' : post.status === 'scheduled' ? 'scheduled' : 'draft');
+      setResult(
+        post.status === 'published' ? 'published'
+        : post.status === 'failed' ? 'failed'
+        : post.status === 'scheduled' ? 'scheduled'
+        : post.status === 'pending_approval' ? 'pending_approval'
+        : 'draft'
+      );
       if (post.status === 'failed') {
         setFailureReason(post.errorMessage || '');
         toast.error(post.errorMessage || 'Publish failed');
       } else {
         toast.success(
-          post.status === 'published' ? 'Published!' : post.status === 'scheduled' ? 'Scheduled!' : 'Saved as draft'
+          post.status === 'published' ? 'Published!'
+          : post.status === 'scheduled' ? 'Scheduled!'
+          : post.status === 'pending_approval' ? 'Sent for approval'
+          : 'Saved as draft'
         );
       }
     } catch (err: any) {
@@ -324,6 +338,7 @@ export default function PublishModal({ open, onClose, initialAccountId }: Publis
                   <span className="min-w-0 break-words">
                     {result === 'published' && 'Published successfully!'}
                     {result === 'scheduled' && 'Scheduled — it will publish automatically at the chosen time.'}
+                    {result === 'pending_approval' && 'Sent to your team’s approver. It will publish once approved.'}
                     {result === 'draft' && 'Saved as a draft. Find it in Social Publishing > History.'}
                     {result === 'failed' && (failureReason || "Couldn't publish — check the platform is connected and try again.")}
                   </span>
@@ -354,7 +369,11 @@ export default function PublishModal({ open, onClose, initialAccountId }: Publis
               disabled={submitting || (action === 'schedule' && !scheduledFor) || result !== null}
               className="btn-primary text-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {submitting ? 'Publishing…' : action === 'now' ? 'Publish' : action === 'schedule' ? 'Schedule' : 'Save draft'}
+              {submitting
+                ? (isMaker && action !== 'draft' ? 'Submitting…' : 'Publishing…')
+                : action === 'draft' ? 'Save draft'
+                : isMaker ? 'Submit for approval'
+                : action === 'now' ? 'Publish' : 'Schedule'}
             </button>
           )}
         </div>

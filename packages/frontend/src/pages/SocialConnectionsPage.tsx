@@ -18,6 +18,8 @@ const PLATFORM_META: Record<string, { label: string; icon: string; color: string
 
 const STATUS_META: Record<string, { label: string; className: string }> = {
   draft: { label: 'Draft', className: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300' },
+  pending_approval: { label: 'Awaiting approval', className: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300' },
+  rejected: { label: 'Rejected', className: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' },
   scheduled: { label: 'Scheduled', className: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' },
   publishing: { label: 'Publishing', className: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' },
   published: { label: 'Published', className: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' },
@@ -30,12 +32,17 @@ export default function SocialConnectionsPage() {
     loadPlatforms, loadAccounts, disconnect,
     resolvePending, selectPending,
     loadPosts, deletePost, refreshAnalytics,
+    approvalContext, pendingApproval,
+    loadApprovalContext, loadPendingApproval, approvePost, rejectPost,
   } = useSocialStore();
   const { unreadCount, setIsOpen: setNotifOpen } = useNotificationStore();
   const [searchParams, setSearchParams] = useSearchParams();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('designhub-sidebar-collapsed') === 'true');
   const [activeSection, setActiveSection] = useState('social');
-  const [activeTab, setActiveTab] = useState<'connections' | 'history'>('connections');
+  const [activeTab, setActiveTab] = useState<'connections' | 'history' | 'approvals'>('connections');
+  const [rejectingId, setRejectingId] = useState<string | null>(null);
+  const [rejectReason, setRejectReason] = useState('');
+  const [actingId, setActingId] = useState<string | null>(null);
   const [pendingChoices, setPendingChoices] = useState<{ platform: string; accounts: { platformUserId: string; platformUsername: string }[] } | null>(null);
   const [pendingSelected, setPendingSelected] = useState<Set<string>>(new Set());
   const [connectingSelected, setConnectingSelected] = useState(false);
@@ -49,6 +56,8 @@ export default function SocialConnectionsPage() {
     loadPlatforms();
     loadAccounts();
     loadPosts();
+    loadApprovalContext();
+    loadPendingApproval();
   }, []);
 
   // Land here from the OAuth popup's redirect (?connected=, ?pending=, ?error=)
@@ -168,9 +177,9 @@ export default function SocialConnectionsPage() {
             </div>
           )}
 
-          {/* Tabs */}
+          {/* Tabs — the Approvals tab only exists for team approvers. */}
           <div className="flex gap-1 mb-6">
-            {(['connections', 'history'] as const).map((tab) => (
+            {(['connections', 'history', ...(approvalContext?.isApprover ? ['approvals'] as const : [])] as const).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -180,7 +189,16 @@ export default function SocialConnectionsPage() {
                     : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'
                 }`}
               >
-                {tab === 'connections' ? 'Connected Accounts' : 'Publish History'}
+                {tab === 'connections' ? 'Connected Accounts' : tab === 'history' ? 'Publish History' : (
+                  <span className="inline-flex items-center gap-1.5">
+                    Approvals
+                    {pendingApproval.length > 0 && (
+                      <span className={`min-w-[18px] px-1.5 h-[18px] inline-flex items-center justify-center rounded-full text-[10px] font-bold ${activeTab === tab ? 'bg-white text-[#7B2FBE]' : 'bg-[#7B2FBE] text-white'}`}>
+                        {pendingApproval.length}
+                      </span>
+                    )}
+                  </span>
+                )}
               </button>
             ))}
           </div>
@@ -288,6 +306,12 @@ export default function SocialConnectionsPage() {
                           {post.status === 'failed' && post.errorMessage && (
                             <p className="text-[11px] text-red-500 flex items-center gap-1 mt-1"><HiOutlineExclamation size={12} /> {post.errorMessage}</p>
                           )}
+                          {post.status === 'rejected' && (
+                            <p className="text-[11px] text-red-500 flex items-center gap-1 mt-1"><HiOutlineExclamation size={12} /> {post.rejectionReason ? `Rejected: ${post.rejectionReason}` : 'Rejected by approver'}</p>
+                          )}
+                          {post.status === 'pending_approval' && (
+                            <p className="text-[11px] text-purple-500 mt-1">Waiting for a team approver</p>
+                          )}
                           {post.status === 'scheduled' && post.scheduledFor && (
                             <p className="text-[11px] text-blue-500 mt-1">Scheduled for {new Date(post.scheduledFor).toLocaleString()}</p>
                           )}
@@ -320,6 +344,92 @@ export default function SocialConnectionsPage() {
                           className="mt-2 flex items-center gap-1 text-[11px] text-[#7B2FBE] hover:underline"
                         >
                           <HiOutlineRefresh size={12} className={refreshingId === post.id ? 'animate-spin' : ''} /> Refresh analytics
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* APPROVALS TAB — approvers only (tab isn't rendered otherwise) */}
+          {activeTab === 'approvals' && (
+            <div className="space-y-3">
+              {pendingApproval.length === 0 && (
+                <div className="text-center py-16 text-gray-400 text-sm">Nothing awaiting approval right now.</div>
+              )}
+              {pendingApproval.map((post) => {
+                const meta = PLATFORM_META[post.platform];
+                const submitter = post.user?.name || post.user?.email || 'A team member';
+                const busy = actingId === post.id;
+                return (
+                  <div key={post.id} className="bg-white dark:bg-[#1e1e30] rounded-2xl border border-gray-200 dark:border-gray-700 p-4">
+                    <div className="flex items-start gap-3">
+                      {post.mediaUrls[0] && <img src={post.mediaUrls[0]} alt="" className="w-16 h-16 rounded-lg object-cover flex-shrink-0" />}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span>{meta?.icon}</span>
+                          <span className="text-sm font-medium text-gray-900 dark:text-white">{meta?.label}</span>
+                          <span className="text-[11px] text-gray-400">· by {submitter}</span>
+                        </div>
+                        <p className="text-xs text-gray-500 break-words">{post.caption || '(no caption)'}</p>
+                        {post.scheduledFor && (
+                          <p className="text-[11px] text-blue-500 mt-1">Scheduled for {new Date(post.scheduledFor).toLocaleString()}</p>
+                        )}
+                        {post.hashtags && post.hashtags.length > 0 && (
+                          <p className="text-[11px] text-[#7B2FBE] mt-1 break-words">{post.hashtags.map((h) => `#${h}`).join(' ')}</p>
+                        )}
+                      </div>
+                    </div>
+
+                    {rejectingId === post.id ? (
+                      <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
+                        <textarea
+                          value={rejectReason}
+                          onChange={(e) => setRejectReason(e.target.value)}
+                          placeholder="Reason for rejection (optional) — the maker sees this"
+                          rows={2}
+                          className="w-full px-3 py-2 text-xs border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7B2FBE]/30 resize-y"
+                        />
+                        <div className="flex items-center justify-end gap-2 mt-2">
+                          <button onClick={() => { setRejectingId(null); setRejectReason(''); }} className="text-xs px-3 py-1.5 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700">Cancel</button>
+                          <button
+                            disabled={busy}
+                            onClick={async () => {
+                              setActingId(post.id);
+                              try { await rejectPost(post.id, rejectReason.trim() || undefined); toast.success('Post rejected'); setRejectingId(null); setRejectReason(''); }
+                              catch (err: any) { toast.error(err.message); }
+                              finally { setActingId(null); }
+                            }}
+                            className="text-xs px-4 py-1.5 rounded-lg bg-red-600 text-white font-semibold hover:bg-red-700 disabled:opacity-50"
+                          >
+                            Confirm reject
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-end gap-2 mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
+                        <button
+                          disabled={busy}
+                          onClick={() => { setRejectingId(post.id); setRejectReason(''); }}
+                          className="text-xs px-4 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 font-semibold hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
+                        >
+                          Reject
+                        </button>
+                        <button
+                          disabled={busy}
+                          onClick={async () => {
+                            setActingId(post.id);
+                            try {
+                              await approvePost(post.id);
+                              toast.success(post.scheduledFor && new Date(post.scheduledFor).getTime() > Date.now() ? 'Approved — scheduled' : 'Approved — publishing');
+                            } catch (err: any) { toast.error(err.message); }
+                            finally { setActingId(null); }
+                          }}
+                          className="text-xs px-4 py-1.5 rounded-lg bg-[#7B2FBE] text-white font-semibold hover:bg-[#6a28a5] disabled:opacity-50 flex items-center gap-1.5"
+                        >
+                          <HiOutlineCheck size={14} /> {busy ? 'Working…' : 'Approve & publish'}
                         </button>
                       </div>
                     )}

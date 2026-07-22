@@ -539,7 +539,7 @@ model SocialPost {
   projectId       String?   @map("project_id")
   socialAccountId String    @map("social_account_id")
   platform        String
-  status          String    @default("draft") // draft|scheduled|publishing|published|failed
+  status          String    @default("draft") // draft|pending_approval|rejected|scheduled|publishing|published|failed
   mediaType       String    @map("media_type") // image|video|carousel|story
   mediaUrls       Json      @map("media_urls")
   caption         String?   @db.Text
@@ -551,6 +551,15 @@ model SocialPost {
   publishedAt     DateTime? @map("published_at")
   platformPostId  String?   @map("platform_post_id")
   errorMessage    String?   @map("error_message") @db.Text
+  // Maker/approver workflow. When a team member with the 'maker' role submits a
+  // post, it is held at status 'pending_approval' scoped to teamId; an 'approver'
+  // on that team then approves (→ published/scheduled) or rejects it. Null teamId
+  // means the author could publish directly (no maker role), the pre-existing path.
+  teamId          String?   @map("team_id")
+  submittedById   String?   @map("submitted_by_id")
+  approvedById    String?   @map("approved_by_id")
+  approvedAt      DateTime? @map("approved_at")
+  rejectionReason String?   @map("rejection_reason") @db.Text
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
@@ -561,6 +570,7 @@ model SocialPost {
 
   @@index([status, scheduledFor])
   @@index([userId])
+  @@index([teamId, status])
   @@map("social_posts")
 }
 

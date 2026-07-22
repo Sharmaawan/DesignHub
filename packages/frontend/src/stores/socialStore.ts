@@ -28,7 +28,7 @@ export interface SocialPostAnalytics {
 export interface SocialPost {
   id: string;
   platform: string;
-  status: 'draft' | 'scheduled' | 'publishing' | 'published' | 'failed';
+  status: 'draft' | 'pending_approval' | 'rejected' | 'scheduled' | 'publishing' | 'published' | 'failed';
   mediaType: 'image' | 'video' | 'carousel' | 'story';
   mediaUrls: string[];
   caption: string | null;
@@ -40,9 +40,19 @@ export interface SocialPost {
   publishedAt: string | null;
   platformPostId: string | null;
   errorMessage: string | null;
+  rejectionReason?: string | null;
   createdAt: string;
   analytics?: SocialPostAnalytics | null;
   socialAccount?: { platform: string; platformUsername: string | null };
+  // Present on the approver queue only — who submitted the post.
+  user?: { name: string | null; email: string | null };
+}
+
+export interface ApprovalContext {
+  inTeam: boolean;
+  role: string | null;
+  isApprover: boolean;
+  isMaker: boolean;
 }
 
 interface SocialState {
@@ -50,6 +60,8 @@ interface SocialState {
   accounts: SocialAccount[];
   posts: SocialPost[];
   isLoading: boolean;
+  approvalContext: ApprovalContext | null;
+  pendingApproval: SocialPost[];
 
   loadPlatforms: () => Promise<void>;
   loadAccounts: () => Promise<void>;
@@ -62,6 +74,11 @@ interface SocialState {
   createPost: (data: Parameters<typeof socialAPI.createPost>[0]) => Promise<SocialPost>;
   deletePost: (id: string) => Promise<void>;
   refreshAnalytics: (id: string) => Promise<void>;
+
+  loadApprovalContext: () => Promise<void>;
+  loadPendingApproval: () => Promise<void>;
+  approvePost: (id: string) => Promise<void>;
+  rejectPost: (id: string, reason?: string) => Promise<void>;
 }
 
 export const useSocialStore = create<SocialState>((set, get) => ({
@@ -69,6 +86,8 @@ export const useSocialStore = create<SocialState>((set, get) => ({
   accounts: [],
   posts: [],
   isLoading: false,
+  approvalContext: null,
+  pendingApproval: [],
 
   loadPlatforms: async () => {
     try {
@@ -160,6 +179,43 @@ export const useSocialStore = create<SocialState>((set, get) => ({
       set((s) => ({ posts: s.posts.map((p) => (p.id === id ? { ...p, analytics: data } : p)) }));
     } catch (err: any) {
       throw new Error(err.response?.data?.error || 'Failed to fetch analytics');
+    }
+  },
+
+  loadApprovalContext: async () => {
+    try {
+      const { data } = await socialAPI.approvalContext();
+      set({ approvalContext: data });
+    } catch (err) {
+      console.error('[social] failed to load approval context', err);
+    }
+  },
+
+  loadPendingApproval: async () => {
+    try {
+      const { data } = await socialAPI.pendingApproval();
+      set({ pendingApproval: data });
+    } catch (err) {
+      console.error('[social] failed to load pending approvals', err);
+    }
+  },
+
+  approvePost: async (id) => {
+    try {
+      await socialAPI.approvePost(id);
+      set((s) => ({ pendingApproval: s.pendingApproval.filter((p) => p.id !== id) }));
+      await get().loadPosts();
+    } catch (err: any) {
+      throw new Error(err.response?.data?.error || 'Failed to approve post');
+    }
+  },
+
+  rejectPost: async (id, reason) => {
+    try {
+      await socialAPI.rejectPost(id, reason);
+      set((s) => ({ pendingApproval: s.pendingApproval.filter((p) => p.id !== id) }));
+    } catch (err: any) {
+      throw new Error(err.response?.data?.error || 'Failed to reject post');
     }
   },
 }));

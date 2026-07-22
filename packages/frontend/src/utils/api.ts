@@ -228,6 +228,11 @@ export const socialAPI = {
   updatePost: (id: string, data: any) => api.put(`/social/posts/${id}`, data),
   deletePost: (id: string) => api.delete(`/social/posts/${id}`),
   analytics: (id: string) => api.get(`/social/posts/${id}/analytics`),
+  // Maker/approver workflow
+  approvalContext: () => api.get('/social/approval-context'),
+  pendingApproval: () => api.get('/social/posts/pending-approval'),
+  approvePost: (id: string) => api.post(`/social/posts/${id}/approve`),
+  rejectPost: (id: string, reason?: string) => api.post(`/social/posts/${id}/reject`, { reason }),
 };
 
 export default api;

@@ -77,6 +77,57 @@ function withDecryptedToken<T extends { accessToken: string }>(account: T): T {
   return { ...account, accessToken: decryptSecret(account.accessToken) };
 }
 
+// ===== MAKER / APPROVER =====
+// Roles that may approve or reject a team's pending posts. 'maker' is the only role
+// whose publish/schedule is held for review; everyone else publishes directly.
+const APPROVER_ROLES = ['approver', 'admin', 'owner'];
+
+// A user's team membership drives the workflow: makers submit for approval, approvers
+// act on the queue. We take the first membership — this app has no notion of an
+// "active" team, and social accounts are per-user, not per-team.
+async function getMembership(userId: string): Promise<{ teamId: string; role: string } | null> {
+  const m = await prisma.teamMember.findFirst({ where: { userId }, select: { teamId: true, role: true } });
+  return m ? { teamId: m.teamId, role: m.role } : null;
+}
+
+// Actually run the platform publish for an already-persisted post and move it to
+// published/failed. Shared by the direct-publish path and the approve endpoint so the
+// two can never drift. Returns the updated post row.
+async function executePublish(postId: string) {
+  const post = await prisma.socialPost.findUnique({ where: { id: postId }, include: { socialAccount: true } });
+  if (!post) throw Object.assign(new Error('Post not found'), { status: 404 });
+
+  const adapter = getAdapter(post.platform);
+  if (!adapter || !adapter.isConfigured()) {
+    return prisma.socialPost.update({
+      where: { id: post.id },
+      data: { status: 'failed', errorMessage: `${post.platform} isn't configured yet` },
+    });
+  }
+  try {
+    const result = await adapter.publish(withDecryptedToken(post.socialAccount), {
+      mediaType: post.mediaType as any,
+      mediaUrls: post.mediaUrls as string[],
+      caption: post.caption,
+      hashtags: post.hashtags as string[] | null,
+      altText: post.altText,
+      firstComment: post.firstComment,
+      linkUrl: post.linkUrl,
+    });
+    return prisma.socialPost.update({
+      where: { id: post.id },
+      data: { status: 'published', publishedAt: new Date(), platformPostId: result.platformPostId },
+    });
+  } catch (err: any) {
+    console.error('[social/posts] publish failed', err);
+    const failed = await prisma.socialPost.update({
+      where: { id: post.id },
+      data: { status: 'failed', errorMessage: err.message || 'Publish failed' },
+    });
+    throw Object.assign(new Error(failed.errorMessage || 'Publish failed'), { status: err.status || 500, post: failed });
+  }
+}
+
 // ===== PLATFORM CONFIG =====
 router.get('/platforms', authMiddleware, async (_req: AuthRequest, res: Response) => {
   const platforms = listAdapters().map((a) => ({
@@ -257,7 +308,16 @@ router.post('/posts', authMiddleware, async (req: AuthRequest, res: Response) =>
       return res.status(400).json({ error: `Caption exceeds ${spec.label}'s ${spec.maxCaptionLength} character limit` });
     }
 
-    const status = action === 'draft' ? 'draft' : action === 'schedule' ? 'scheduled' : 'publishing';
+    // Maker/approver gate: a team member who is NOT an approver is a maker, so any
+    // post they'd send to a platform (now or scheduled) is held for review instead.
+    // Drafts are never gated, and users outside a team publish directly as before.
+    const membership = await getMembership(req.userId!);
+    const isMaker = !!membership && !APPROVER_ROLES.includes(membership.role);
+    const needsApproval = isMaker && (action === 'now' || action === 'schedule');
+
+    const status = needsApproval
+      ? 'pending_approval'
+      : action === 'draft' ? 'draft' : action === 'schedule' ? 'scheduled' : 'publishing';
 
     const post = await prisma.socialPost.create({
       data: {
@@ -273,25 +333,35 @@ router.post('/posts', authMiddleware, async (req: AuthRequest, res: Response) =>
         altText,
         firstComment,
         linkUrl,
+        // Keep the requested schedule time through the approval hold — on approval a
+        // future time routes back to the scheduler, a past/absent time publishes now.
         scheduledFor: action === 'schedule' && scheduledFor ? new Date(scheduledFor) : null,
+        ...(needsApproval ? { teamId: membership!.teamId, submittedById: req.userId! } : {}),
       },
     });
 
+    if (needsApproval) {
+      // Notify every approver on the team that a post is waiting for review.
+      const approvers = await prisma.teamMember.findMany({
+        where: { teamId: membership!.teamId, role: { in: APPROVER_ROLES } },
+        select: { userId: true },
+      });
+      const author = await prisma.user.findUnique({ where: { id: req.userId! }, select: { name: true, email: true } });
+      const who = author?.name || author?.email || 'A team member';
+      await prisma.notification.createMany({
+        data: approvers
+          .filter((a) => a.userId !== req.userId)
+          .map((a) => ({ userId: a.userId, type: 'social_approval_request', message: `${who} submitted a ${account.platform} post for your approval` })),
+      }).catch((e) => console.error('[social/posts] failed to notify approvers', e));
+      return res.json(post);
+    }
+
     if (action === 'now') {
       try {
-        const result = await adapter.publish(withDecryptedToken(account), { mediaType, mediaUrls, caption, hashtags, altText, firstComment, linkUrl });
-        const published = await prisma.socialPost.update({
-          where: { id: post.id },
-          data: { status: 'published', publishedAt: new Date(), platformPostId: result.platformPostId },
-        });
+        const published = await executePublish(post.id);
         return res.json(published);
       } catch (err: any) {
-        console.error('[social/posts] publish failed', err);
-        const failed = await prisma.socialPost.update({
-          where: { id: post.id },
-          data: { status: 'failed', errorMessage: err.message || 'Publish failed' },
-        });
-        return res.status(remapUpstreamStatus(err.status || 500)).json(failed);
+        return res.status(remapUpstreamStatus(err.status || 500)).json(err.post ?? { error: err.message || 'Publish failed' });
       }
     }
 
@@ -314,6 +384,130 @@ router.get('/posts', authMiddleware, async (req: AuthRequest, res: Response) => 
   } catch (err) {
     console.error('[social/posts] list failed', err);
     res.status(500).json({ error: 'Failed to fetch posts' });
+  }
+});
+
+// ===== APPROVAL WORKFLOW =====
+// Tells the client whether to show the approver queue and how the Publish button
+// should read (maker → "Submit for approval", approver → "Publish").
+router.get('/approval-context', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const membership = await getMembership(req.userId!);
+    const isApprover = !!membership && APPROVER_ROLES.includes(membership.role);
+    res.json({
+      inTeam: !!membership,
+      role: membership?.role ?? null,
+      isApprover,
+      // Only a non-approver team member has posts held for review.
+      isMaker: !!membership && !isApprover,
+    });
+  } catch (err) {
+    console.error('[social/approval-context] failed', err);
+    res.status(500).json({ error: 'Failed to load approval context' });
+  }
+});
+
+// The approver's queue: everything awaiting review on the teams they can approve for.
+router.get('/posts/pending-approval', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const membership = await getMembership(req.userId!);
+    if (!membership || !APPROVER_ROLES.includes(membership.role)) return res.json([]);
+    const posts = await prisma.socialPost.findMany({
+      where: { teamId: membership.teamId, status: 'pending_approval' },
+      include: {
+        socialAccount: { select: { platform: true, platformUsername: true } },
+        user: { select: { name: true, email: true } },
+      },
+      orderBy: { createdAt: 'asc' },
+      take: 100,
+    });
+    res.json(posts);
+  } catch (err) {
+    console.error('[social/posts/pending-approval] failed', err);
+    res.status(500).json({ error: 'Failed to fetch pending posts' });
+  }
+});
+
+// Load the post an approver is about to act on, verifying they may act on it.
+async function loadForApproval(postId: string, userId: string) {
+  const membership = await getMembership(userId);
+  if (!membership || !APPROVER_ROLES.includes(membership.role)) {
+    throw Object.assign(new Error('Only an approver can do that'), { status: 403 });
+  }
+  const post = await prisma.socialPost.findUnique({ where: { id: postId } });
+  if (!post || post.teamId !== membership.teamId) throw Object.assign(new Error('Pending post not found'), { status: 404 });
+  if (post.status !== 'pending_approval') throw Object.assign(new Error('This post is no longer awaiting approval'), { status: 409 });
+  return post;
+}
+
+router.post('/posts/:id/approve', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const post = await loadForApproval(req.params.id, req.userId!);
+
+    // A future scheduled time goes back to the scheduler; otherwise publish now.
+    const future = post.scheduledFor && post.scheduledFor.getTime() > Date.now();
+    await prisma.socialPost.update({
+      where: { id: post.id },
+      data: { approvedById: req.userId!, approvedAt: new Date(), rejectionReason: null, status: future ? 'scheduled' : 'publishing' },
+    });
+
+    let result = await prisma.socialPost.findUnique({ where: { id: post.id } });
+    if (!future) {
+      try {
+        result = await executePublish(post.id);
+      } catch (err: any) {
+        // The post is already marked failed inside executePublish; surface why but
+        // still 200 so the approver sees the failure state rather than a raw error.
+        result = err.post ?? result;
+      }
+    }
+
+    if (post.submittedById) {
+      const decidedStatus = result?.status;
+      await prisma.notification.create({
+        data: {
+          userId: post.submittedById,
+          type: 'social_approval_decision',
+          message: decidedStatus === 'failed'
+            ? `Your ${post.platform} post was approved but failed to publish`
+            : future
+            ? `Your ${post.platform} post was approved and scheduled`
+            : `Your ${post.platform} post was approved and published`,
+        },
+      }).catch((e) => console.error('[social/approve] notify failed', e));
+    }
+    res.json(result);
+  } catch (err: any) {
+    console.error('[social/approve] failed', err);
+    res.status(err.status || 500).json({ error: err.message || 'Failed to approve post' });
+  }
+});
+
+router.post('/posts/:id/reject', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const post = await loadForApproval(req.params.id, req.userId!);
+    const reason = (req.body?.reason || '').toString().trim();
+
+    const rejected = await prisma.socialPost.update({
+      where: { id: post.id },
+      data: { status: 'rejected', approvedById: req.userId!, rejectionReason: reason || null },
+    });
+
+    if (post.submittedById) {
+      await prisma.notification.create({
+        data: {
+          userId: post.submittedById,
+          type: 'social_approval_decision',
+          message: reason
+            ? `Your ${post.platform} post was rejected: ${reason}`
+            : `Your ${post.platform} post was rejected`,
+        },
+      }).catch((e) => console.error('[social/reject] notify failed', e));
+    }
+    res.json(rejected);
+  } catch (err: any) {
+    console.error('[social/reject] failed', err);
+    res.status(err.status || 500).json({ error: err.message || 'Failed to reject post' });
   }
 });
 
