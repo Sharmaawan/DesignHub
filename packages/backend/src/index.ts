@@ -86,10 +86,18 @@ app.use('/uploads', express.static('uploads'));
 // Generous global ceiling against abuse; a much tighter one below specifically
 // guards the unauthenticated register/login/google endpoints from brute-forcing.
 app.use('/api/', rateLimit({ windowMs: 15 * 60 * 1000, limit: 300, standardHeaders: true, legacyHeaders: false }));
-app.use('/api/auth', rateLimit({
-  windowMs: 15 * 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false,
+
+// Scope the strict limiter to ONLY the unauthenticated credential endpoints. It used
+// to sit on all of /api/auth, but that namespace also holds GET /me — which the
+// frontend calls on every page load to restore the session — so ordinary browsing
+// exhausted the login budget and locked users out of signing in.
+const credentialLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false,
   message: { error: 'Too many attempts — please try again later.' },
-}));
+});
+app.use('/api/auth/login', credentialLimiter);
+app.use('/api/auth/register', credentialLimiter);
+app.use('/api/auth/google', credentialLimiter);
 
 app.use('/api/auth', authRoutes);
 app.use('/api/projects', projectRoutes);
