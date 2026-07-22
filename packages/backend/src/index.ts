@@ -57,6 +57,14 @@ process.on('uncaughtException', (err) => {
 });
 
 const app = express();
+
+// Behind a reverse proxy (nginx) the client IP arrives in X-Forwarded-For, not
+// req.socket — without this express-rate-limit throws ERR_ERL_UNEXPECTED_X_FORWARDED_FOR
+// and would otherwise rate-limit every request under the proxy's single IP. Trust
+// exactly one hop (the local nginx) rather than `true`, which would trust a
+// client-spoofed header and let anyone forge their rate-limit identity.
+app.set('trust proxy', 1);
+
 const httpServer = createServer(app);
 const FRONTEND_ORIGIN = process.env.FRONTEND_URL || 'http://localhost:5173';
 const io = new Server(httpServer, {
