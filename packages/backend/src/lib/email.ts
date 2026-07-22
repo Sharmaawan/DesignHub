@@ -4,8 +4,9 @@ interface SmtpCreds { host: string; port: number; user: string; pass: string }
 
 // Per-user SMTP (connected via Settings > Email, see routes/emailSettings.ts) always
 // wins when present — that's the whole point of that feature, invites should come from
-// the inviter's own address. Falls back to a system-wide SMTP_* env var only if the
-// inviter never connected one; if neither exists, sending is skipped (not a crash).
+// the inviter's own address. Otherwise fall back, in order, to a local msmtp relay
+// (MSMTP_PATH — reuses the server's ~/.msmtprc for host/auth/TLS) or a system-wide
+// SMTP_* env var. If none exists, sending is skipped (logged, not a crash).
 function resolveTransporter(userSmtp?: SmtpCreds | null) {
   if (userSmtp?.user && userSmtp?.pass) {
     return nodemailer.createTransport({
@@ -13,6 +14,17 @@ function resolveTransporter(userSmtp?: SmtpCreds | null) {
       port: userSmtp.port || 587,
       secure: false,
       auth: { user: userSmtp.user, pass: userSmtp.pass },
+    });
+  }
+  // msmtp is sendmail-compatible: nodemailer pipes the full message to it and `-t`
+  // makes msmtp read recipients from the To/Cc/Bcc headers. Auth, host and TLS all
+  // come from the server's msmtprc, so no credentials live in the app or its env.
+  if (process.env.MSMTP_PATH) {
+    return nodemailer.createTransport({
+      sendmail: true,
+      newline: 'unix',
+      path: process.env.MSMTP_PATH,
+      args: ['-t', ...(process.env.MSMTP_ACCOUNT ? ['-a', process.env.MSMTP_ACCOUNT] : [])],
     });
   }
   if (process.env.SMTP_USER) {
@@ -25,6 +37,10 @@ function resolveTransporter(userSmtp?: SmtpCreds | null) {
   }
   return null;
 }
+
+// The address outgoing mail is sent From when it isn't the inviter's own connected
+// account. With msmtp this must match an identity its msmtprc is allowed to send as.
+const SYSTEM_FROM = process.env.MSMTP_FROM || process.env.SMTP_USER || '';
 
 export async function sendInviteEmail({
   to,
@@ -44,10 +60,10 @@ export async function sendInviteEmail({
   userSmtp?: SmtpCreds | null;
 }) {
   const transporter = resolveTransporter(userSmtp);
-  const fromAddress = userSmtp?.user || process.env.SMTP_USER;
+  const fromAddress = userSmtp?.user || SYSTEM_FROM;
 
   if (!transporter) {
-    console.log(`[Email skipped] No SMTP configured (neither the inviter's connected email nor a system SMTP_USER). Invite link for ${to}: ${inviteLink}`);
+    console.log(`[Email skipped] No mail transport configured (no inviter SMTP, no MSMTP_PATH, no SMTP_USER). Invite link for ${to}: ${inviteLink}`);
     return false;
   }
 
@@ -121,12 +137,12 @@ export async function sendNotificationEmail({
 }) {
   const transporter = resolveTransporter(null);
   if (!transporter) {
-    console.log(`[Email skipped] SMTP not configured. Subject: ${subject}`);
+    console.log(`[Email skipped] No mail transport configured. Subject: ${subject}`);
     return false;
   }
 
   const mailOptions = {
-    from: `"DesignHub" <${process.env.SMTP_USER}>`,
+    from: `"DesignHub" <${SYSTEM_FROM}>`,
     to,
     subject,
     html: `
