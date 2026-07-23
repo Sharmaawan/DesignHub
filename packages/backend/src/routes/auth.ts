@@ -5,6 +5,7 @@ import prisma from '../lib/prisma';
 import { OAuth2Client } from 'google-auth-library';
 import { JWT_SECRET } from '../lib/secrets';
 import { isAllowedEmailDomain, ALLOWED_DOMAINS_MESSAGE } from '../lib/allowedDomains';
+import { ensureTeamMembership } from '../lib/defaultTeam';
 
 const router = Router();
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
@@ -32,6 +33,8 @@ router.post('/register', async (req: Request, res: Response) => {
     const user = await prisma.user.create({
       data: { name, email, passwordHash, avatar },
     });
+    // Every user must belong to a team — place new accounts into the org team.
+    await ensureTeamMembership(user.id);
     const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
     res.json({ user: { id: user.id, email: user.email, name: user.name, avatar: user.avatar }, token });
   } catch (error) {
@@ -55,6 +58,8 @@ router.post('/login', async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
     await prisma.user.update({ where: { id: user.id }, data: { lastLogin: new Date() } });
+    // Auto-assign teamless accounts (e.g. users predating this rule) to the org team.
+    await ensureTeamMembership(user.id);
     const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
     res.json({ user: { id: user.id, email: user.email, name: user.name, avatar: user.avatar }, token });
   } catch (error) {
@@ -157,6 +162,9 @@ router.post('/google', async (req: Request, res: Response) => {
       });
     }
 
+    // Every user must belong to a team — covers both new Google accounts and
+    // existing ones that predate this rule.
+    await ensureTeamMembership(user.id);
     const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
     res.json({
       user: { id: user.id, email: user.email, name: user.name, avatar: user.avatar },
