@@ -5,7 +5,7 @@ import prisma from '../lib/prisma';
 import { OAuth2Client } from 'google-auth-library';
 import { JWT_SECRET } from '../lib/secrets';
 import { isAllowedEmailDomain, ALLOWED_DOMAINS_MESSAGE } from '../lib/allowedDomains';
-import { ensureTeamMembership } from '../lib/defaultTeam';
+import { ensureTeamMembership, getTeamRole } from '../lib/defaultTeam';
 
 const router = Router();
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
@@ -33,10 +33,10 @@ router.post('/register', async (req: Request, res: Response) => {
     const user = await prisma.user.create({
       data: { name, email, passwordHash, avatar },
     });
-    // Every user must belong to a team — place new accounts into the org team.
-    await ensureTeamMembership(user.id);
+    // Every user must belong to the org team — place new accounts in and get their role.
+    const role = await ensureTeamMembership(user.id, user.email);
     const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
-    res.json({ user: { id: user.id, email: user.email, name: user.name, avatar: user.avatar }, token });
+    res.json({ user: { id: user.id, email: user.email, name: user.name, avatar: user.avatar, role }, token });
   } catch (error) {
     res.status(500).json({ error: 'Server error' });
   }
@@ -58,10 +58,10 @@ router.post('/login', async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
     await prisma.user.update({ where: { id: user.id }, data: { lastLogin: new Date() } });
-    // Auto-assign teamless accounts (e.g. users predating this rule) to the org team.
-    await ensureTeamMembership(user.id);
+    // Auto-assign to the org team and sync the role (admins vs makers) on every login.
+    const role = await ensureTeamMembership(user.id, user.email);
     const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
-    res.json({ user: { id: user.id, email: user.email, name: user.name, avatar: user.avatar }, token });
+    res.json({ user: { id: user.id, email: user.email, name: user.name, avatar: user.avatar, role }, token });
   } catch (error) {
     res.status(500).json({ error: 'Server error' });
   }
@@ -162,12 +162,11 @@ router.post('/google', async (req: Request, res: Response) => {
       });
     }
 
-    // Every user must belong to a team — covers both new Google accounts and
-    // existing ones that predate this rule.
-    await ensureTeamMembership(user.id);
+    // Every user must belong to the org team — covers new and existing Google accounts.
+    const role = await ensureTeamMembership(user.id, user.email);
     const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
     res.json({
-      user: { id: user.id, email: user.email, name: user.name, avatar: user.avatar },
+      user: { id: user.id, email: user.email, name: user.name, avatar: user.avatar, role },
       token,
     });
   } catch (error: any) {
@@ -184,7 +183,8 @@ router.get('/me', async (req: Request, res: Response) => {
     const decoded = jwt.verify(token, JWT_SECRET) as { id: string; email: string };
     const user = await prisma.user.findUnique({ where: { id: decoded.id } });
     if (!user) return res.status(404).json({ error: 'User not found' });
-    res.json({ id: user.id, email: user.email, name: user.name, avatar: user.avatar, provider: user.provider });
+    const role = await getTeamRole(user.id, user.email);
+    res.json({ id: user.id, email: user.email, name: user.name, avatar: user.avatar, provider: user.provider, role });
   } catch {
     res.status(401).json({ error: 'Invalid token' });
   }

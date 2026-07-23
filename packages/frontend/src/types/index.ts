@@ -5,6 +5,8 @@ export interface User {
   avatar?: string;
   provider?: string;
   subscriptionPlan?: string;
+  // Org-team role: 'admin' (approver) or 'editor' (maker). Set at login.
+  role?: string;
   createdAt: string;
 }
 

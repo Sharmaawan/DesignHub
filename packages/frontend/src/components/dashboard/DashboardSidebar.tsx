@@ -182,7 +182,18 @@ export default function DashboardSidebar({ collapsed, onToggle, activeSection, o
             />
             {!collapsed && (
               <div className="flex-1 min-w-0 text-left">
-                <div className="text-sm font-medium text-gray-900 dark:text-white truncate">{user?.name || 'User'}</div>
+                <div className="text-sm font-medium text-gray-900 dark:text-white truncate flex items-center gap-1.5">
+                  <span className="truncate">{user?.name || 'User'}</span>
+                  {user?.role && (
+                    <span className={`shrink-0 px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wide ${
+                      user.role === 'admin' || user.role === 'owner' || user.role === 'approver'
+                        ? 'bg-[#7B2FBE]/10 text-[#7B2FBE] dark:bg-[#7B2FBE]/20 dark:text-purple-300'
+                        : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-300'
+                    }`}>
+                      {user.role === 'admin' || user.role === 'owner' || user.role === 'approver' ? 'Approver' : 'Maker'}
+                    </span>
+                  )}
+                </div>
                 <div className="text-[10px] text-gray-400 truncate">{user?.email}</div>
               </div>
             )}
