@@ -29,7 +29,7 @@ export default function EditorPage() {
   const {
     pages, currentPageIndex, selectedElementIds, zoom, isSaving, lastSaved,
     setProject, setZoom, zoomIn, zoomOut, undo, redo, copy, paste, cut,
-    pushHistory, setSaving, setLastSaved, removeElements, selectAll, deselectAll,
+    pushHistory, setSaving, setLastSaved, selectAll, deselectAll,
     setCommentsOpen, setVersionsOpen, commentsOpen, versionsOpen, layersOpen, setLayersOpen,
     addPage, deselectAll: deselect,
   } = useEditorStore();
@@ -91,9 +91,24 @@ export default function EditorPage() {
     if (isCtrl && e.key === 'd') { e.preventDefault(); if (state.selectedElementIds.length) useEditorStore.getState().duplicateElements(state.selectedElementIds); }
     if ((e.key === 'Delete' || e.key === 'Backspace') && state.selectedElementIds.length > 0) {
       e.preventDefault();
-      removeElements(state.selectedElementIds);
+      // Soft-delete via keyboard too, matching the toolbar's trash button — hidden,
+      // not gone, so a stray Delete/Backspace tap can't destroy work. Permanently
+      // removing something is a deliberate act that lives in the Layers panel.
+      state.selectedElementIds.forEach((id) => state.hideElement(id));
     }
     if (e.key === 'Escape') { deselectAll(); }
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key) && state.selectedElementIds.length > 0) {
+      e.preventDefault();
+      const step = e.shiftKey ? 10 : 1;
+      const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
+      const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
+      const page = state.pages[state.currentPageIndex];
+      state.selectedElementIds.forEach((id) => {
+        const el = page.elements.find((e2) => e2.id === id);
+        if (el) state.moveElement(id, el.x + dx, el.y + dy);
+      });
+      pushHistory();
+    }
     if (isCtrl && e.key === '=') { e.preventDefault(); zoomIn(); }
     if (isCtrl && e.key === '-') { e.preventDefault(); zoomOut(); }
     if (isCtrl && e.key === '0') { e.preventDefault(); setZoom(1); }
@@ -105,7 +120,7 @@ export default function EditorPage() {
         setTimeout(() => { setSaving(false); setLastSaved(new Date().toISOString()); toast.success('Saved!'); }, 500);
       }
     }
-  }, [undo, redo, copy, paste, cut, removeElements, selectAll, deselectAll, zoomIn, zoomOut, setZoom, projectId, setSaving, setLastSaved, updateProject]);
+  }, [undo, redo, copy, paste, cut, pushHistory, selectAll, deselectAll, zoomIn, zoomOut, setZoom, projectId, setSaving, setLastSaved, updateProject]);
 
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown);
@@ -243,7 +258,10 @@ export default function EditorPage() {
                 ['Ctrl+X', 'Cut'],
                 ['Ctrl+D', 'Duplicate'],
                 ['Ctrl+A', 'Select All'],
-                ['Delete', 'Delete Selected'],
+                ['Delete', 'Hide Selected'],
+                ['Escape', 'Deselect'],
+                ['Arrow keys', 'Nudge Selected'],
+                ['Shift+Arrow', 'Nudge Selected (10px)'],
                 ['Ctrl++', 'Zoom In'],
                 ['Ctrl+-', 'Zoom Out'],
                 ['Ctrl+0', 'Reset Zoom'],

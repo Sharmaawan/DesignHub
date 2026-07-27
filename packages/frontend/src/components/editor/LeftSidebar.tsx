@@ -300,10 +300,23 @@ function ShapePreview({ shape, color }: { shape: string; color: string }) {
   }
 }
 
+// Persisted across refreshes and independent of any selection/edit/zoom/tool-switch
+// state elsewhere in the editor — this is the only thing allowed to open or close
+// the panel, so "closed" only ever changes because the user clicked something here.
+const PANEL_OPEN_KEY = 'designhub-leftpanel-open';
+const readStoredPanelOpen = () => {
+  const stored = localStorage.getItem(PANEL_OPEN_KEY);
+  return stored === null ? true : stored === 'true';
+};
+
 export default function LeftSidebar() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState<TabKey>('templates');
-  const [panelOpen, setPanelOpen] = useState(true);
+  const [panelOpen, setPanelOpenState] = useState(readStoredPanelOpen);
+  const setPanelOpen = (open: boolean) => {
+    setPanelOpenState(open);
+    localStorage.setItem(PANEL_OPEN_KEY, String(open));
+  };
   const [search, setSearch] = useState('');
   const [iconCat, setIconCat] = useState('All');
   const [iconColor, setIconColor] = useState('#6366F1');
@@ -701,6 +714,13 @@ export default function LeftSidebar() {
             ? `${aiPrompt.trim()}. Incorporate the attached logo/reference image${plural} naturally into the design.`
             : `Combine the attached image${plural} into a single polished, professional design. Preserve the content, text and branding of the attached image${plural} as faithfully as possible — compose and arrange them attractively rather than replacing them with new subject matter.`;
         })()
+      // Image models bake text directly into pixels, which can never be edited
+      // afterward without regenerating the whole picture. Keeping the model to
+      // artwork only, with real Text elements layered on top after (see
+      // addAiImageWithEditableText), is the only way any of that text — a title,
+      // a date, a location — stays editable once it's on the canvas.
+      : isImage
+      ? `${aiPrompt}. Background artwork/illustration only — do not render any text, words, letters, numbers, or captions anywhere in the image.`
       : aiPrompt;
 
     console.log('[AI] generate request', { provider, type: isImage ? 'image' : 'text', aiTab });

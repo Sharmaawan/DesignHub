@@ -18,6 +18,12 @@ interface EditorCanvasProps {
   onCursorMove?: (x: number, y: number) => void;
 }
 
+// Konva starts a drag on the very first pixel of pointer movement by default, so a
+// slightly unsteady click (not a real drag gesture) would nudge the element before
+// the click even registers as a click. A few pixels of dead zone is the same fix
+// Canva/Figma use — real drags are unaffected, accidental ones are absorbed.
+Konva.dragDistance = 4;
+
 // Page backgrounds can be a plain color OR a CSS `linear-gradient(...)` string (set
 // by the Background panel's gradient swatches). Konva's `fill` prop is passed
 // straight to canvas fillStyle, which can't parse CSS gradient syntax and silently
@@ -110,9 +116,16 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
-  const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
   const [shiftHeld, setShiftHeld] = useState(false);
+
+  // Smart alignment guides (Canva/Figma-style pink lines): computed once at drag
+  // start from every other element's bounds on the page, then checked against the
+  // dragged element's current position on every move. Kept in a ref (not state)
+  // so building the snapshot never re-renders anything — only the visible guide
+  // lines themselves are state, and only change when they actually appear/disappear.
+  const dragGuideContextRef = useRef<{ vLines: number[]; hLines: number[] } | null>(null);
+  const [activeGuideLines, setActiveGuideLines] = useState<{ v: number[]; h: number[] }>({ v: [], h: [] });
 
   const {
     zoom: storeZoom, selectedElementIds, showGrid: storeShowGrid, gridSize, snapEnabled,
@@ -206,12 +219,18 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
     const transformer = transformerRef.current;
     const stage = stageRef.current;
     if (!transformer || !stage) return;
+    // Defensive: locked elements must never get resize/rotate handles, even if
+    // something upstream (e.g. a future select-all-ish action) puts a locked id
+    // into selectedElementIds — dragging is already blocked at the node level via
+    // `draggable`, but the Transformer has no equivalent prop, so it's filtered here.
+    const lockedIds = new Set(page.elements.filter((e) => e.locked).map((e) => e.id));
     const nodes = selectedElementIds
+      .filter((id) => !lockedIds.has(id))
       .map((id) => stage.findOne('#' + id))
       .filter(Boolean);
     transformer.nodes(nodes as any);
     transformer.getLayer()?.batchDraw();
-  }, [selectedElementIds]);
+  }, [selectedElementIds, page.elements]);
 
   const handleWheel = useCallback((e: Konva.KonvaEventObject<WheelEvent>) => {
     e.evt.preventDefault();
@@ -329,10 +348,6 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
     }
     if (isPanning) {
       setIsPanning(false);
-    }
-    if (dragStart) {
-      pushHistory();
-      setDragStart(null);
     }
   };
 
@@ -473,37 +488,78 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
     }
   };
 
-  const handleElementDragStart = (e: Konva.KonvaEventObject<DragEvent>, id: string) => {
-    setDragStart({ x: e.target.x(), y: e.target.y() });
+  // Snapshot of every alignment line a dragged element could snap to — every other
+  // visible element's left/center/right (x) and top/center/bottom (y) edges, plus
+  // the page's own edges/center. Built once at drag start rather than recomputed on
+  // every mousemove, since the set of "other elements" can't change mid-drag.
+  const buildDragGuideContext = (draggedId: string) => {
+    const vLines = new Set<number>([0, page.width / 2, page.width]);
+    const hLines = new Set<number>([0, page.height / 2, page.height]);
+    for (const el of page.elements) {
+      if (el.id === draggedId || !el.visible) continue;
+      vLines.add(el.x);
+      vLines.add(el.x + el.width / 2);
+      vLines.add(el.x + el.width);
+      hLines.add(el.y);
+      hLines.add(el.y + el.height / 2);
+      hLines.add(el.y + el.height);
+    }
+    return { vLines: Array.from(vLines), hLines: Array.from(hLines) };
+  };
+
+  // For each candidate edge (left/center/right, or top/center/bottom) of the
+  // dragged element, finds the closest guide line within threshold — returns how
+  // far to shift the element's position so that edge lands exactly on the line.
+  const findAxisSnap = (edges: number[], lines: number[], threshold: number): { delta: number; line: number } | null => {
+    let best: { delta: number; line: number } | null = null;
+    for (const edge of edges) {
+      for (const line of lines) {
+        const delta = line - edge;
+        if (Math.abs(delta) <= threshold && (!best || Math.abs(delta) < Math.abs(best.delta))) {
+          best = { delta, line };
+        }
+      }
+    }
+    return best;
+  };
+
+  const handleElementDragStart = (_e: Konva.KonvaEventObject<DragEvent>, id: string) => {
+    dragGuideContextRef.current = buildDragGuideContext(id);
   };
 
   const handleElementDragMove = (e: Konva.KonvaEventObject<DragEvent>) => {
+    const node = e.target;
+    let newX = node.x();
+    let newY = node.y();
+    const guides = { v: [] as number[], h: [] as number[] };
+
     if (snapEnabled) {
-      const node = e.target;
-      let newX = node.x();
-      let newY = node.y();
-
-      const snapThreshold = 5 / zoom;
-      const snapPoints = [0, page.width / 2, page.width, page.height / 2, page.height];
-
-      for (const snapY of snapPoints) {
-        if (Math.abs(newY - snapY) < snapThreshold) {
-          newY = snapY;
-        }
-      }
-      for (const snapX of snapPoints) {
-        if (Math.abs(newX - snapX) < snapThreshold) {
-          newX = snapX;
-        }
+      const threshold = 5 / zoom;
+      const ctx = dragGuideContextRef.current;
+      if (ctx && storeShowGuides) {
+        const w = node.width();
+        const h = node.height();
+        const snapX = findAxisSnap([newX, newX + w / 2, newX + w], ctx.vLines, threshold);
+        const snapY = findAxisSnap([newY, newY + h / 2, newY + h], ctx.hLines, threshold);
+        if (snapX) { newX += snapX.delta; guides.v.push(snapX.line); }
+        if (snapY) { newY += snapY.delta; guides.h.push(snapY.line); }
+      } else {
+        // Guides disabled but snapping still on: fall back to page edges/center only.
+        const snapPoints = [0, page.width / 2, page.width, page.height / 2, page.height];
+        for (const p of snapPoints) if (Math.abs(newY - p) < threshold) newY = p;
+        for (const p of snapPoints) if (Math.abs(newX - p) < threshold) newX = p;
       }
       node.x(newX);
       node.y(newY);
     }
+    setActiveGuideLines(guides);
   };
 
   const handleElementDragEnd = (e: Konva.KonvaEventObject<DragEvent>, id: string) => {
     moveElement(id, e.target.x(), e.target.y());
     pushHistory();
+    dragGuideContextRef.current = null;
+    setActiveGuideLines({ v: [], h: [] });
   };
 
   const handleTransformEnd = (e: Konva.KonvaEventObject<Event>, id: string) => {
@@ -744,6 +800,16 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
           )}
 
           {sortedElements.map(renderElement)}
+
+          {/* Smart alignment guides — pink lines shown only while actively dragging,
+              marking where the dragged element's edge/center now lines up with
+              another element's or the page's own edge/center. */}
+          {activeGuideLines.v.map((x) => (
+            <Line key={`gv${x}`} points={[x, -4000, x, page.height + 4000]} stroke="#FF4DA6" strokeWidth={1 / zoom} dash={[4 / zoom, 4 / zoom]} listening={false} />
+          ))}
+          {activeGuideLines.h.map((y) => (
+            <Line key={`gh${y}`} points={[-4000, y, page.width + 4000, y]} stroke="#FF4DA6" strokeWidth={1 / zoom} dash={[4 / zoom, 4 / zoom]} listening={false} />
+          ))}
 
           {/* Only pen/highlighter ever populate currentStroke — eraser works by
               immediately deleting matched strokes in eraseNear(), it has no stroke

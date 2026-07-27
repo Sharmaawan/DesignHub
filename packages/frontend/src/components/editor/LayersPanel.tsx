@@ -24,6 +24,10 @@ export default function LayersPanel() {
   } = useEditorStore();
 
   const [pagesCollapsed, setPagesCollapsed] = useState(false);
+  // Unlike the canvas's own Delete key/trash button (which now just hides an
+  // element, recoverable from this same panel), this is genuinely permanent — so
+  // it's the one place that gets a confirmation step first.
+  const [confirmDeleteIds, setConfirmDeleteIds] = useState<string[] | null>(null);
 
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
@@ -168,8 +172,8 @@ export default function LayersPanel() {
           className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors" title="Duplicate">
           <HiOutlineDuplicate size={14} className="text-gray-500 dark:text-gray-400" />
         </button>
-        <button onClick={() => { if (selectedCount > 0) { removeElements(selectedElementIds); toast.success('Deleted'); } }} disabled={selectedCount === 0}
-          className="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-30 disabled:cursor-not-allowed transition-colors" title="Delete">
+        <button onClick={() => { if (selectedCount > 0) setConfirmDeleteIds(selectedElementIds); }} disabled={selectedCount === 0}
+          className="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-30 disabled:cursor-not-allowed transition-colors" title="Delete permanently">
           <HiOutlineTrash size={14} className="text-gray-500 dark:text-gray-400 hover:text-red-500" />
         </button>
         {selectedCount >= 2 && (
@@ -255,6 +259,30 @@ export default function LayersPanel() {
       {selectedCount > 0 && (
         <div className="text-xs text-gray-400 dark:text-gray-500 pt-1 border-t border-gray-200 dark:border-gray-700">
           {selectedCount} selected
+        </div>
+      )}
+
+      {confirmDeleteIds && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setConfirmDeleteIds(null)}>
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-5" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-1.5">
+              Delete {confirmDeleteIds.length > 1 ? `${confirmDeleteIds.length} layers` : 'layer'} permanently?
+            </h3>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
+              This can't be undone. If you just want it out of the way, use Hide instead — you can bring it back anytime from here.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setConfirmDeleteIds(null)} className="px-3 py-1.5 text-xs font-semibold rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                Cancel
+              </button>
+              <button
+                onClick={() => { removeElements(confirmDeleteIds); toast.success('Deleted'); setConfirmDeleteIds(null); }}
+                className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-red-500 text-white hover:bg-red-600 transition-colors"
+              >
+                Delete permanently
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

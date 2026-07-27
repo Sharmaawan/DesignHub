@@ -11,7 +11,7 @@ import {
 export default function FloatingToolbar() {
   const {
     pages, currentPageIndex, selectedElementIds,
-    removeElements, duplicateElements, bringForward, sendBackward,
+    duplicateElements, bringForward, sendBackward,
     bringToFront, sendToBack, lockElement, unlockElement, hideElement, showElement,
     copy, paste, updateElement, commentsOpen, setCommentsOpen,
   } = useEditorStore();
@@ -107,7 +107,11 @@ export default function FloatingToolbar() {
     }] : []),
     { type: 'divider' },
     {
-      icon: HiOutlineTrash, label: 'Delete', action: () => removeElements([element.id]),
+      // Soft-delete: this is the fast, everyday action, so it hides rather than
+      // permanently removes — recoverable from the Layers panel. Actually deleting
+      // for good is a deliberate act that lives in the Layers panel instead, gated
+      // behind a confirmation there.
+      icon: HiOutlineTrash, label: 'Delete', action: () => hideElement(element.id),
       danger: true,
       shortcut: 'Del',
     },

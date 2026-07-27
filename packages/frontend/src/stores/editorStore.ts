@@ -516,7 +516,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   selectAll: () => {
     const { pages, currentPageIndex } = get();
     const page = pages[currentPageIndex];
-    set({ selectedElementIds: page.elements.map((e) => e.id) });
+    set({ selectedElementIds: page.elements.filter((e) => !e.locked).map((e) => e.id) });
   },
 
   deselectAll: () => set({ selectedElementIds: [] }),
@@ -593,10 +593,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set({ pages: newPages });
   },
 
-  lockElement: (id) => get().updateElement(id, { locked: true }),
-  unlockElement: (id) => get().updateElement(id, { locked: false }),
-  hideElement: (id) => get().updateElement(id, { visible: false }),
-  showElement: (id) => get().updateElement(id, { visible: true }),
+  lockElement: (id) => { get().updateElement(id, { locked: true }); get().pushHistory(); },
+  unlockElement: (id) => { get().updateElement(id, { locked: false }); get().pushHistory(); },
+  hideElement: (id) => { get().updateElement(id, { visible: false }); get().pushHistory(); },
+  showElement: (id) => { get().updateElement(id, { visible: true }); get().pushHistory(); },
 
   groupElements: (ids) => {
     const { pages, currentPageIndex } = get();
