@@ -78,9 +78,11 @@ function withDecryptedToken<T extends { accessToken: string }>(account: T): T {
 }
 
 // ===== MAKER / APPROVER =====
-// Roles that may approve or reject a team's pending posts. 'maker' is the only role
-// whose publish/schedule is held for review; everyone else publishes directly.
-const APPROVER_ROLES = ['approver', 'admin', 'owner'];
+// Roles that may approve or reject a team's pending posts. 'maker' is the default
+// role every team member gets on first login; 'editor' is granted only via an
+// accepted Team-page invite (see lib/defaultTeam.ts) — that's the actual approver
+// tier day to day, alongside the fixed 'admin' emails.
+const APPROVER_ROLES = ['editor', 'approver', 'admin', 'owner'];
 
 // A user's team membership drives the workflow: makers submit for approval, approvers
 // act on the queue. We take the first membership — this app has no notion of an

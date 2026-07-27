@@ -197,6 +197,10 @@ router.put('/invites/:inviteId/accept', authMiddleware, async (req: AuthRequest,
 
     await prisma.teamInvite.update({ where: { id: req.params.inviteId }, data: { status: 'accepted' } });
 
+    // Every user is auto-joined to the org team on login (see lib/defaultTeam.ts),
+    // so a membership row almost always already exists by the time someone accepts
+    // an invite — this has to upgrade its role, not silently no-op, or an invite
+    // (e.g. to 'editor') would never actually take effect.
     const existingMember = await prisma.teamMember.findUnique({
       where: { teamId_userId: { teamId: invite.teamId, userId: req.userId! } },
     });
@@ -204,6 +208,8 @@ router.put('/invites/:inviteId/accept', authMiddleware, async (req: AuthRequest,
       await prisma.teamMember.create({
         data: { teamId: invite.teamId, userId: req.userId!, role: invite.role },
       });
+    } else if (existingMember.role !== invite.role) {
+      await prisma.teamMember.update({ where: { id: existingMember.id }, data: { role: invite.role } });
     }
 
     res.json({ success: true });
