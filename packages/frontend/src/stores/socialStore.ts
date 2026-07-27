@@ -28,7 +28,7 @@ export interface SocialPostAnalytics {
 export interface SocialPost {
   id: string;
   platform: string;
-  status: 'draft' | 'pending_approval' | 'rejected' | 'scheduled' | 'publishing' | 'published' | 'failed';
+  status: 'draft' | 'pending_approval' | 'approved' | 'rejected' | 'scheduled' | 'publishing' | 'published' | 'failed';
   mediaType: 'image' | 'video' | 'carousel' | 'story';
   mediaUrls: string[];
   caption: string | null;
@@ -79,6 +79,7 @@ interface SocialState {
   loadPendingApproval: () => Promise<void>;
   approvePost: (id: string) => Promise<void>;
   rejectPost: (id: string, reason?: string) => Promise<void>;
+  sendPost: (id: string) => Promise<SocialPost>;
 }
 
 export const useSocialStore = create<SocialState>((set, get) => ({
@@ -216,6 +217,19 @@ export const useSocialStore = create<SocialState>((set, get) => ({
       set((s) => ({ pendingApproval: s.pendingApproval.filter((p) => p.id !== id) }));
     } catch (err: any) {
       throw new Error(err.response?.data?.error || 'Failed to reject post');
+    }
+  },
+
+  // The maker's own action once their post shows status 'approved' — actually sends
+  // it to the platform. Separate from approvePost, which an approver calls and which
+  // no longer publishes anything itself.
+  sendPost: async (id) => {
+    try {
+      const { data } = await socialAPI.sendPost(id);
+      set((s) => ({ posts: s.posts.map((p) => (p.id === id ? data : p)) }));
+      return data;
+    } catch (err: any) {
+      throw new Error(err.response?.data?.error || 'Failed to send post');
     }
   },
 }));

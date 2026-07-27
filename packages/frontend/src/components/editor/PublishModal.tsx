@@ -338,7 +338,7 @@ export default function PublishModal({ open, onClose, initialAccountId }: Publis
                   <span className="min-w-0 break-words">
                     {result === 'published' && 'Published successfully!'}
                     {result === 'scheduled' && 'Scheduled — it will publish automatically at the chosen time.'}
-                    {result === 'pending_approval' && 'Sent to your team’s approver. It will publish once approved.'}
+                    {result === 'pending_approval' && "Sent to your team's approver. Once approved, you'll be able to send it yourself from Social Publishing > History."}
                     {result === 'draft' && 'Saved as a draft. Find it in Social Publishing > History.'}
                     {result === 'failed' && (failureReason || "Couldn't publish — check the platform is connected and try again.")}
                   </span>

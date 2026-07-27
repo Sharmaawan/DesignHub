@@ -444,35 +444,25 @@ router.post('/posts/:id/approve', authMiddleware, async (req: AuthRequest, res: 
   try {
     const post = await loadForApproval(req.params.id, req.userId!);
 
-    // A future scheduled time goes back to the scheduler; otherwise publish now.
+    // A future scheduled time still goes straight back to the scheduler — nobody's
+    // expected to be at their desk to hand-fire a 3am post, so approval there is
+    // sufficient on its own. For a "now" post, approval only clears it; the maker who
+    // submitted it makes the actual publish happen themselves via POST /:id/send,
+    // rather than it firing the instant an approver clicks Approve.
     const future = post.scheduledFor && post.scheduledFor.getTime() > Date.now();
-    await prisma.socialPost.update({
+    const result = await prisma.socialPost.update({
       where: { id: post.id },
-      data: { approvedById: req.userId!, approvedAt: new Date(), rejectionReason: null, status: future ? 'scheduled' : 'publishing' },
+      data: { approvedById: req.userId!, approvedAt: new Date(), rejectionReason: null, status: future ? 'scheduled' : 'approved' },
     });
 
-    let result = await prisma.socialPost.findUnique({ where: { id: post.id } });
-    if (!future) {
-      try {
-        result = await executePublish(post.id);
-      } catch (err: any) {
-        // The post is already marked failed inside executePublish; surface why but
-        // still 200 so the approver sees the failure state rather than a raw error.
-        result = err.post ?? result;
-      }
-    }
-
     if (post.submittedById) {
-      const decidedStatus = result?.status;
       await prisma.notification.create({
         data: {
           userId: post.submittedById,
           type: 'social_approval_decision',
-          message: decidedStatus === 'failed'
-            ? `Your ${post.platform} post was approved but failed to publish`
-            : future
+          message: future
             ? `Your ${post.platform} post was approved and scheduled`
-            : `Your ${post.platform} post was approved and published`,
+            : `Your ${post.platform} post was approved — you can now send it to ${post.platform}`,
         },
       }).catch((e) => console.error('[social/approve] notify failed', e));
     }
@@ -480,6 +470,34 @@ router.post('/posts/:id/approve', authMiddleware, async (req: AuthRequest, res: 
   } catch (err: any) {
     console.error('[social/approve] failed', err);
     res.status(err.status || 500).json({ error: err.message || 'Failed to approve post' });
+  }
+});
+
+// The maker's own action, once their post has been approved: actually publish it.
+// Kept separate from /approve so an approver clicking Approve never itself fires the
+// platform call — the submitter decides when it actually goes out.
+router.post('/posts/:id/send', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const post = await prisma.socialPost.findUnique({ where: { id: req.params.id } });
+    if (!post) return res.status(404).json({ error: 'Post not found' });
+    if (post.submittedById !== req.userId! && post.userId !== req.userId!) {
+      return res.status(403).json({ error: 'Only the person who submitted this post can send it' });
+    }
+    if (post.status !== 'approved') {
+      return res.status(409).json({ error: 'This post is not approved and ready to send' });
+    }
+
+    try {
+      const result = await executePublish(post.id);
+      res.json(result);
+    } catch (err: any) {
+      // executePublish already marked the post failed — surface why but still 200
+      // so the maker sees the failure state on the post rather than a raw error.
+      res.json(err.post ?? { ...post, status: 'failed', errorMessage: err.message });
+    }
+  } catch (err: any) {
+    console.error('[social/send] failed', err);
+    res.status(err.status || 500).json({ error: err.message || 'Failed to send post' });
   }
 });
 

@@ -233,6 +233,7 @@ export const socialAPI = {
   pendingApproval: () => api.get('/social/posts/pending-approval'),
   approvePost: (id: string) => api.post(`/social/posts/${id}/approve`),
   rejectPost: (id: string, reason?: string) => api.post(`/social/posts/${id}/reject`, { reason }),
+  sendPost: (id: string) => api.post(`/social/posts/${id}/send`),
 };
 
 export default api;

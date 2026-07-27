@@ -19,6 +19,7 @@ const PLATFORM_META: Record<string, { label: string; icon: string; color: string
 const STATUS_META: Record<string, { label: string; className: string }> = {
   draft: { label: 'Draft', className: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300' },
   pending_approval: { label: 'Awaiting approval', className: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300' },
+  approved: { label: 'Approved — ready to send', className: 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-300' },
   rejected: { label: 'Rejected', className: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' },
   scheduled: { label: 'Scheduled', className: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' },
   publishing: { label: 'Publishing', className: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' },
@@ -33,7 +34,7 @@ export default function SocialConnectionsPage() {
     resolvePending, selectPending,
     loadPosts, deletePost, refreshAnalytics,
     approvalContext, pendingApproval,
-    loadApprovalContext, loadPendingApproval, approvePost, rejectPost,
+    loadApprovalContext, loadPendingApproval, approvePost, rejectPost, sendPost,
   } = useSocialStore();
   const { unreadCount, setIsOpen: setNotifOpen } = useNotificationStore();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -47,6 +48,7 @@ export default function SocialConnectionsPage() {
   const [pendingSelected, setPendingSelected] = useState<Set<string>>(new Set());
   const [connectingSelected, setConnectingSelected] = useState(false);
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
+  const [sendingId, setSendingId] = useState<string | null>(null);
   // The pending id is stripped from the URL as soon as it's read (see effect below),
   // so it has to be kept somewhere across renders for the picker's "select" action —
   // a plain variable would be reset to null on every re-render, hence useRef.
@@ -312,6 +314,9 @@ export default function SocialConnectionsPage() {
                           {post.status === 'pending_approval' && (
                             <p className="text-[11px] text-purple-500 mt-1">Waiting for a team approver</p>
                           )}
+                          {post.status === 'approved' && (
+                            <p className="text-[11px] text-teal-600 mt-1">Approved — send it whenever you're ready</p>
+                          )}
                           {post.status === 'scheduled' && post.scheduledFor && (
                             <p className="text-[11px] text-blue-500 mt-1">Scheduled for {new Date(post.scheduledFor).toLocaleString()}</p>
                           )}
@@ -321,6 +326,29 @@ export default function SocialConnectionsPage() {
                         <HiOutlineTrash size={14} />
                       </button>
                     </div>
+
+                    {post.status === 'approved' && (
+                      <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
+                        <button
+                          onClick={async () => {
+                            setSendingId(post.id);
+                            try {
+                              const result = await sendPost(post.id);
+                              if (result.status === 'published') toast.success(`Sent to ${PLATFORM_META[post.platform]?.label || post.platform}!`);
+                              else toast.error(result.errorMessage || 'Failed to send');
+                            } catch (err: any) {
+                              toast.error(err.message);
+                            }
+                            setSendingId(null);
+                          }}
+                          disabled={sendingId === post.id}
+                          className="w-full py-2 text-sm font-semibold rounded-xl bg-[#7B2FBE] text-white hover:bg-[#6A25A8] disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-1.5"
+                        >
+                          <HiOutlineCheck size={16} />
+                          {sendingId === post.id ? 'Sending…' : `Send to ${PLATFORM_META[post.platform]?.label || post.platform}`}
+                        </button>
+                      </div>
+                    )}
 
                     {post.status === 'published' && (
                       <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
@@ -423,13 +451,13 @@ export default function SocialConnectionsPage() {
                             setActingId(post.id);
                             try {
                               await approvePost(post.id);
-                              toast.success(post.scheduledFor && new Date(post.scheduledFor).getTime() > Date.now() ? 'Approved — scheduled' : 'Approved — publishing');
+                              toast.success(post.scheduledFor && new Date(post.scheduledFor).getTime() > Date.now() ? 'Approved — scheduled' : "Approved — the sender can now publish it");
                             } catch (err: any) { toast.error(err.message); }
                             finally { setActingId(null); }
                           }}
                           className="text-xs px-4 py-1.5 rounded-lg bg-[#7B2FBE] text-white font-semibold hover:bg-[#6a28a5] disabled:opacity-50 flex items-center gap-1.5"
                         >
-                          <HiOutlineCheck size={14} /> {busy ? 'Working…' : 'Approve & publish'}
+                          <HiOutlineCheck size={14} /> {busy ? 'Working…' : 'Approve'}
                         </button>
                       </div>
                     )}
