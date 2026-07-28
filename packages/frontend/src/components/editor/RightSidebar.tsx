@@ -28,7 +28,22 @@ export default function RightSidebar() {
   const selectedElements = page?.elements.filter((e) => selectedElementIds.includes(e.id)) || [];
   const element = selectedElements.length === 1 ? selectedElements[0] : null;
 
-  if (!rightPanelOpen) return null;
+  // Closing via the X used to unmount this entirely with nothing left anywhere to
+  // bring it back — selecting an existing element doesn't reopen it (only adding a
+  // brand-new one does), so it stayed gone for the rest of the session. This narrow
+  // strip is the one persistent, always-clickable way back in, same idea as the left
+  // sidebar's icon rail staying up when its own panel collapses.
+  if (!rightPanelOpen) {
+    return (
+      <button
+        onClick={() => setRightPanelOpen(true)}
+        title="Show design panel"
+        className="w-6 flex-shrink-0 bg-white dark:bg-canva-dark-surface border-l border-gray-200 dark:border-canva-dark-border hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center justify-center transition-colors"
+      >
+        <HiOutlineArrowLeft size={14} className="text-gray-400" />
+      </button>
+    );
+  }
 
   // Nothing selected — the page's own background isn't a clickable canvas element (it's
   // a page property, not a shape), so clicking empty canvas can never "select" it. Show
