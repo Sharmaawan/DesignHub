@@ -114,8 +114,6 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
   const containerRef = useRef<HTMLDivElement>(null);
   const transformerRef = useRef<Konva.Transformer>(null);
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
-  const [isPanning, setIsPanning] = useState(false);
-  const [panStart, setPanStart] = useState({ x: 0, y: 0 });
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
   const [shiftHeld, setShiftHeld] = useState(false);
 
@@ -235,15 +233,12 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
   const handleWheel = useCallback((e: Konva.KonvaEventObject<WheelEvent>) => {
     e.evt.preventDefault();
 
-    // Plain scroll/trackpad swipe pans instead of zooming — previously every
-    // wheel event zoomed, with no way to just scroll around, so reaching a
-    // part of the design that had scrolled out of view after zooming out
-    // meant zooming back in or holding the middle mouse button every time.
-    // Ctrl/Cmd+scroll still zooms (browsers also report trackpad pinch-zoom
-    // gestures as a wheel event with ctrlKey set, so pinch-to-zoom keeps working).
+    // The canvas position is fixed — a plain scroll/trackpad swipe does nothing,
+    // it never pans. Only Ctrl/Cmd+scroll zooms (browsers also report trackpad
+    // pinch-zoom gestures as a wheel event with ctrlKey set, so pinch-to-zoom
+    // still works even though a plain two-finger swipe no longer moves anything).
     const isZoomGesture = e.evt.ctrlKey || e.evt.metaKey;
     if (!isZoomGesture) {
-      setPan(panX - e.evt.deltaX, panY - e.evt.deltaY);
       return;
     }
 
@@ -300,12 +295,6 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
       deselectAll();
       setEditingTextId(null);
       useEditorStore.setState({ isEditing: false });
-
-      const evt = e.evt as MouseEvent;
-      if (evt.button === 1) {
-        setIsPanning(true);
-        setPanStart({ x: evt.clientX - panX, y: evt.clientY - panY });
-      }
     }
   };
 
@@ -327,13 +316,6 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
       if (!pos) return;
       if (activeTool === 'eraser') eraseNear(pos.x, pos.y);
       else setCurrentStroke((prev) => [...prev, pos.x, pos.y]);
-      return;
-    }
-    if (isPanning) {
-      const evt = e.evt as MouseEvent;
-      const dx = evt.clientX - panStart.x - panX;
-      const dy = evt.clientY - panStart.y - panY;
-      setPan(panX + dx, panY + dy);
     }
   };
 
@@ -344,10 +326,6 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
         addDrawing(currentStroke, activeTool as 'pen' | 'highlighter', drawColor, drawWidth);
       }
       setCurrentStroke([]);
-      return;
-    }
-    if (isPanning) {
-      setIsPanning(false);
     }
   };
 
@@ -731,13 +709,7 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
         onMouseDown={handleStageMouseDown}
         onMouseMove={handleStageMouseMove}
         onMouseUp={handleStageMouseUp}
-        draggable={isPanning}
-        onDragEnd={(e) => {
-          if (isPanning) {
-            setPan(e.target.x(), e.target.y());
-          }
-        }}
-        style={{ cursor: isPanning ? 'grabbing' : activeTool !== 'select' ? 'crosshair' : 'default' }}
+        style={{ cursor: activeTool !== 'select' ? 'crosshair' : 'default' }}
       >
         <Layer>
           <Rect
