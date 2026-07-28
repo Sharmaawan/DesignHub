@@ -147,7 +147,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   panX: 0,
   panY: 0,
   showGrid: false,
-  showRulers: true,
+  showRulers: false,
   showGuides: true,
   snapEnabled: true,
   gridSize: 20,
