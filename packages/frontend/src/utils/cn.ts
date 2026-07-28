@@ -58,8 +58,8 @@ export function snapToGrid(value: number, gridSize: number): number {
 export const CANVAS_PRESETS: Record<string, { width: number; height: number }> = {
   'Instagram Post': { width: 1080, height: 1080 },
   'Instagram Story': { width: 1080, height: 1920 },
-  'Facebook Post': { width: 1200, height: 630 },
-  'Twitter Post': { width: 1200, height: 675 },
+  'Facebook Post': { width: 1080, height: 1080 },
+  'Twitter Post': { width: 1080, height: 1080 },
   'YouTube Thumbnail': { width: 1280, height: 720 },
   'Presentation 16:9': { width: 1920, height: 1080 },
   'Presentation 4:3': { width: 1440, height: 1080 },

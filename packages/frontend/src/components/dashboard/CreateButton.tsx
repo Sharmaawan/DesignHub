@@ -9,9 +9,9 @@ import VideoSuggestionsModal from './VideoSuggestionsModal';
 
 const DESIGN_TYPES: DesignType[] = [
   { id: 'presentation', label: 'Presentation', icon: '📊', width: 1920, height: 1080, category: 'Presentations', description: '16:9 widescreen' },
-  { id: 'social-post', label: 'Social Media Post', icon: '📱', width: 1200, height: 630, category: 'Social Media', description: 'Facebook, Twitter' },
+  { id: 'social-post', label: 'Social Media Post', icon: '📱', width: 1080, height: 1080, category: 'Social Media', description: 'Square format' },
   { id: 'instagram-post', label: 'Instagram Post', icon: '📷', width: 1080, height: 1080, category: 'Social Media', description: 'Square format' },
-  { id: 'facebook-post', label: 'Facebook Post', icon: '👥', width: 1200, height: 630, category: 'Social Media', description: 'Feed post' },
+  { id: 'facebook-post', label: 'Facebook Post', icon: '👥', width: 1080, height: 1080, category: 'Social Media', description: 'Square format' },
   { id: 'linkedin-post', label: 'LinkedIn Post', icon: '💼', width: 1200, height: 627, category: 'Social Media', description: 'LinkedIn feed' },
   { id: 'youtube-thumb', label: 'YouTube Thumbnail', icon: '▶️', width: 1280, height: 720, category: 'Video', description: 'YouTube cover' },
   { id: 'story', label: 'Story', icon: '📖', width: 1080, height: 1920, category: 'Social Media', description: 'Instagram/Facebook Story' },
