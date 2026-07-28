@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useEditorStore } from '../../stores/editorStore';
 import { useProjectStore } from '../../stores/projectStore';
+import { useSocialStore } from '../../stores/socialStore';
 import {
   HiOutlineArrowLeft, HiOutlineDownload, HiOutlineShare,
   HiOutlineReply, HiOutlineRefresh, HiOutlineSearch,
@@ -40,14 +41,24 @@ export default function TopToolbar({ onThemeToggle, isDark, onShowShortcuts, onO
     pages, currentPageIndex, sidePanelTab, setSidePanelTab,
   } = useEditorStore();
   const { projects, updateProject } = useProjectStore();
+  const { approvalContext, loadApprovalContext, posts, loadPosts } = useSocialStore();
   const [showZoomMenu, setShowZoomMenu] = useState(false);
   const [showViewMenu, setShowViewMenu] = useState(false);
+
+  // Drives the Publish button's label — a maker submits for review instead of
+  // publishing directly, and the button should say so up front rather than only
+  // revealing that once they're already inside the modal. Once THIS project
+  // already has a submission awaiting review, re-submitting makes no sense —
+  // the button reflects that instead of staying clickable as if nothing happened.
+  useEffect(() => { loadApprovalContext(); loadPosts(); }, [loadApprovalContext, loadPosts]);
+  const isMaker = !!approvalContext?.isMaker;
   const [editingName, setEditingName] = useState(false);
   const [projectName, setProjectName] = useState('');
 
   const projectId = window.location.pathname.split('/').pop();
   const project = projects.find((p) => p.id === projectId);
   const currentPage = pages[currentPageIndex];
+  const pendingPostForProject = posts.find((p) => p.projectId === projectId && p.status === 'pending_approval');
 
   const handleSave = () => {
     if (!projectId) return;
@@ -266,9 +277,20 @@ export default function TopToolbar({ onThemeToggle, isDark, onShowShortcuts, onO
           <span className="hidden sm:inline">Export</span>
           <HiOutlineChevronDown size={10} />
         </button>
-        <button onClick={onOpenPublish} className="btn-primary flex items-center gap-1.5 text-sm py-1.5 px-3" title="Publish to social media">
+        <button
+          onClick={onOpenPublish}
+          disabled={isMaker && !!pendingPostForProject}
+          className="btn-primary flex items-center gap-1.5 text-sm py-1.5 px-3 disabled:opacity-50 disabled:cursor-not-allowed"
+          title={
+            isMaker && pendingPostForProject ? 'Already submitted — waiting on an approver to review it'
+              : isMaker ? 'Send to social media for approval'
+              : 'Publish to social media'
+          }
+        >
           <HiOutlineGlobeAlt size={14} />
-          <span className="hidden sm:inline">Publish</span>
+          <span className="hidden sm:inline">
+            {isMaker && pendingPostForProject ? 'Awaiting Approval' : isMaker ? 'Send for Approval' : 'Publish'}
+          </span>
         </button>
       </div>
     </div>

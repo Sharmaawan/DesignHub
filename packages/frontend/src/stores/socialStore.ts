@@ -28,6 +28,7 @@ export interface SocialPostAnalytics {
 export interface SocialPost {
   id: string;
   platform: string;
+  projectId: string | null;
   status: 'draft' | 'pending_approval' | 'approved' | 'rejected' | 'scheduled' | 'publishing' | 'published' | 'failed';
   mediaType: 'image' | 'video' | 'carousel' | 'story';
   mediaUrls: string[];

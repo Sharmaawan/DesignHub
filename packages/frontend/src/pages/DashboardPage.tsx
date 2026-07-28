@@ -5,6 +5,7 @@ import { useProjectStore } from '../stores/projectStore';
 import { useNotificationStore } from '../stores/notificationStore';
 import { useEditorStore } from '../stores/editorStore';
 import { useTeamStore } from '../stores/teamStore';
+import { useSocialStore } from '../stores/socialStore';
 import DashboardSidebar from '../components/dashboard/DashboardSidebar';
 import CreateButton from '../components/dashboard/CreateButton';
 import HeroSearch from '../components/dashboard/HeroSearch';
@@ -30,6 +31,10 @@ export default function DashboardPage({ initialSection }: { initialSection?: str
   const { isOpen: notifOpen, setIsOpen: setNotifOpen, unreadCount, loadNotifications } = useNotificationStore();
   const { loadUserInvites, loadTeams } = useTeamStore();
   const { logout } = useAuthStore();
+  // Team Requests (invite management) is an approver/admin action — a maker has no
+  // use for it and shouldn't see who's on the team or be able to send invites.
+  const { approvalContext, loadApprovalContext } = useSocialStore();
+  const canManageTeam = !!approvalContext?.isApprover;
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     return localStorage.getItem('designhub-sidebar-collapsed') === 'true';
@@ -46,6 +51,7 @@ export default function DashboardPage({ initialSection }: { initialSection?: str
     loadNotifications();
     loadUserInvites();
     loadTeams();
+    loadApprovalContext();
   }, []);
 
   // Auto-logout on 401
@@ -383,13 +389,16 @@ export default function DashboardPage({ initialSection }: { initialSection?: str
           {/* Two-column layout for side sections — home only */}
           {activeSection === 'home' && (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-10">
-              {/* Team Requests */}
-              <div className="lg:col-span-1">
-                <TeamRequests />
-              </div>
+              {/* Team Requests — approver/admin only; a maker has no invite/team-
+                  management access, so there's nothing here for them to see. */}
+              {canManageTeam && (
+                <div className="lg:col-span-1">
+                  <TeamRequests />
+                </div>
+              )}
 
               {/* What's New */}
-              <div className="lg:col-span-2">
+              <div className={canManageTeam ? 'lg:col-span-2' : 'lg:col-span-3'}>
                 <WhatsNew />
               </div>
             </div>
