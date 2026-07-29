@@ -170,9 +170,17 @@ export default function PublishModal({ open, onClose, initialAccountId }: Publis
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
       <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-xl mx-4 animate-slide-up" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between p-5 border-b border-gray-100 dark:border-gray-700">
-          <h2 className="text-lg font-display font-bold text-gray-900 dark:text-white">Publish design</h2>
+          <h2 className="text-lg font-display font-bold text-gray-900 dark:text-white">{isMaker ? 'Submit for approval' : 'Publish design'}</h2>
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"><HiOutlineX size={18} /></button>
         </div>
+
+        {isMaker && result === null && (
+          <div className="px-5 pt-4 -mb-1">
+            <p className="text-xs text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/20 rounded-lg px-3 py-2">
+              This won't go live yet — it's sent to an approver first. Once approved, come back here to actually publish it.
+            </p>
+          </div>
+        )}
 
         <div className="p-5 space-y-5 max-h-[65vh] overflow-y-auto">
           {/* STEP 1: choose account */}

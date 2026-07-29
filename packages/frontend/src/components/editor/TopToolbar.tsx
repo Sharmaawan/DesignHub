@@ -41,9 +41,10 @@ export default function TopToolbar({ onThemeToggle, isDark, onShowShortcuts, onO
     pages, currentPageIndex, sidePanelTab, setSidePanelTab,
   } = useEditorStore();
   const { projects, updateProject } = useProjectStore();
-  const { approvalContext, loadApprovalContext, posts, loadPosts } = useSocialStore();
+  const { approvalContext, loadApprovalContext, posts, loadPosts, sendPost } = useSocialStore();
   const [showZoomMenu, setShowZoomMenu] = useState(false);
   const [showViewMenu, setShowViewMenu] = useState(false);
+  const [sending, setSending] = useState(false);
 
   // Drives the Publish button's label — a maker submits for review instead of
   // publishing directly, and the button should say so up front rather than only
@@ -59,6 +60,23 @@ export default function TopToolbar({ onThemeToggle, isDark, onShowShortcuts, onO
   const project = projects.find((p) => p.id === projectId);
   const currentPage = pages[currentPageIndex];
   const pendingPostForProject = posts.find((p) => p.projectId === projectId && p.status === 'pending_approval');
+  // Distinct from pending — an approver already signed off on this one, so the maker
+  // should get a real "publish it now" action instead of being routed back through
+  // "Send for Approval" as if nothing had happened yet.
+  const approvedPostForProject = posts.find((p) => p.projectId === projectId && p.status === 'approved');
+
+  const handleSendApprovedPost = async () => {
+    if (!approvedPostForProject) return;
+    setSending(true);
+    try {
+      const result = await sendPost(approvedPostForProject.id);
+      if (result.status === 'published') toast.success('Published!');
+      else toast.error(result.errorMessage || 'Failed to publish');
+    } catch (err: any) {
+      toast.error(err.message);
+    }
+    setSending(false);
+  };
 
   const handleSave = () => {
     if (!projectId) return;
@@ -278,18 +296,23 @@ export default function TopToolbar({ onThemeToggle, isDark, onShowShortcuts, onO
           <HiOutlineChevronDown size={10} />
         </button>
         <button
-          onClick={onOpenPublish}
-          disabled={isMaker && !!pendingPostForProject}
+          onClick={isMaker && approvedPostForProject ? handleSendApprovedPost : onOpenPublish}
+          disabled={sending || (isMaker && !!pendingPostForProject)}
           className="btn-primary flex items-center gap-1.5 text-sm py-1.5 px-3 disabled:opacity-50 disabled:cursor-not-allowed"
           title={
-            isMaker && pendingPostForProject ? 'Already submitted — waiting on an approver to review it'
+            isMaker && approvedPostForProject ? 'Approved — publish it now'
+              : isMaker && pendingPostForProject ? 'Already submitted — waiting on an approver to review it'
               : isMaker ? 'Send to social media for approval'
               : 'Publish to social media'
           }
         >
           <HiOutlineGlobeAlt size={14} />
           <span className="hidden sm:inline">
-            {isMaker && pendingPostForProject ? 'Awaiting Approval' : isMaker ? 'Send for Approval' : 'Publish'}
+            {sending ? 'Publishing...'
+              : isMaker && approvedPostForProject ? 'Publish Now'
+              : isMaker && pendingPostForProject ? 'Awaiting Approval'
+              : isMaker ? 'Send for Approval'
+              : 'Publish'}
           </span>
         </button>
       </div>
