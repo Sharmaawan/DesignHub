@@ -99,6 +99,24 @@ async function executePublish(postId: string) {
   const post = await prisma.socialPost.findUnique({ where: { id: postId }, include: { socialAccount: true } });
   if (!post) throw Object.assign(new Error('Post not found'), { status: 404 });
 
+  // Meta/Pinterest publish by handing the media URL to the *platform*, whose servers
+  // then fetch it — a localhost URL can never work there. This has to be checked HERE
+  // (right before actually contacting the platform), not back in POST /posts at
+  // submission time: a maker's post held for approval, or a draft, never reaches this
+  // function at all, so it shouldn't be blocked by a check that only matters once
+  // something is genuinely about to go out. Checking it at submission time made local
+  // dev (no public HTTPS origin) unable to even create a pending-approval post.
+  const mediaUrls = post.mediaUrls as string[];
+  if (mediaUrls.some((u) => !/^https?:\/\//.test(u)) || mediaUrls.some((u) => /^https?:\/\/(localhost|127\.0\.0\.1)/.test(u))) {
+    return prisma.socialPost.update({
+      where: { id: post.id },
+      data: {
+        status: 'failed',
+        errorMessage: 'Media URL is not publicly reachable. Set FRONTEND_URL (or PUBLIC_MEDIA_URL) on the API to this deployment\'s public https origin.',
+      },
+    });
+  }
+
   const adapter = getAdapter(post.platform);
   if (!adapter || !adapter.isConfigured()) {
     return prisma.socialPost.update({
@@ -271,25 +289,18 @@ router.post('/posts', authMiddleware, async (req: AuthRequest, res: Response) =>
     const { socialAccountId, projectId, action, mediaType, mediaUrls: rawMediaUrls, caption, hashtags, altText, firstComment, linkUrl, scheduledFor } = req.body;
 
     // Meta and Pinterest publish by handing the media URL to the *platform*, whose
-    // servers then fetch it — so a relative "/uploads/x.png" (or anything pointing at
-    // localhost) can never work, and the failure surfaces as an opaque upstream error.
-    // Resolve to the deployment's public origin here rather than trusting whatever the
-    // browser sent, so scheduled posts (published later, with no browser involved)
-    // store a fetchable URL too.
+    // servers then fetch it — so a relative "/uploads/x.png" won't work as-is. Resolve
+    // to the deployment's public origin here rather than trusting whatever the browser
+    // sent, so scheduled posts (published later, with no browser involved) store a
+    // fetchable URL too. Whether that resolved URL is ACTUALLY publicly reachable
+    // (not localhost, has a real public origin configured) is validated later, in
+    // executePublish, right before something is actually sent to the platform — not
+    // here, since a pending-approval post or a draft never reaches that point at all
+    // and shouldn't be blocked by a check that only matters once publishing is real.
     const PUBLIC_ORIGIN = (process.env.PUBLIC_MEDIA_URL || process.env.FRONTEND_URL || '').replace(/\/$/, '');
     const mediaUrls: string[] = (Array.isArray(rawMediaUrls) ? rawMediaUrls : []).map((u: string) =>
       typeof u === 'string' && u.startsWith('/') ? `${PUBLIC_ORIGIN}${u}` : u
     );
-    if (mediaUrls.some((u) => !/^https?:\/\//.test(u))) {
-      return res.status(400).json({
-        error: 'Media URL is not publicly reachable. Set FRONTEND_URL (or PUBLIC_MEDIA_URL) on the API to this deployment\'s public https origin.',
-      });
-    }
-    if (mediaUrls.some((u) => /^https?:\/\/(localhost|127\.0\.0\.1)/.test(u))) {
-      return res.status(400).json({
-        error: 'Media URL points at localhost, which social platforms cannot fetch. Set FRONTEND_URL (or PUBLIC_MEDIA_URL) to the public origin.',
-      });
-    }
 
     const account = await prisma.socialAccount.findUnique({ where: { id: socialAccountId } });
     if (!account || account.userId !== req.userId) return res.status(404).json({ error: 'Social account not found' });

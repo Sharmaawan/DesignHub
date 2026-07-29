@@ -26,9 +26,13 @@ interface TopToolbarProps {
   onOpenSettings: () => void;
   onOpenPreview: () => void;
   collaborators: Collaborator[];
+  // Set when viewing a design this account doesn't own (e.g. an approver reviewing a
+  // submitted design) — the backend now correctly rejects a non-owner's save, so Save
+  // here explains that instead of silently no-op'ing.
+  isReadOnlyView?: boolean;
 }
 
-export default function TopToolbar({ onThemeToggle, isDark, onShowShortcuts, onOpenShare, onOpenExport, onOpenPublish, onOpenSettings, onOpenPreview, collaborators }: TopToolbarProps) {
+export default function TopToolbar({ onThemeToggle, isDark, onShowShortcuts, onOpenShare, onOpenExport, onOpenPublish, onOpenSettings, onOpenPreview, collaborators, isReadOnlyView }: TopToolbarProps) {
   const navigate = useNavigate();
   const { user } = useAuthStore();
   const {
@@ -39,8 +43,9 @@ export default function TopToolbar({ onThemeToggle, isDark, onShowShortcuts, onO
     isSaving, lastSaved, setSaving, setLastSaved,
     setCommentsOpen, setVersionsOpen, commentsOpen, versionsOpen,
     pages, currentPageIndex, sidePanelTab, setSidePanelTab,
+    project,
   } = useEditorStore();
-  const { projects, updateProject } = useProjectStore();
+  const { updateProject } = useProjectStore();
   const { approvalContext, loadApprovalContext, posts, loadPosts, sendPost } = useSocialStore();
   const [showZoomMenu, setShowZoomMenu] = useState(false);
   const [showViewMenu, setShowViewMenu] = useState(false);
@@ -57,7 +62,6 @@ export default function TopToolbar({ onThemeToggle, isDark, onShowShortcuts, onO
   const [projectName, setProjectName] = useState('');
 
   const projectId = window.location.pathname.split('/').pop();
-  const project = projects.find((p) => p.id === projectId);
   const currentPage = pages[currentPageIndex];
   const pendingPostForProject = posts.find((p) => p.projectId === projectId && p.status === 'pending_approval');
   // Distinct from pending — an approver already signed off on this one, so the maker
@@ -81,6 +85,10 @@ export default function TopToolbar({ onThemeToggle, isDark, onShowShortcuts, onO
 
   const handleSave = () => {
     if (!projectId) return;
+    if (isReadOnlyView) {
+      toast.error("You're viewing someone else's design — changes here aren't saved.");
+      return;
+    }
     setSaving(true);
     const state = useEditorStore.getState();
     updateProject(projectId, { canvasData: state.pages, name: project?.name || 'Untitled' });
@@ -92,7 +100,7 @@ export default function TopToolbar({ onThemeToggle, isDark, onShowShortcuts, onO
   };
 
   const handleNameSave = () => {
-    if (projectId && projectName.trim()) {
+    if (projectId && projectName.trim() && !isReadOnlyView) {
       updateProject(projectId, { name: projectName.trim() });
       toast.success('Renamed!');
     }

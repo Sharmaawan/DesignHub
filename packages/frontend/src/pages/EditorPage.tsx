@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useEditorStore } from '../stores/editorStore';
-import { useProjectStore } from '../stores/projectStore';
+import { useProjectStore, mapApiProjectToProject } from '../stores/projectStore';
 import { useThemeStore } from '../stores/themeStore';
 import LeftSidebar from '../components/editor/LeftSidebar';
 import TopToolbar from '../components/editor/TopToolbar';
@@ -21,6 +21,8 @@ import PublishModal from '../components/editor/PublishModal';
 import PreviewMode from '../components/editor/PreviewMode';
 import toast from 'react-hot-toast';
 import { useCollaboration } from '../hooks/useCollaboration';
+import { useAuthStore } from '../stores/authStore';
+import { projectAPI } from '../utils/api';
 
 export default function EditorPage() {
   const { projectId } = useParams();
@@ -35,6 +37,13 @@ export default function EditorPage() {
   } = useEditorStore();
   const sidePanelTab = useEditorStore((s) => s.sidePanelTab);
   const { projects, updateProject, loadProjects } = useProjectStore();
+  const { user } = useAuthStore();
+  // Set once a project not in the viewer's own list loads via the read-only fallback
+  // below (e.g. an approver opening a design someone else submitted for review) — used
+  // to skip autosave/keyboard-save, which the backend now correctly rejects for a
+  // non-owner anyway (see routes/projects.ts PUT /:id), rather than silently no-op'ing
+  // every 30s against an endpoint that will never succeed.
+  const [isReadOnlyView, setIsReadOnlyView] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showShare, setShowShare] = useState(false);
@@ -47,16 +56,34 @@ export default function EditorPage() {
   useEffect(() => { loadProjects(); }, []);
 
   useEffect(() => {
-    if (projectId) {
-      const project = projects.find((p) => p.id === projectId);
-      if (project) setProject(project);
+    if (!projectId) return;
+    const project = projects.find((p) => p.id === projectId);
+    if (project) {
+      setProject(project);
+      setIsReadOnlyView(false);
+      return;
     }
-  }, [projectId, projects, setProject]);
+    // Not in the viewer's own project list — GET /:id has no ownership restriction
+    // (unlike PUT/DELETE), specifically so an approver can open and review a design
+    // someone else submitted for approval without needing to own or collaborate on it.
+    let cancelled = false;
+    projectAPI.get(projectId).then(({ data }) => {
+      if (cancelled) return;
+      setProject(mapApiProjectToProject(data));
+      setIsReadOnlyView(data.ownerId !== user?.id);
+    }).catch(() => {
+      if (!cancelled) toast.error("Couldn't load that design — it may not exist or you may not have access.");
+    });
+    return () => { cancelled = true; };
+  }, [projectId, projects, setProject, user?.id]);
 
-  // Autosave
+  // Autosave — skipped in read-only view (e.g. an approver reviewing someone else's
+  // submitted design): the backend now correctly rejects a non-owner's PUT anyway, so
+  // this just avoids attempting a save every 30s that can only ever fail, and avoids
+  // the "Saved" indicator misleadingly implying it worked.
   useEffect(() => {
     autosaveTimerRef.current = setInterval(() => {
-      if (projectId) {
+      if (projectId && !isReadOnlyView) {
         const state = useEditorStore.getState();
         if (state.pages.length > 0) {
           setSaving(true);
@@ -69,7 +96,7 @@ export default function EditorPage() {
       }
     }, 30000);
     return () => clearInterval(autosaveTimerRef.current);
-  }, [projectId, updateProject, setSaving, setLastSaved]);
+  }, [projectId, updateProject, setSaving, setLastSaved, isReadOnlyView]);
 
   // Keyboard shortcuts
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -114,13 +141,15 @@ export default function EditorPage() {
     if (isCtrl && e.key === '0') { e.preventDefault(); setZoom(1); }
     if (isCtrl && e.shiftKey && (e.key === 'S' || e.key === 's')) {
       e.preventDefault();
-      if (projectId) {
+      if (projectId && isReadOnlyView) {
+        toast.error("You're viewing someone else's design — changes here aren't saved.");
+      } else if (projectId) {
         setSaving(true);
         updateProject(projectId, { canvasData: state.pages });
         setTimeout(() => { setSaving(false); setLastSaved(new Date().toISOString()); toast.success('Saved!'); }, 500);
       }
     }
-  }, [undo, redo, copy, paste, cut, pushHistory, selectAll, deselectAll, zoomIn, zoomOut, setZoom, projectId, setSaving, setLastSaved, updateProject]);
+  }, [undo, redo, copy, paste, cut, pushHistory, selectAll, deselectAll, zoomIn, zoomOut, setZoom, projectId, setSaving, setLastSaved, updateProject, isReadOnlyView]);
 
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown);
@@ -142,6 +171,7 @@ export default function EditorPage() {
         onOpenSettings={() => setShowSettings(true)}
         onOpenPreview={() => setShowPreview(true)}
         collaborators={collaborators}
+        isReadOnlyView={isReadOnlyView}
       />
 
       <div className="flex-1 flex overflow-hidden relative">

@@ -2,6 +2,50 @@ import { create } from 'zustand';
 import { Project, Folder, Template } from '../types';
 import { projectAPI, templateAPI, favoriteAPI } from '../utils/api';
 
+// canvasData (a JSON snapshot of the full pages array, written by the editor's own
+// save paths) is the real source of truth — nothing currently populates the structured
+// Page/Element tables for hand-authored designs, so that relation is kept only as a
+// fallback for rows that do have it (e.g. duplicated projects). Shared by loadProjects
+// (the dashboard's own project list) and EditorPage's single-project fallback fetch
+// (opening a project — e.g. an approver reviewing a submitted design — that isn't in
+// the viewer's own list), so the two can never map the API response differently.
+export function mapApiProjectToProject(p: any): Project {
+  return {
+    id: p.id,
+    name: p.name,
+    pages: (Array.isArray(p.canvasData) && p.canvasData.length > 0)
+      ? p.canvasData
+      : p.pages?.map((pg: any) => ({
+        id: pg.id,
+        name: pg.name,
+        elements: pg.elements?.map((el: any) => ({
+          id: el.id,
+          type: el.type,
+          x: el.x || 0,
+          y: el.y || 0,
+          width: el.width || 100,
+          height: el.height || 100,
+          rotation: el.rotation || 0,
+          opacity: el.opacity ?? 1,
+          visible: el.visible ?? true,
+          locked: el.locked,
+          name: el.name || '',
+          zIndex: el.index || 0,
+          data: el.data,
+        })) || [],
+        backgroundColor: pg.backgroundColor || '#FFFFFF',
+        width: pg.width || 1920,
+        height: pg.height || 1080,
+      })) || [],
+    ownerId: p.ownerId,
+    collaborators: [],
+    isFavorite: p.favorites?.length > 0,
+    isTemplate: false,
+    createdAt: p.createdAt,
+    updatedAt: p.updatedAt,
+  };
+}
+
 interface ProjectState {
   projects: Project[];
   folders: Folder[];
@@ -140,45 +184,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set({ isLoading: true });
     try {
       const { data } = await projectAPI.list();
-      // canvasData (a JSON snapshot of the full pages array, written by the editor's
-      // own save paths) is the real source of truth — nothing currently populates the
-      // structured Page/Element tables for hand-authored designs, so that relation is
-      // kept only as a fallback for rows that do have it (e.g. duplicated projects).
-      const projects: Project[] = data.map((p: any) => ({
-        id: p.id,
-        name: p.name,
-        description: p.description,
-        pages: (Array.isArray(p.canvasData) && p.canvasData.length > 0)
-          ? p.canvasData
-          : p.pages?.map((pg: any) => ({
-          id: pg.id,
-          name: pg.name,
-          elements: pg.elements?.map((el: any) => ({
-            id: el.id,
-            type: el.type,
-            x: el.x || 0,
-            y: el.y || 0,
-            width: el.width || 100,
-            height: el.height || 100,
-            rotation: el.rotation || 0,
-            opacity: el.opacity ?? 1,
-            visible: el.visible ?? true,
-            locked: el.locked,
-            name: el.name || '',
-            zIndex: el.index || 0,
-            data: el.data,
-          })) || [],
-          backgroundColor: pg.backgroundColor || '#FFFFFF',
-          width: pg.width || 1920,
-          height: pg.height || 1080,
-        })) || [],
-        ownerId: p.ownerId,
-        collaborators: [],
-        isFavorite: p.favorites?.length > 0,
-        isTemplate: false,
-        createdAt: p.createdAt,
-        updatedAt: p.updatedAt,
-      }));
+      const projects: Project[] = data.map(mapApiProjectToProject);
       set({ projects, isLoading: false });
     } catch {
       set({ isLoading: false });

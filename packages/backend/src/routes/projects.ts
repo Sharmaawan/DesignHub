@@ -50,6 +50,15 @@ router.post('/', authMiddleware, async (req: AuthRequest, res: Response) => {
 
 router.put('/:id', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
+    // Previously unrestricted — any authenticated user could overwrite ANY project by
+    // ID (e.g. an approver's project-review feature reads other people's projects by
+    // ID, which made this gap directly reachable). GET stays open to any authenticated
+    // user (needed for exactly that review flow); only mutation needs the owner check.
+    const existing = await prisma.project.findUnique({ where: { id: req.params.id }, select: { ownerId: true } });
+    if (!existing) return res.status(404).json({ error: 'Project not found' });
+    if (existing.ownerId !== req.userId) {
+      return res.status(403).json({ error: 'Only the project owner can edit this design' });
+    }
     const { name, description, canvasData, status, thumbnail } = req.body;
     const project = await prisma.project.update({
       where: { id: req.params.id },
@@ -63,6 +72,11 @@ router.put('/:id', authMiddleware, async (req: AuthRequest, res: Response) => {
 
 router.delete('/:id', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
+    const existing = await prisma.project.findUnique({ where: { id: req.params.id }, select: { ownerId: true } });
+    if (!existing) return res.status(404).json({ error: 'Project not found' });
+    if (existing.ownerId !== req.userId) {
+      return res.status(403).json({ error: 'Only the project owner can delete this design' });
+    }
     await prisma.project.delete({ where: { id: req.params.id } });
     res.json({ success: true });
   } catch (error) {
