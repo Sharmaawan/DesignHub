@@ -394,12 +394,26 @@ export default function SocialConnectionsPage() {
                 return (
                   <div key={post.id} className="bg-white dark:bg-[#1e1e30] rounded-2xl border border-gray-200 dark:border-gray-700 p-4">
                     <div className="flex items-start gap-3">
-                      {post.mediaUrls[0] && <img src={post.mediaUrls[0]} alt="" className="w-16 h-16 rounded-lg object-cover flex-shrink-0" />}
+                      {post.mediaUrls[0] && (
+                        post.projectId ? (
+                          <a href={`/editor/${post.projectId}`} target="_blank" rel="noopener noreferrer" title="Open the design in the editor" className="flex-shrink-0 group relative">
+                            <img src={post.mediaUrls[0]} alt="" className="w-16 h-16 rounded-lg object-cover" />
+                            <span className="absolute inset-0 rounded-lg bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center text-white text-[9px] font-semibold opacity-0 group-hover:opacity-100">Open</span>
+                          </a>
+                        ) : (
+                          <img src={post.mediaUrls[0]} alt="" className="w-16 h-16 rounded-lg object-cover flex-shrink-0" />
+                        )
+                      )}
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 mb-1">
                           <span>{meta?.icon}</span>
                           <span className="text-sm font-medium text-gray-900 dark:text-white">{meta?.label}</span>
                           <span className="text-[11px] text-gray-400">· by {submitter}</span>
+                          {post.projectId && (
+                            <a href={`/editor/${post.projectId}`} target="_blank" rel="noopener noreferrer" className="text-[11px] text-[#7B2FBE] hover:underline ml-auto flex-shrink-0">
+                              Open design ↗
+                            </a>
+                          )}
                         </div>
                         <p className="text-xs text-gray-500 break-words">{post.caption || '(no caption)'}</p>
                         {post.scheduledFor && (

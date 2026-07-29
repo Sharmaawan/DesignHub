@@ -1,7 +1,9 @@
 import { useEffect, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { Toaster } from 'react-hot-toast';
+import toast, { Toaster } from 'react-hot-toast';
 import { useAuthStore } from './stores/authStore';
+import { useSocialStore } from './stores/socialStore';
+import { getSocket } from './lib/socket';
 
 // Every page used to be a static import, so visiting /login alone pulled in the
 // editor's Konva/react-konva code, DOCX/PDF/XLSX import libraries, and every other
@@ -44,6 +46,37 @@ export default function App() {
   useEffect(() => {
     if (token && !user) loadUser();
   }, [token, user, loadUser]);
+
+  // Live approval-status sync — a maker's toolbar or an approver's queue should
+  // update the moment a decision happens, not only after a reload. This has to
+  // live app-wide (not just inside the editor) since an approver reviewing
+  // submissions is usually on /social, not in a project at all.
+  useEffect(() => {
+    if (!user?.id) return;
+    const socket = getSocket();
+    socket.emit('join-user', user.id);
+
+    const refresh = () => {
+      const store = useSocialStore.getState();
+      store.loadApprovalContext();
+      store.loadPosts();
+      store.loadPendingApproval();
+    };
+    const onDecided = (payload: { postId: string; status: string }) => {
+      refresh();
+      if (payload.status === 'approved' || payload.status === 'scheduled') {
+        toast.success('Your design was approved!');
+      } else if (payload.status === 'rejected') {
+        toast.error('Your design was rejected — check Social Publishing for the reason');
+      }
+    };
+    socket.on('social:pending-changed', refresh);
+    socket.on('social:post-decided', onDecided);
+    return () => {
+      socket.off('social:pending-changed', refresh);
+      socket.off('social:post-decided', onDecided);
+    };
+  }, [user?.id]);
 
   return (
     <BrowserRouter>

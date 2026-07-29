@@ -222,6 +222,7 @@ export default function EditorPage() {
         open={showPublish}
         onClose={() => { setShowPublish(false); setPublishAccountId(null); }}
         initialAccountId={publishAccountId}
+        projectId={projectId}
       />
       <PreviewMode open={showPreview} onClose={() => setShowPreview(false)} />
 

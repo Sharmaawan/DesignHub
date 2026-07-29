@@ -73,6 +73,9 @@ const io = new Server(httpServer, {
     methods: ['GET', 'POST'],
   },
 });
+// Lets route handlers (e.g. routes/social.ts approve/reject/submit) push realtime
+// events without a circular import back to this file — `req.app.get('io')`.
+app.set('io', io);
 
 // crossOriginResourcePolicy relaxed to 'cross-origin' — /uploads is routinely
 // loaded (as <img>/<video> src) from a frontend served on a different origin
@@ -150,6 +153,14 @@ const CURSOR_COLORS = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#
 
 io.on('connection', (socket) => {
   console.log(`User connected: ${socket.id}`);
+
+  // A personal room, independent of whatever project page (if any) the user
+  // currently has open — social-post approval/rejection notifications need to
+  // reach a specific user wherever they are in the app, not just collaborators
+  // on one project.
+  socket.on('join-user', (userId: string) => {
+    if (userId) socket.join(`user:${userId}`);
+  });
 
   socket.on('join-project', (projectId: string, user: { id: string; name: string; avatar: string }) => {
     socket.join(projectId);

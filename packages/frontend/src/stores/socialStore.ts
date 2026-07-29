@@ -73,6 +73,9 @@ interface SocialState {
 
   loadPosts: () => Promise<void>;
   createPost: (data: Parameters<typeof socialAPI.createPost>[0]) => Promise<SocialPost>;
+  // Also how a rejected post gets edited-and-resubmitted — see routes/social.ts's
+  // PUT /posts/:id, which resets a rejected post back to pending_approval in place.
+  updatePost: (id: string, data: Record<string, unknown>) => Promise<SocialPost>;
   deletePost: (id: string) => Promise<void>;
   refreshAnalytics: (id: string) => Promise<void>;
 
@@ -163,6 +166,16 @@ export const useSocialStore = create<SocialState>((set, get) => ({
       return data;
     } catch (err: any) {
       throw new Error(err.response?.data?.error || 'Failed to create post');
+    }
+  },
+
+  updatePost: async (id, data) => {
+    try {
+      const { data: updated } = await socialAPI.updatePost(id, data);
+      set((s) => ({ posts: s.posts.map((p) => (p.id === id ? updated : p)) }));
+      return updated;
+    } catch (err: any) {
+      throw new Error(err.response?.data?.error || 'Failed to update post');
     }
   },
 

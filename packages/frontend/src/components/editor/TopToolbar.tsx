@@ -64,6 +64,7 @@ export default function TopToolbar({ onThemeToggle, isDark, onShowShortcuts, onO
   // should get a real "publish it now" action instead of being routed back through
   // "Send for Approval" as if nothing had happened yet.
   const approvedPostForProject = posts.find((p) => p.projectId === projectId && p.status === 'approved');
+  const rejectedPostForProject = posts.find((p) => p.projectId === projectId && p.status === 'rejected');
 
   const handleSendApprovedPost = async () => {
     if (!approvedPostForProject) return;
@@ -302,6 +303,7 @@ export default function TopToolbar({ onThemeToggle, isDark, onShowShortcuts, onO
           title={
             isMaker && approvedPostForProject ? 'Approved — publish it now'
               : isMaker && pendingPostForProject ? 'Already submitted — waiting on an approver to review it'
+              : isMaker && rejectedPostForProject ? 'Rejected — edit and resubmit for another review'
               : isMaker ? 'Send to social media for approval'
               : 'Publish to social media'
           }
@@ -311,6 +313,7 @@ export default function TopToolbar({ onThemeToggle, isDark, onShowShortcuts, onO
             {sending ? 'Publishing...'
               : isMaker && approvedPostForProject ? 'Publish Now'
               : isMaker && pendingPostForProject ? 'Awaiting Approval'
+              : isMaker && rejectedPostForProject ? 'Resubmit'
               : isMaker ? 'Send for Approval'
               : 'Publish'}
           </span>

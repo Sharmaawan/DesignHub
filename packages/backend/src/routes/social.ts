@@ -355,6 +355,10 @@ router.post('/posts', authMiddleware, async (req: AuthRequest, res: Response) =>
           .filter((a) => a.userId !== req.userId)
           .map((a) => ({ userId: a.userId, type: 'social_approval_request', message: `${who} submitted a ${account.platform} post for your approval` })),
       }).catch((e) => console.error('[social/posts] failed to notify approvers', e));
+      const io = req.app.get('io');
+      approvers
+        .filter((a) => a.userId !== req.userId)
+        .forEach((a) => io?.to(`user:${a.userId}`).emit('social:pending-changed'));
       return res.json(post);
     }
 
@@ -468,6 +472,7 @@ router.post('/posts/:id/approve', authMiddleware, async (req: AuthRequest, res: 
         },
       }).catch((e) => console.error('[social/approve] notify failed', e));
     }
+    req.app.get('io')?.to(`user:${post.userId}`).emit('social:post-decided', { postId: post.id, status: result.status });
     res.json(result);
   } catch (err: any) {
     console.error('[social/approve] failed', err);
@@ -524,6 +529,7 @@ router.post('/posts/:id/reject', authMiddleware, async (req: AuthRequest, res: R
         },
       }).catch((e) => console.error('[social/reject] notify failed', e));
     }
+    req.app.get('io')?.to(`user:${post.userId}`).emit('social:post-decided', { postId: post.id, status: rejected.status });
     res.json(rejected);
   } catch (err: any) {
     console.error('[social/reject] failed', err);
@@ -546,14 +552,39 @@ router.put('/posts/:id', authMiddleware, async (req: AuthRequest, res: Response)
   try {
     const post = await prisma.socialPost.findUnique({ where: { id: req.params.id } });
     if (!post || post.userId !== req.userId) return res.status(404).json({ error: 'Post not found' });
-    if (post.status !== 'draft' && post.status !== 'scheduled') {
-      return res.status(400).json({ error: 'Only drafts and scheduled posts can be edited' });
+    // A rejected post is also editable — this is how a maker "edits and resubmits":
+    // the SAME row goes back to pending_approval instead of creating an orphaned
+    // duplicate that leaves the original rejected post stranded in their history.
+    if (post.status !== 'draft' && post.status !== 'scheduled' && post.status !== 'rejected') {
+      return res.status(400).json({ error: 'Only drafts, scheduled, and rejected posts can be edited' });
     }
     const { caption, hashtags, altText, firstComment, linkUrl, scheduledFor, mediaUrls, mediaType } = req.body;
+    const wasRejected = post.status === 'rejected';
     const updated = await prisma.socialPost.update({
       where: { id: req.params.id },
-      data: { caption, hashtags, altText, firstComment, linkUrl, mediaUrls, mediaType, scheduledFor: scheduledFor ? new Date(scheduledFor) : undefined },
+      data: {
+        caption, hashtags, altText, firstComment, linkUrl, mediaUrls, mediaType,
+        scheduledFor: scheduledFor ? new Date(scheduledFor) : undefined,
+        ...(wasRejected ? { status: 'pending_approval', rejectionReason: null, approvedById: null, approvedAt: null } : {}),
+      },
     });
+
+    if (wasRejected && post.teamId) {
+      const approvers = await prisma.teamMember.findMany({
+        where: { teamId: post.teamId, role: { in: APPROVER_ROLES } },
+        select: { userId: true },
+      });
+      const author = await prisma.user.findUnique({ where: { id: req.userId! }, select: { name: true, email: true } });
+      const who = author?.name || author?.email || 'A team member';
+      await prisma.notification.createMany({
+        data: approvers
+          .filter((a) => a.userId !== req.userId)
+          .map((a) => ({ userId: a.userId, type: 'social_approval_request', message: `${who} resubmitted a ${post.platform} post for your approval` })),
+      }).catch((e) => console.error('[social/posts/:id] resubmit notify failed', e));
+      const io = req.app.get('io');
+      approvers.filter((a) => a.userId !== req.userId).forEach((a) => io?.to(`user:${a.userId}`).emit('social:pending-changed'));
+    }
+
     res.json(updated);
   } catch (err) {
     console.error('[social/posts/:id] update failed', err);

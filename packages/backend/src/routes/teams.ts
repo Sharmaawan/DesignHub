@@ -6,6 +6,17 @@ import crypto from 'crypto';
 
 const router = Router();
 
+// Team membership/invite mutation endpoints below previously had no authorization
+// check beyond "is logged in" — any authenticated user could call e.g.
+// PUT /:id/members/:memberId with { role: 'admin' } to self-promote on any team, or
+// list/revoke another team's invites. Only 'owner'/'admin' team members may manage
+// membership and invites; 'editor' (approver) and 'maker' cannot.
+async function isTeamAdmin(teamId: string, userId: string | undefined): Promise<boolean> {
+  if (!userId) return false;
+  const member = await prisma.teamMember.findUnique({ where: { teamId_userId: { teamId, userId } } });
+  return !!member && (member.role === 'owner' || member.role === 'admin');
+}
+
 // List teams for current user
 router.get('/', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
@@ -68,6 +79,9 @@ router.get('/:id/members', authMiddleware, async (req: AuthRequest, res: Respons
 // Add member directly
 router.post('/:id/members', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
+    if (!(await isTeamAdmin(req.params.id, req.userId))) {
+      return res.status(403).json({ error: 'Only team admins can add members' });
+    }
     const { email, role } = req.body;
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user) return res.status(404).json({ error: 'User not found' });
@@ -88,6 +102,9 @@ router.post('/:id/members', authMiddleware, async (req: AuthRequest, res: Respon
 // Remove member
 router.delete('/:id/members/:memberId', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
+    if (!(await isTeamAdmin(req.params.id, req.userId))) {
+      return res.status(403).json({ error: 'Only team admins can remove members' });
+    }
     await prisma.teamMember.delete({ where: { id: req.params.memberId } });
     res.json({ success: true });
   } catch {
@@ -98,6 +115,9 @@ router.delete('/:id/members/:memberId', authMiddleware, async (req: AuthRequest,
 // Update member role
 router.put('/:id/members/:memberId', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
+    if (!(await isTeamAdmin(req.params.id, req.userId))) {
+      return res.status(403).json({ error: 'Only team admins can change member roles' });
+    }
     const { role } = req.body;
     const member = await prisma.teamMember.update({
       where: { id: req.params.memberId },
@@ -114,6 +134,9 @@ router.put('/:id/members/:memberId', authMiddleware, async (req: AuthRequest, re
 // List invites for team
 router.get('/:id/invites', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
+    if (!(await isTeamAdmin(req.params.id, req.userId))) {
+      return res.status(403).json({ error: 'Only team admins can view invites' });
+    }
     const invites = await prisma.teamInvite.findMany({
       where: { teamId: req.params.id },
       include: { invitedBy: { select: { id: true, name: true, email: true } } },
@@ -128,6 +151,9 @@ router.get('/:id/invites', authMiddleware, async (req: AuthRequest, res: Respons
 // Send invite
 router.post('/:id/invites', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
+    if (!(await isTeamAdmin(req.params.id, req.userId))) {
+      return res.status(403).json({ error: 'Only team admins can send invites' });
+    }
     const { email, role } = req.body;
     if (!email) return res.status(400).json({ error: 'Email is required' });
 
@@ -194,6 +220,12 @@ router.put('/invites/:inviteId/accept', authMiddleware, async (req: AuthRequest,
     if (!invite) return res.status(404).json({ error: 'Invite not found' });
     if (invite.status !== 'pending') return res.status(400).json({ error: 'Invite already processed' });
     if (new Date() > invite.expiresAt) return res.status(400).json({ error: 'Invite expired' });
+    // Without this, anyone who learns/guesses an inviteId could accept an invite
+    // meant for a different email and be granted that role themselves.
+    const requester = await prisma.user.findUnique({ where: { id: req.userId! } });
+    if (!requester || requester.email.toLowerCase() !== invite.email.toLowerCase()) {
+      return res.status(403).json({ error: 'This invite was sent to a different email address' });
+    }
 
     await prisma.teamInvite.update({ where: { id: req.params.inviteId }, data: { status: 'accepted' } });
 
@@ -221,6 +253,12 @@ router.put('/invites/:inviteId/accept', authMiddleware, async (req: AuthRequest,
 // Reject invite
 router.put('/invites/:inviteId/reject', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
+    const invite = await prisma.teamInvite.findUnique({ where: { id: req.params.inviteId } });
+    if (!invite) return res.status(404).json({ error: 'Invite not found' });
+    const requester = await prisma.user.findUnique({ where: { id: req.userId! } });
+    if (!requester || requester.email.toLowerCase() !== invite.email.toLowerCase()) {
+      return res.status(403).json({ error: 'This invite was sent to a different email address' });
+    }
     await prisma.teamInvite.update({
       where: { id: req.params.inviteId },
       data: { status: 'rejected' },
@@ -234,6 +272,11 @@ router.put('/invites/:inviteId/reject', authMiddleware, async (req: AuthRequest,
 // Resend invite (generates new token)
 router.put('/invites/:inviteId/resend', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
+    const existing = await prisma.teamInvite.findUnique({ where: { id: req.params.inviteId } });
+    if (!existing) return res.status(404).json({ error: 'Invite not found' });
+    if (!(await isTeamAdmin(existing.teamId, req.userId))) {
+      return res.status(403).json({ error: 'Only team admins can resend invites' });
+    }
     const newToken = crypto.randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
     const invite = await prisma.teamInvite.update({
@@ -249,6 +292,11 @@ router.put('/invites/:inviteId/resend', authMiddleware, async (req: AuthRequest,
 // Revoke invite
 router.delete('/invites/:inviteId', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
+    const existing = await prisma.teamInvite.findUnique({ where: { id: req.params.inviteId } });
+    if (!existing) return res.status(404).json({ error: 'Invite not found' });
+    if (!(await isTeamAdmin(existing.teamId, req.userId))) {
+      return res.status(403).json({ error: 'Only team admins can revoke invites' });
+    }
     await prisma.teamInvite.delete({ where: { id: req.params.inviteId } });
     res.json({ success: true });
   } catch {

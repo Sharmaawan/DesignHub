@@ -9,6 +9,11 @@ interface PublishModalProps {
   open: boolean;
   onClose: () => void;
   initialAccountId?: string | null;
+  // Without this, a submitted post's `projectId` is always null — which breaks
+  // every "does this project have a pending/approved post" lookup elsewhere
+  // (TopToolbar's Send-for-Approval/Publish-Now button, the approver's "open the
+  // design" link) since those all match posts by projectId.
+  projectId?: string;
 }
 
 const PLATFORM_META: Record<string, { label: string; icon: string; color: string }> = {
@@ -28,9 +33,13 @@ function dataUrlToFile(dataUrl: string, filename: string): File {
   return new File([bytes], filename, { type: mime });
 }
 
-export default function PublishModal({ open, onClose, initialAccountId }: PublishModalProps) {
+export default function PublishModal({ open, onClose, initialAccountId, projectId }: PublishModalProps) {
   const { pages, currentPageIndex } = useEditorStore();
-  const { platforms, accounts, loadPlatforms, loadAccounts, connect, createPost, approvalContext, loadApprovalContext } = useSocialStore();
+  const { platforms, accounts, loadPlatforms, loadAccounts, connect, createPost, updatePost, posts, approvalContext, loadApprovalContext } = useSocialStore();
+  // A rejected post for this exact project resubmits in place (PUT, same row —
+  // keeps the rejection reason/history attached to one post) instead of creating a
+  // brand-new, disconnected submission via createPost.
+  const rejectedPost = projectId ? posts.find((p) => p.projectId === projectId && p.status === 'rejected') : undefined;
 
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
@@ -57,14 +66,36 @@ export default function PublishModal({ open, onClose, initialAccountId }: Publis
 
   useEffect(() => {
     if (!open) return;
-    setStep(initialAccountId ? 2 : 1);
-    setSelectedAccountId(initialAccountId || null);
+    if (rejectedPost) {
+      // Pre-fill from the rejected post so "resubmit" means "review/tweak and send
+      // again," not "start over from a blank form."
+      setStep(2);
+      setSelectedAccountId(null); // account list loads async below; resolved once accounts arrive
+      setMediaType(rejectedPost.mediaType);
+      setCaption(rejectedPost.caption || '');
+      setHashtagsInput((rejectedPost.hashtags || []).join(' '));
+      setAltText(rejectedPost.altText || '');
+      setFirstComment(rejectedPost.firstComment || '');
+      setLinkUrl(rejectedPost.linkUrl || '');
+    } else {
+      setStep(initialAccountId ? 2 : 1);
+      setSelectedAccountId(initialAccountId || null);
+    }
     setResult(null);
     setSubmitting(false);
     loadPlatforms();
     loadAccounts();
     loadApprovalContext();
-  }, [open, initialAccountId]);
+  }, [open, initialAccountId, rejectedPost?.id]);
+
+  // The rejected post only stores a socialAccountId, not the account object itself —
+  // resolve it once the accounts list has actually loaded in.
+  useEffect(() => {
+    if (open && rejectedPost && accounts.length > 0 && !selectedAccountId) {
+      const acc = accounts.find((a) => a.platform === rejectedPost.platform);
+      if (acc) setSelectedAccountId(acc.id);
+    }
+  }, [open, rejectedPost, accounts, selectedAccountId]);
 
   if (!open) return null;
 
@@ -121,18 +152,29 @@ export default function PublishModal({ open, onClose, initialAccountId }: Publis
 
       const hashtags = hashtagsInput.split(/[\s,]+/).map((h) => h.replace(/^#/, '').trim()).filter(Boolean);
 
-      const post = await createPost({
-        socialAccountId: account.id,
-        action,
-        mediaType,
-        mediaUrls: [mediaUrl],
-        caption: caption || undefined,
-        hashtags: hashtags.length ? hashtags : undefined,
-        altText: altText || undefined,
-        firstComment: firstComment || undefined,
-        linkUrl: linkUrl || undefined,
-        scheduledFor: action === 'schedule' && scheduledFor ? new Date(scheduledFor).toISOString() : undefined,
-      });
+      const post = rejectedPost
+        ? await updatePost(rejectedPost.id, {
+            mediaType,
+            mediaUrls: [mediaUrl],
+            caption: caption || undefined,
+            hashtags: hashtags.length ? hashtags : undefined,
+            altText: altText || undefined,
+            firstComment: firstComment || undefined,
+            linkUrl: linkUrl || undefined,
+          })
+        : await createPost({
+            socialAccountId: account.id,
+            projectId,
+            action,
+            mediaType,
+            mediaUrls: [mediaUrl],
+            caption: caption || undefined,
+            hashtags: hashtags.length ? hashtags : undefined,
+            altText: altText || undefined,
+            firstComment: firstComment || undefined,
+            linkUrl: linkUrl || undefined,
+            scheduledFor: action === 'schedule' && scheduledFor ? new Date(scheduledFor).toISOString() : undefined,
+          });
 
       setResult(
         post.status === 'published' ? 'published'
@@ -170,11 +212,22 @@ export default function PublishModal({ open, onClose, initialAccountId }: Publis
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
       <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-xl mx-4 animate-slide-up" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between p-5 border-b border-gray-100 dark:border-gray-700">
-          <h2 className="text-lg font-display font-bold text-gray-900 dark:text-white">{isMaker ? 'Submit for approval' : 'Publish design'}</h2>
+          <h2 className="text-lg font-display font-bold text-gray-900 dark:text-white">
+            {rejectedPost ? 'Edit & resubmit' : isMaker ? 'Submit for approval' : 'Publish design'}
+          </h2>
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"><HiOutlineX size={18} /></button>
         </div>
 
-        {isMaker && result === null && (
+        {rejectedPost && result === null && (
+          <div className="px-5 pt-4 -mb-1">
+            <p className="text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded-lg px-3 py-2">
+              <strong>Rejected{rejectedPost.rejectionReason ? ':' : ' — no reason given.'}</strong> {rejectedPost.rejectionReason}
+              {' '}Make your changes and resubmit for another review.
+            </p>
+          </div>
+        )}
+
+        {!rejectedPost && isMaker && result === null && (
           <div className="px-5 pt-4 -mb-1">
             <p className="text-xs text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/20 rounded-lg px-3 py-2">
               This won't go live yet — it's sent to an approver first. Once approved, come back here to actually publish it.
@@ -377,7 +430,9 @@ export default function PublishModal({ open, onClose, initialAccountId }: Publis
               disabled={submitting || (action === 'schedule' && !scheduledFor) || result !== null}
               className="btn-primary text-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {submitting
+              {rejectedPost
+                ? (submitting ? 'Resubmitting…' : 'Resubmit for approval')
+                : submitting
                 ? (isMaker && action !== 'draft' ? 'Submitting…' : 'Publishing…')
                 : action === 'draft' ? 'Save draft'
                 : isMaker ? 'Submit for approval'
