@@ -21,13 +21,13 @@ export default function PageNavigation() {
 
   return (
     <div className="h-28 bg-white dark:bg-canva-dark-surface border-t border-gray-200 dark:border-canva-dark-border flex flex-col flex-shrink-0">
-      <div className="flex items-center justify-between px-4 py-1.5 border-b border-gray-100 dark:border-gray-800">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-gray-100 dark:border-gray-800">
         <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
-          {pages.length} page{pages.length !== 1 ? 's' : ''} - Page {currentPageIndex + 1}
+          {pages.length} page{pages.length !== 1 ? 's' : ''} · Page {currentPageIndex + 1}
         </span>
         <button
           onClick={addPage}
-          className="flex items-center gap-1 px-2 py-1 text-xs text-canva-purple hover:bg-canva-purple/10 rounded-md transition-colors font-medium"
+          className="flex items-center gap-1 px-2.5 py-1 text-xs text-canva-purple hover:bg-canva-purple/10 rounded-md transition-colors font-medium"
         >
           <HiOutlinePlus size={14} />
           Add page

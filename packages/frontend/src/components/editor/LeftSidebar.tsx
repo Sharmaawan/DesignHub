@@ -1381,7 +1381,7 @@ export default function LeftSidebar() {
       {/* Panel */}
       {panelOpen && (
         <div className="w-64 bg-white dark:bg-canva-dark-surface border-r border-gray-200 dark:border-canva-dark-border flex flex-col overflow-hidden">
-          <div className="flex items-center justify-between px-3 py-2.5 border-b border-gray-100 dark:border-gray-800 flex-shrink-0">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-gray-800 flex-shrink-0">
             <span className="text-sm font-semibold text-gray-900 dark:text-white capitalize">{activeTab}</span>
             <button
               onClick={() => {
@@ -1395,8 +1395,8 @@ export default function LeftSidebar() {
           </div>
 
           {(activeTab === 'templates' || activeTab === 'elements') && (
-            <div className="px-3 py-2 border-b border-gray-100 dark:border-gray-800 flex-shrink-0">
-              <div className="flex items-center gap-2 bg-gray-100 dark:bg-gray-800 rounded-lg px-2.5 py-1.5">
+            <div className="px-4 py-2.5 border-b border-gray-100 dark:border-gray-800 flex-shrink-0">
+              <div className="flex items-center gap-2 bg-gray-100 dark:bg-gray-800 rounded-lg px-3 py-2">
                 <HiOutlineSearch size={13} className="text-gray-400 flex-shrink-0" />
                 <input type="text" placeholder={`Search ${activeTab}...`} value={search} onChange={(e) => setSearch(e.target.value)}
                   className="flex-1 bg-transparent text-xs text-gray-700 dark:text-gray-300 placeholder-gray-400 outline-none" />
@@ -1408,9 +1408,9 @@ export default function LeftSidebar() {
 
             {/* TEMPLATES */}
             {activeTab === 'templates' && (
-              <div className="p-3">
+              <div className="p-4">
                 {/* Describe your ideal design — generates a title/subtitle/color scheme via AI */}
-                <div className="mb-3 p-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-gradient-to-br from-canva-purple/5 to-pink-500/5">
+                <div className="mb-4 p-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gradient-to-br from-canva-purple/5 to-pink-500/5">
                   <textarea
                     value={aiTemplatePrompt}
                     onChange={(e) => setAiTemplatePrompt(e.target.value)}
@@ -1430,7 +1430,7 @@ export default function LeftSidebar() {
                   </button>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-2 gap-2.5">
                   {BUILT_IN_TEMPLATES
                     .filter((t) => !search || t.name.toLowerCase().includes(search.toLowerCase()) || t.cat.toLowerCase().includes(search.toLowerCase()))
                     .map((tpl) => (

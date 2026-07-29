@@ -52,24 +52,24 @@ export default function RightSidebar() {
   if (!element) {
     return (
       <div className="w-72 bg-white dark:bg-canva-dark-surface border-l border-gray-200 dark:border-canva-dark-border overflow-y-auto">
-        <div className="sticky top-0 z-10 bg-white dark:bg-canva-dark-surface border-b border-gray-100 dark:border-gray-800 px-4 py-3 flex items-center justify-between">
+        <div className="sticky top-0 z-10 bg-white dark:bg-canva-dark-surface border-b border-gray-100 dark:border-gray-800 px-5 py-3.5 flex items-center justify-between">
           <span className="text-sm font-semibold text-gray-900 dark:text-white">Design</span>
           <button onClick={() => setRightPanelOpen(false)} className="toolbar-btn"><HiOutlineX size={16} /></button>
         </div>
-        <div className="p-4 space-y-5">
-          <p className="text-xs text-gray-400 dark:text-gray-500">
+        <div className="p-5 space-y-6">
+          <p className="text-xs text-gray-400 dark:text-gray-500 leading-relaxed">
             Click any text, shape, or image on the canvas to edit it. Nothing selected right now, so here's the page itself:
           </p>
           {page && (
             <>
               {/* Quick page actions */}
-              <div className="flex items-center gap-1">
-                <button onClick={() => duplicatePage(currentPageIndex)} className="toolbar-btn flex-1 flex items-center justify-center gap-1 text-xs" title="Duplicate page">
+              <div className="flex items-center gap-1.5">
+                <button onClick={() => duplicatePage(currentPageIndex)} className="toolbar-btn flex-1 flex items-center justify-center gap-1.5 text-xs font-medium" title="Duplicate page">
                   <HiOutlineDuplicate size={14} /> Duplicate page
                 </button>
                 <button
                   onClick={() => { if (pages.length > 1) removePage(currentPageIndex); else toast.error("Can't delete the only page"); }}
-                  className="toolbar-btn text-red-500 hover:text-red-600" title="Delete page"
+                  className="toolbar-btn text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20" title="Delete page"
                 >
                   <HiOutlineTrash size={14} />
                 </button>
@@ -139,7 +139,7 @@ export default function RightSidebar() {
                   { label: 'Show guides', on: showGuides, toggle: toggleGuides },
                   { label: 'Snap to grid', on: snapEnabled, toggle: toggleSnap },
                 ].map((s) => (
-                  <label key={s.label} className="flex items-center justify-between py-1.5 cursor-pointer">
+                  <label key={s.label} className="flex items-center justify-between py-2 cursor-pointer">
                     <span className="text-xs text-gray-600 dark:text-gray-400">{s.label}</span>
                     <button
                       onClick={s.toggle}
@@ -149,7 +149,7 @@ export default function RightSidebar() {
                     </button>
                   </label>
                 ))}
-                <div className="mt-2">
+                <div className="mt-3">
                   <NumberInput label="Grid size" value={gridSize} min={2} max={200} onChange={(v) => setGridSize(v)} />
                 </div>
               </Section>
@@ -975,7 +975,7 @@ function ChartProperties({ element, handleDataUpdate }: { element: CanvasElement
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div>
-      <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">{title}</h3>
+      <h3 className="text-[11px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2.5">{title}</h3>
       {children}
     </div>
   );

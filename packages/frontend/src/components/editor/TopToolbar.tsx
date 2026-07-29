@@ -111,9 +111,9 @@ export default function TopToolbar({ onThemeToggle, isDark, onShowShortcuts, onO
   };
 
   return (
-    <div className="h-14 bg-white dark:bg-canva-dark-surface border-b border-gray-200 dark:border-canva-dark-border flex items-center justify-between px-3 flex-shrink-0">
+    <div className="h-14 bg-white dark:bg-canva-dark-surface border-b border-gray-200 dark:border-canva-dark-border grid grid-cols-[1fr_auto_1fr] items-center px-3 gap-3 flex-shrink-0">
       {/* Left */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 justify-self-start min-w-0">
         <button onClick={() => navigate('/')} className="toolbar-btn flex items-center gap-1.5" title="Back to dashboard">
           <HiOutlineArrowLeft size={18} />
           <span className="text-sm font-medium hidden sm:inline">Home</span>
@@ -128,16 +128,17 @@ export default function TopToolbar({ onThemeToggle, isDark, onShowShortcuts, onO
           </button>
         </div>
         <div className="h-5 w-px bg-gray-200 dark:bg-gray-700" />
-        <button onClick={handleSave} className="toolbar-btn flex items-center gap-1" title="Save (Ctrl+Shift+S)">
+        <button onClick={handleSave} className="toolbar-btn flex items-center gap-1.5" title="Save (Ctrl+Shift+S)">
           <HiOutlineSave size={16} />
-          <span className="text-[11px] hidden md:inline">
+          <span className="text-[11px] font-medium hidden md:inline">
             {isSaving ? 'Saving...' : lastSaved ? `Saved` : 'Save'}
           </span>
         </button>
       </div>
 
-      {/* Center */}
-      <div className="flex items-center gap-2">
+      {/* Center — a true grid column, not flex justify-between, so this stays visually
+          centered on the whole toolbar regardless of how wide the left/right groups are. */}
+      <div className="flex items-center gap-2 justify-self-center min-w-0">
         {editingName ? (
           <input
             autoFocus
@@ -145,27 +146,27 @@ export default function TopToolbar({ onThemeToggle, isDark, onShowShortcuts, onO
             onChange={(e) => setProjectName(e.target.value)}
             onBlur={handleNameSave}
             onKeyDown={(e) => { if (e.key === 'Enter') handleNameSave(); if (e.key === 'Escape') setEditingName(false); }}
-            className="text-sm font-medium text-gray-900 dark:text-white bg-gray-100 dark:bg-gray-700 px-3 py-1 rounded-lg border-0 focus:outline-none focus:ring-2 focus:ring-canva-purple text-center min-w-[150px]"
+            className="text-sm font-medium text-gray-900 dark:text-white bg-gray-100 dark:bg-gray-700 px-3 py-1.5 rounded-lg border-0 focus:outline-none focus:ring-2 focus:ring-canva-purple text-center min-w-[150px]"
           />
         ) : (
           <button
             onClick={() => { setProjectName(project?.name || 'Untitled Design'); setEditingName(true); }}
-            className="text-sm font-medium text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700 px-3 py-1 rounded-lg transition-colors flex items-center gap-1"
+            className="group text-sm font-medium text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 max-w-[280px]"
           >
-            {project?.name || 'Untitled Design'}
-            <HiOutlinePencil size={12} className="text-gray-400" />
+            <span className="truncate">{project?.name || 'Untitled Design'}</span>
+            <HiOutlinePencil size={12} className="text-gray-400 group-hover:text-gray-500 flex-shrink-0" />
           </button>
         )}
-        {isSaving && <HiOutlineCheck size={14} className="text-green-500" />}
+        {isSaving && <HiOutlineCheck size={14} className="text-green-500 flex-shrink-0" />}
         {currentPage && (
-          <span className="text-[10px] text-gray-400 hidden md:inline">
+          <span className="text-[10px] text-gray-400 hidden md:inline flex-shrink-0">
             {currentPage.width}×{currentPage.height}
           </span>
         )}
       </div>
 
       {/* Right */}
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-1.5 justify-self-end">
         {/* View menu */}
         <div className="relative">
           <button onClick={() => setShowViewMenu(!showViewMenu)} className="toolbar-btn flex items-center gap-1 text-xs">
@@ -238,25 +239,22 @@ export default function TopToolbar({ onThemeToggle, isDark, onShowShortcuts, onO
 
         <div className="h-5 w-px bg-gray-200 dark:bg-gray-700" />
 
-        {/* Comments */}
-        <button onClick={() => setCommentsOpen(!commentsOpen)} className={`toolbar-btn ${commentsOpen ? 'bg-canva-purple/10 text-canva-purple' : ''}`} title="Comments">
-          <HiOutlinePencil size={16} />
-        </button>
-
-        {/* Version History */}
-        <button onClick={() => setVersionsOpen(!versionsOpen)} className={`toolbar-btn ${versionsOpen ? 'bg-canva-purple/10 text-canva-purple' : ''}`} title="Version history">
-          <HiOutlineClock size={16} />
-        </button>
-
-        {/* Layers */}
-        <button onClick={() => setSidePanelTab(sidePanelTab === 'layers' ? '' : 'layers')} className={`toolbar-btn ${sidePanelTab === 'layers' ? 'bg-canva-purple/10 text-canva-purple' : ''}`} title="Layers panel">
-          <HiOutlineViewGrid size={16} />
-        </button>
-
-        {/* Video timeline */}
-        <button onClick={() => setSidePanelTab(sidePanelTab === 'timeline' ? '' : 'timeline')} className={`toolbar-btn ${sidePanelTab === 'timeline' ? 'bg-canva-purple/10 text-canva-purple' : ''}`} title="Video timeline">
-          <HiOutlineFilm size={16} />
-        </button>
+        {/* Panel toggles — grouped into one cluster (matches the Zoom pill's visual
+            language) instead of four loose icons floating between dividers. */}
+        <div className="flex items-center gap-0.5 bg-gray-100 dark:bg-gray-800 rounded-lg p-0.5">
+          <button onClick={() => setCommentsOpen(!commentsOpen)} className={`p-1.5 rounded-md transition-colors ${commentsOpen ? 'bg-white dark:bg-gray-700 text-canva-purple shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'}`} title="Comments">
+            <HiOutlinePencil size={16} />
+          </button>
+          <button onClick={() => setVersionsOpen(!versionsOpen)} className={`p-1.5 rounded-md transition-colors ${versionsOpen ? 'bg-white dark:bg-gray-700 text-canva-purple shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'}`} title="Version history">
+            <HiOutlineClock size={16} />
+          </button>
+          <button onClick={() => setSidePanelTab(sidePanelTab === 'layers' ? '' : 'layers')} className={`p-1.5 rounded-md transition-colors ${sidePanelTab === 'layers' ? 'bg-white dark:bg-gray-700 text-canva-purple shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'}`} title="Layers panel">
+            <HiOutlineViewGrid size={16} />
+          </button>
+          <button onClick={() => setSidePanelTab(sidePanelTab === 'timeline' ? '' : 'timeline')} className={`p-1.5 rounded-md transition-colors ${sidePanelTab === 'timeline' ? 'bg-white dark:bg-gray-700 text-canva-purple shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'}`} title="Video timeline">
+            <HiOutlineFilm size={16} />
+          </button>
+        </div>
 
         <div className="h-5 w-px bg-gray-200 dark:bg-gray-700" />
 
@@ -288,10 +286,13 @@ export default function TopToolbar({ onThemeToggle, isDark, onShowShortcuts, onO
         </button>
 
         {/* Quick export + Full export */}
-        <button onClick={handleExportCanvas} className="p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors" title="Quick PNG export">
+        <button onClick={handleExportCanvas} className="toolbar-btn" title="Quick PNG export">
           <HiOutlineDownload size={16} />
         </button>
-        <button onClick={onOpenExport} className="btn-primary flex items-center gap-1.5 text-sm py-1.5 px-3">
+        {/* Secondary/outline styling (vs. the solid Send-for-Approval/Publish button
+            below) so the two adjacent purple CTAs don't compete for attention —
+            Export is a supporting action, Publish is the primary one. */}
+        <button onClick={onOpenExport} className="flex items-center gap-1.5 text-sm font-medium py-1.5 px-3 rounded-lg border border-canva-purple/30 text-canva-purple hover:bg-canva-purple/5 active:scale-95 transition-all duration-150 ml-1 whitespace-nowrap flex-shrink-0">
           <HiOutlineDownload size={14} />
           <span className="hidden sm:inline">Export</span>
           <HiOutlineChevronDown size={10} />
@@ -299,7 +300,7 @@ export default function TopToolbar({ onThemeToggle, isDark, onShowShortcuts, onO
         <button
           onClick={isMaker && approvedPostForProject ? handleSendApprovedPost : onOpenPublish}
           disabled={sending || (isMaker && !!pendingPostForProject)}
-          className="btn-primary flex items-center gap-1.5 text-sm py-1.5 px-3 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="btn-primary flex items-center gap-1.5 text-sm py-1.5 px-3 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap flex-shrink-0"
           title={
             isMaker && approvedPostForProject ? 'Approved — publish it now'
               : isMaker && pendingPostForProject ? 'Already submitted — waiting on an approver to review it'
