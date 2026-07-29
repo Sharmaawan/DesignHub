@@ -143,9 +143,9 @@ export default function RightSidebar() {
                     <span className="text-xs text-gray-600 dark:text-gray-400">{s.label}</span>
                     <button
                       onClick={s.toggle}
-                      className={`w-9 h-5 rounded-full transition-colors relative ${s.on ? 'bg-canva-purple' : 'bg-gray-300 dark:bg-gray-600'}`}
+                      className={`w-9 h-5 rounded-full transition-colors duration-200 relative cursor-pointer flex-shrink-0 ${s.on ? 'bg-canva-purple' : 'bg-gray-300 dark:bg-gray-600'}`}
                     >
-                      <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${s.on ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
+                      <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200 ${s.on ? 'translate-x-4' : 'translate-x-0'}`} />
                     </button>
                   </label>
                 ))}
@@ -688,27 +688,27 @@ function VideoProperties({ element, handleDataUpdate }: { element: CanvasElement
         <span className="text-sm text-gray-700 dark:text-gray-300">Autoplay</span>
         <button
           onClick={() => handleDataUpdate({ autoplay: !(data.autoplay ?? true) })}
-          className={`w-9 h-5 rounded-full transition-colors relative ${(data.autoplay ?? true) ? 'bg-canva-purple' : 'bg-gray-300 dark:bg-gray-600'}`}
+          className={`w-9 h-5 rounded-full transition-colors duration-200 relative cursor-pointer flex-shrink-0 ${(data.autoplay ?? true) ? 'bg-canva-purple' : 'bg-gray-300 dark:bg-gray-600'}`}
         >
-          <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${(data.autoplay ?? true) ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
+          <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200 ${(data.autoplay ?? true) ? 'translate-x-4' : 'translate-x-0'}`} />
         </button>
       </label>
       <label className="flex items-center justify-between py-1.5 cursor-pointer">
         <span className="text-sm text-gray-700 dark:text-gray-300">Loop</span>
         <button
           onClick={() => handleDataUpdate({ loop: !(data.loop ?? true) })}
-          className={`w-9 h-5 rounded-full transition-colors relative ${(data.loop ?? true) ? 'bg-canva-purple' : 'bg-gray-300 dark:bg-gray-600'}`}
+          className={`w-9 h-5 rounded-full transition-colors duration-200 relative cursor-pointer flex-shrink-0 ${(data.loop ?? true) ? 'bg-canva-purple' : 'bg-gray-300 dark:bg-gray-600'}`}
         >
-          <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${(data.loop ?? true) ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
+          <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200 ${(data.loop ?? true) ? 'translate-x-4' : 'translate-x-0'}`} />
         </button>
       </label>
       <label className="flex items-center justify-between py-1.5 cursor-pointer">
         <span className="text-sm text-gray-700 dark:text-gray-300">Muted</span>
         <button
           onClick={() => handleDataUpdate({ muted: !(data.muted ?? true) })}
-          className={`w-9 h-5 rounded-full transition-colors relative ${(data.muted ?? true) ? 'bg-canva-purple' : 'bg-gray-300 dark:bg-gray-600'}`}
+          className={`w-9 h-5 rounded-full transition-colors duration-200 relative cursor-pointer flex-shrink-0 ${(data.muted ?? true) ? 'bg-canva-purple' : 'bg-gray-300 dark:bg-gray-600'}`}
         >
-          <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${(data.muted ?? true) ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
+          <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200 ${(data.muted ?? true) ? 'translate-x-4' : 'translate-x-0'}`} />
         </button>
       </label>
 

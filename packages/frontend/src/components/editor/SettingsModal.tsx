@@ -231,9 +231,9 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
                   <span className="text-sm text-gray-700 dark:text-gray-300">{item.label}</span>
                   <button
                     onClick={() => update('editor', item.key, !(settings.editor as any)[item.key])}
-                    className={`w-10 h-6 rounded-full transition-colors relative ${(settings.editor as any)[item.key] ? 'bg-canva-purple' : 'bg-gray-300 dark:bg-gray-600'}`}
+                    className={`w-10 h-6 rounded-full transition-colors duration-200 relative cursor-pointer ${(settings.editor as any)[item.key] ? 'bg-canva-purple' : 'bg-gray-300 dark:bg-gray-600'}`}
                   >
-                    <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${(settings.editor as any)[item.key] ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                    <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${(settings.editor as any)[item.key] ? 'translate-x-4' : 'translate-x-0.5'}`} />
                   </button>
                 </label>
               ))}
@@ -275,10 +275,10 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
                       <div className="flex items-center gap-2 flex-shrink-0">
                         <button
                           onClick={() => handleToggleKey(s.id)}
-                          className={`w-10 h-6 rounded-full transition-colors relative ${s.isActive ? 'bg-canva-purple' : 'bg-gray-300 dark:bg-gray-600'}`}
+                          className={`w-10 h-6 rounded-full transition-colors duration-200 relative cursor-pointer ${s.isActive ? 'bg-canva-purple' : 'bg-gray-300 dark:bg-gray-600'}`}
                           title={s.isActive ? 'Active' : 'Inactive'}
                         >
-                          <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${s.isActive ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                          <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${s.isActive ? 'translate-x-4' : 'translate-x-0.5'}`} />
                         </button>
                         <button onClick={() => handleDeleteKey(s.id)} className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20">
                           <HiOutlineTrash size={16} />
@@ -405,9 +405,9 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
                   </div>
                   <button
                     onClick={() => update('notifications', item.key, !(settings.notifications as any)[item.key])}
-                    className={`w-10 h-6 rounded-full transition-colors relative flex-shrink-0 ${(settings.notifications as any)[item.key] ? 'bg-canva-purple' : 'bg-gray-300 dark:bg-gray-600'}`}
+                    className={`w-10 h-6 rounded-full transition-colors duration-200 relative cursor-pointer flex-shrink-0 ${(settings.notifications as any)[item.key] ? 'bg-canva-purple' : 'bg-gray-300 dark:bg-gray-600'}`}
                   >
-                    <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${(settings.notifications as any)[item.key] ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                    <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${(settings.notifications as any)[item.key] ? 'translate-x-4' : 'translate-x-0.5'}`} />
                   </button>
                 </label>
               ))}
@@ -428,9 +428,9 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
                   </div>
                   <button
                     onClick={() => update('privacy', item.key, !(settings.privacy as any)[item.key])}
-                    className={`w-10 h-6 rounded-full transition-colors relative flex-shrink-0 ${(settings.privacy as any)[item.key] ? 'bg-canva-purple' : 'bg-gray-300 dark:bg-gray-600'}`}
+                    className={`w-10 h-6 rounded-full transition-colors duration-200 relative cursor-pointer flex-shrink-0 ${(settings.privacy as any)[item.key] ? 'bg-canva-purple' : 'bg-gray-300 dark:bg-gray-600'}`}
                   >
-                    <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${(settings.privacy as any)[item.key] ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                    <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${(settings.privacy as any)[item.key] ? 'translate-x-4' : 'translate-x-0.5'}`} />
                   </button>
                 </label>
               ))}

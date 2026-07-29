@@ -177,9 +177,9 @@ export default function ExportModal({ open, onClose }: ExportModalProps) {
               <span className="text-sm text-gray-700 dark:text-gray-300">Transparent background</span>
               <button
                 onClick={() => setTransparent(!transparent)}
-                className={`w-10 h-6 rounded-full transition-colors relative ${transparent ? 'bg-canva-purple' : 'bg-gray-300 dark:bg-gray-600'}`}
+                className={`w-10 h-6 rounded-full transition-colors duration-200 relative cursor-pointer ${transparent ? 'bg-canva-purple' : 'bg-gray-300 dark:bg-gray-600'}`}
               >
-                <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${transparent ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${transparent ? 'translate-x-4' : 'translate-x-0'}`} />
               </button>
             </label>
           )}
