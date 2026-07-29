@@ -111,9 +111,10 @@ export default function TopToolbar({ onThemeToggle, isDark, onShowShortcuts, onO
   };
 
   return (
-    <div className="h-14 bg-white dark:bg-canva-dark-surface border-b border-gray-200 dark:border-canva-dark-border grid grid-cols-[1fr_auto_1fr] items-center px-3 gap-3 flex-shrink-0">
-      {/* Left */}
-      <div className="flex items-center gap-2 justify-self-start min-w-0">
+    <div className="h-14 bg-white dark:bg-canva-dark-surface border-b border-gray-200 dark:border-canva-dark-border flex items-center px-3 gap-3 flex-shrink-0">
+      {/* Left — flex-shrink-0: these icon buttons can't meaningfully shrink below
+          their content, so they must never be asked to. */}
+      <div className="flex items-center gap-2 flex-shrink-0">
         <button onClick={() => navigate('/')} className="toolbar-btn flex items-center gap-1.5" title="Back to dashboard">
           <HiOutlineArrowLeft size={18} />
           <span className="text-sm font-medium hidden sm:inline">Home</span>
@@ -136,42 +137,49 @@ export default function TopToolbar({ onThemeToggle, isDark, onShowShortcuts, onO
         </button>
       </div>
 
-      {/* Center — a true grid column, not flex justify-between, so this stays visually
-          centered on the whole toolbar regardless of how wide the left/right groups are. */}
-      <div className="flex items-center gap-2 justify-self-center min-w-0">
-        {editingName ? (
-          <input
-            autoFocus
-            value={projectName}
-            onChange={(e) => setProjectName(e.target.value)}
-            onBlur={handleNameSave}
-            onKeyDown={(e) => { if (e.key === 'Enter') handleNameSave(); if (e.key === 'Escape') setEditingName(false); }}
-            className="text-sm font-medium text-gray-900 dark:text-white bg-gray-100 dark:bg-gray-700 px-3 py-1.5 rounded-lg border-0 focus:outline-none focus:ring-2 focus:ring-canva-purple text-center min-w-[150px]"
-          />
-        ) : (
-          <button
-            onClick={() => { setProjectName(project?.name || 'Untitled Design'); setEditingName(true); }}
-            className="group text-sm font-medium text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 max-w-[280px]"
-          >
-            <span className="truncate">{project?.name || 'Untitled Design'}</span>
-            <HiOutlinePencil size={12} className="text-gray-400 group-hover:text-gray-500 flex-shrink-0" />
-          </button>
-        )}
-        {isSaving && <HiOutlineCheck size={14} className="text-green-500 flex-shrink-0" />}
-        {currentPage && (
-          <span className="text-[10px] text-gray-400 hidden md:inline flex-shrink-0">
-            {currentPage.width}×{currentPage.height}
-          </span>
-        )}
+      {/* Center — flex-1 + min-w-0 (NOT grid 1fr, NOT absolute+fixed-max-width — both
+          overlapped the right icon cluster at common laptop widths, since that
+          cluster alone can exceed half the toolbar width once its text labels show).
+          flex-1 mathematically gets exactly (total − left − right − gaps), which can
+          never be negative and never fights either flex-shrink-0 sibling for space;
+          min-w-0 lets it actually shrink to that width instead of overflowing, and
+          the title's own truncate then absorbs any further squeeze. */}
+      <div className="flex-1 min-w-0 flex justify-center">
+        <div className="flex items-center gap-2 min-w-0">
+          {editingName ? (
+            <input
+              autoFocus
+              value={projectName}
+              onChange={(e) => setProjectName(e.target.value)}
+              onBlur={handleNameSave}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleNameSave(); if (e.key === 'Escape') setEditingName(false); }}
+              className="text-sm font-medium text-gray-900 dark:text-white bg-gray-100 dark:bg-gray-700 px-3 py-1.5 rounded-lg border-0 focus:outline-none focus:ring-2 focus:ring-canva-purple text-center min-w-[150px]"
+            />
+          ) : (
+            <button
+              onClick={() => { setProjectName(project?.name || 'Untitled Design'); setEditingName(true); }}
+              className="group text-sm font-medium text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 min-w-0"
+            >
+              <span className="truncate">{project?.name || 'Untitled Design'}</span>
+              <HiOutlinePencil size={12} className="hidden lg:inline text-gray-400 group-hover:text-gray-500 flex-shrink-0" />
+            </button>
+          )}
+          {isSaving && <HiOutlineCheck size={14} className="text-green-500 flex-shrink-0" />}
+          {currentPage && (
+            <span className="text-[10px] text-gray-400 hidden md:inline flex-shrink-0">
+              {currentPage.width}×{currentPage.height}
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Right */}
-      <div className="flex items-center gap-1.5 justify-self-end">
+      <div className="flex items-center gap-1.5 flex-shrink-0">
         {/* View menu */}
         <div className="relative">
           <button onClick={() => setShowViewMenu(!showViewMenu)} className="toolbar-btn flex items-center gap-1 text-xs">
             <HiOutlineViewGrid size={16} />
-            <span className="hidden lg:inline">View</span>
+            <span className="hidden xl:inline">View</span>
             <HiOutlineChevronRight size={10} className={`transition-transform ${showViewMenu ? 'rotate-90' : ''}`} />
           </button>
           {showViewMenu && (
@@ -276,13 +284,13 @@ export default function TopToolbar({ onThemeToggle, isDark, onShowShortcuts, onO
         {/* Preview */}
         <button onClick={onOpenPreview} className="toolbar-btn flex items-center gap-1" title="Preview design">
           <HiOutlineEye size={16} />
-          <span className="text-xs hidden lg:inline">Preview</span>
+          <span className="text-xs hidden xl:inline">Preview</span>
         </button>
 
         {/* Share */}
         <button onClick={onOpenShare} className="toolbar-btn flex items-center gap-1" title="Share this design">
           <HiOutlineShare size={16} />
-          <span className="text-xs hidden lg:inline">Share</span>
+          <span className="text-xs hidden xl:inline">Share</span>
         </button>
 
         {/* Quick export + Full export */}
