@@ -405,15 +405,19 @@ export default function SocialConnectionsPage() {
                         )
                       )}
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span>{meta?.icon}</span>
-                          <span className="text-sm font-medium text-gray-900 dark:text-white">{meta?.label}</span>
-                          <span className="text-[11px] text-gray-400">· by {submitter}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-semibold text-gray-900 dark:text-white truncate">{post.project?.name || 'Untitled Design'}</span>
                           {post.projectId && (
                             <a href={`/editor/${post.projectId}`} target="_blank" rel="noopener noreferrer" className="text-[11px] text-[#7B2FBE] hover:underline ml-auto flex-shrink-0">
                               Open design ↗
                             </a>
                           )}
+                        </div>
+                        <div className="flex items-center gap-2 mb-1 mt-0.5">
+                          <span>{meta?.icon}</span>
+                          <span className="text-xs text-gray-500 dark:text-gray-400">{meta?.label}</span>
+                          <span className="text-[11px] text-gray-400">· by {submitter}</span>
+                          <span className="text-[11px] text-gray-400">· {new Date(post.createdAt).toLocaleString()}</span>
                         </div>
                         <p className="text-xs text-gray-500 break-words">{post.caption || '(no caption)'}</p>
                         {post.scheduledFor && (

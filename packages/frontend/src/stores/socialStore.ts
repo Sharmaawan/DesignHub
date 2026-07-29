@@ -47,6 +47,8 @@ export interface SocialPost {
   socialAccount?: { platform: string; platformUsername: string | null };
   // Present on the approver queue only — who submitted the post.
   user?: { name: string | null; email: string | null };
+  // Present on the approver queue only — the design's own title, not just its caption.
+  project?: { name: string } | null;
 }
 
 export interface ApprovalContext {

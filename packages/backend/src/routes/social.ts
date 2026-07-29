@@ -423,6 +423,7 @@ router.get('/posts/pending-approval', authMiddleware, async (req: AuthRequest, r
       include: {
         socialAccount: { select: { platform: true, platformUsername: true } },
         user: { select: { name: true, email: true } },
+        project: { select: { name: true } },
       },
       orderBy: { createdAt: 'asc' },
       take: 100,
