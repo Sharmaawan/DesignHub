@@ -145,7 +145,7 @@ export default function RightSidebar() {
                       onClick={s.toggle}
                       className={`w-9 h-5 rounded-full transition-colors relative ${s.on ? 'bg-canva-purple' : 'bg-gray-300 dark:bg-gray-600'}`}
                     >
-                      <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${s.on ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                      <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${s.on ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
                     </button>
                   </label>
                 ))}
@@ -690,7 +690,7 @@ function VideoProperties({ element, handleDataUpdate }: { element: CanvasElement
           onClick={() => handleDataUpdate({ autoplay: !(data.autoplay ?? true) })}
           className={`w-9 h-5 rounded-full transition-colors relative ${(data.autoplay ?? true) ? 'bg-canva-purple' : 'bg-gray-300 dark:bg-gray-600'}`}
         >
-          <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${(data.autoplay ?? true) ? 'translate-x-4' : 'translate-x-0.5'}`} />
+          <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${(data.autoplay ?? true) ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
         </button>
       </label>
       <label className="flex items-center justify-between py-1.5 cursor-pointer">
@@ -699,7 +699,7 @@ function VideoProperties({ element, handleDataUpdate }: { element: CanvasElement
           onClick={() => handleDataUpdate({ loop: !(data.loop ?? true) })}
           className={`w-9 h-5 rounded-full transition-colors relative ${(data.loop ?? true) ? 'bg-canva-purple' : 'bg-gray-300 dark:bg-gray-600'}`}
         >
-          <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${(data.loop ?? true) ? 'translate-x-4' : 'translate-x-0.5'}`} />
+          <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${(data.loop ?? true) ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
         </button>
       </label>
       <label className="flex items-center justify-between py-1.5 cursor-pointer">
@@ -708,7 +708,7 @@ function VideoProperties({ element, handleDataUpdate }: { element: CanvasElement
           onClick={() => handleDataUpdate({ muted: !(data.muted ?? true) })}
           className={`w-9 h-5 rounded-full transition-colors relative ${(data.muted ?? true) ? 'bg-canva-purple' : 'bg-gray-300 dark:bg-gray-600'}`}
         >
-          <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${(data.muted ?? true) ? 'translate-x-4' : 'translate-x-0.5'}`} />
+          <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${(data.muted ?? true) ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
         </button>
       </label>
 

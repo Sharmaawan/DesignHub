@@ -234,8 +234,8 @@ export default function TopToolbar({ onThemeToggle, isDark, onShowShortcuts, onO
           <HiOutlineViewGrid size={16} />
         </button>
 
-        {/* Transitions */}
-        <button onClick={() => setSidePanelTab(sidePanelTab === 'transitions' ? '' : 'transitions')} className={`toolbar-btn ${sidePanelTab === 'transitions' ? 'bg-canva-purple/10 text-canva-purple' : ''}`} title="Page transitions">
+        {/* Video timeline */}
+        <button onClick={() => setSidePanelTab(sidePanelTab === 'timeline' ? '' : 'timeline')} className={`toolbar-btn ${sidePanelTab === 'timeline' ? 'bg-canva-purple/10 text-canva-purple' : ''}`} title="Video timeline">
           <HiOutlineFilm size={16} />
         </button>
 

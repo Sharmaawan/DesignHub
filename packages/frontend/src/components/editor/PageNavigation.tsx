@@ -94,10 +94,15 @@ export default function PageNavigation() {
                 )}
               </div>
 
-              <div className="absolute -bottom-0 left-0 right-0 bg-white/95 dark:bg-gray-900/95 text-center py-0.5 rounded-b-md">
+              <div className="absolute -bottom-0 left-0 right-0 bg-white/95 dark:bg-gray-900/95 text-center py-0.5 rounded-b-md flex items-center justify-center gap-1">
                 <span className={`text-[10px] font-medium ${index === currentPageIndex ? 'text-canva-purple' : 'text-gray-500 dark:text-gray-400'}`}>
                   {index + 1}
                 </span>
+                {!!page.duration && (
+                  <span className="text-[8px] text-gray-400" title="Scene duration">
+                    · {(page.duration / 1000).toFixed(page.duration % 1000 === 0 ? 0 : 1)}s
+                  </span>
+                )}
               </div>
 
               {pages.length > 1 && (

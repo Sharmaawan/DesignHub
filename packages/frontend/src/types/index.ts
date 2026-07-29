@@ -36,11 +36,23 @@ export interface Page {
   backgroundColor: string;
   width: number;
   height: number;
+  // Video timeline — undefined on every non-video page, preserving today's static-slide behavior.
+  duration?: number;
+  tracks?: Track[];
+}
+
+export interface Track {
+  id: string;
+  type: 'video' | 'text' | 'audio';
+  name: string;
+  locked?: boolean;
+  muted?: boolean;
+  hidden?: boolean;
 }
 
 export interface CanvasElement {
   id: string;
-  type: 'text' | 'image' | 'shape' | 'icon' | 'sticker' | 'chart' | 'table' | 'video' | 'group' | 'drawing';
+  type: 'text' | 'image' | 'shape' | 'icon' | 'sticker' | 'chart' | 'table' | 'video' | 'audio' | 'group' | 'drawing';
   x: number;
   y: number;
   width: number;
@@ -57,7 +69,12 @@ export interface CanvasElement {
   filters?: ImageFilter[];
   zIndex: number;
   groupId?: string;
-  data: TextData | ImageData | ShapeData | IconData | ChartData | TableData | VideoData | DrawingData;
+  // Video timeline — set only when this element is a clip on a track; undefined means
+  // it behaves exactly as a static, spatially-placed element (today's behavior).
+  trackId?: string;
+  timelineStart?: number;
+  timelineEnd?: number;
+  data: TextData | ImageData | ShapeData | IconData | ChartData | TableData | VideoData | AudioData | DrawingData;
 }
 
 export interface TextData {
@@ -156,6 +173,18 @@ export interface VideoData {
   muted: boolean;
   startTime: number;
   endTime: number;
+}
+
+export interface AudioData {
+  type: 'audio';
+  src: string;
+  volume: number;
+  muted: boolean;
+  loop: boolean;
+  startTime: number;
+  endTime: number;
+  fadeIn?: number;
+  fadeOut?: number;
 }
 
 export interface DrawingData {

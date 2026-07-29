@@ -985,8 +985,23 @@ export default function LeftSidebar() {
     probe.src = url;
   };
 
-  // Import categories the editor can turn into editable canvas content, as opposed to
-  // video/audio which are just stored and opened externally.
+  // Audio has no visual footprint on the canvas (see AudioElement in EditorCanvas.tsx,
+  // which renders nothing) — it only becomes meaningful once placed on a track via the
+  // video timeline panel, so this just adds it as an unassigned element for that panel's
+  // "Not on timeline" list to pick up. width/height are placeholders, never displayed.
+  const addAudioToCanvas = (url: string, name: string) => {
+    addElement({
+      type: 'audio' as any, x: cx, y: cy, width: 100, height: 100,
+      rotation: 0, opacity: 1, visible: true, locked: false, name, zIndex: 0,
+      data: { type: 'audio', src: url, volume: 1, muted: false, loop: false, startTime: 0, endTime: 0 } as any,
+    });
+    pushHistory();
+    toast.success(`${name} added — open the video timeline panel to place it on a track`);
+  };
+
+  // Import categories the editor can turn into editable canvas content directly. Video
+  // and audio are deliberately excluded — they get their own handling in `activate`
+  // below (addVideoToCanvas / addAudioToCanvas) instead of the generic import pipeline.
   const IMPORTABLE_CATS = ['image', 'svg', 'pdf', 'doc', 'sheet', 'slides', 'text'];
 
   // Shared by fresh uploads (processFile) and re-opening a previously uploaded file
@@ -1790,13 +1805,14 @@ export default function LeftSidebar() {
                         const isDone = f.progress >= 100;
                         const isImage = cat === 'image' || cat === 'svg';
                         // Image/SVG go straight to canvas; video becomes a real playable
-                        // canvas element; PDFs/DOCX/PPTX/XLSX/TXT run through the import
-                        // pipeline; audio has no in-canvas representation yet, so it
-                        // still opens externally.
+                        // canvas element; audio becomes an unassigned timeline element
+                        // (place it on a track via the video timeline panel); PDFs/DOCX/
+                        // PPTX/XLSX/TXT run through the import pipeline.
                         const activate = () => {
                           if (!f.url) return;
                           if (isImage) addImageToCanvas(f.url, f.name);
                           else if (cat === 'video') addVideoToCanvas(f.url, f.name);
+                          else if (cat === 'audio') addAudioToCanvas(f.url, f.name);
                           else if (f.canvasable) handleImportExistingFile(f);
                           else window.open(f.url, '_blank', 'noopener,noreferrer');
                         };

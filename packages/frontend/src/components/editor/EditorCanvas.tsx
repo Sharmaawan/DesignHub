@@ -1,9 +1,10 @@
 import { useRef, useState, useCallback, useEffect, useMemo } from 'react';
 import { Stage, Layer, Rect, Text, Image as KonvaImage, Group, Transformer, Line } from 'react-konva';
 import { useEditorStore } from '../../stores/editorStore';
-import { CanvasElement, Page, TextData, ImageData, ShapeData, TableData, ChartData, VideoData } from '../../types';
+import { CanvasElement, Page, TextData, ImageData, ShapeData, TableData, ChartData, VideoData, AudioData } from '../../types';
 import Konva from 'konva';
 import { Collaborator } from '../../hooks/useCollaboration';
+import { timelineClock as defaultTimelineClock, TimelineClock } from '../../lib/timelineClock';
 
 interface EditorCanvasProps {
   page: Page;
@@ -16,6 +17,10 @@ interface EditorCanvasProps {
   hideChrome?: boolean;
   collaborators?: Collaborator[];
   onCursorMove?: (x: number, y: number) => void;
+  // Which shared clock drives this canvas's video/audio elements — defaults to the
+  // module-level singleton the live editor uses. Preview mode passes its own isolated
+  // instance since it can be mounted at the same time as the live editor canvas.
+  clock?: TimelineClock;
 }
 
 // Konva starts a drag on the very first pixel of pointer movement by default, so a
@@ -109,7 +114,7 @@ function Ruler({ zoom, panX, panY, width, height }: { zoom: number; panX: number
   );
 }
 
-export default function EditorCanvas({ page, zoomOverride, panOverride, hideChrome, collaborators, onCursorMove }: EditorCanvasProps) {
+export default function EditorCanvas({ page, zoomOverride, panOverride, hideChrome, collaborators, onCursorMove, clock = defaultTimelineClock }: EditorCanvasProps) {
   const stageRef = useRef<Konva.Stage>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const transformerRef = useRef<Konva.Transformer>(null);
@@ -132,6 +137,7 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
     selectElement, deselectAll, moveElement, updateElement, setZoom, setPan,
     setHoveredElement, pushHistory, setViewportCenter,
     activeTool, drawColor, drawWidth, addDrawing,
+    isPlaying, setPlayheadMs, setIsPlaying,
   } = useEditorStore();
   const [currentStroke, setCurrentStroke] = useState<number[]>([]);
   const isDrawingRef = useRef(false);
@@ -180,6 +186,39 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
     observer.observe(container);
     return () => observer.disconnect();
   }, []);
+
+  // Drive the shared video-timeline clock off this page's duration and the store's
+  // isPlaying flag. The clock's own per-frame tick never touches React state — only
+  // its throttled UI subscription does, which is what feeds the scrubber.
+  // Only the live editor canvas (the default singleton clock) is driven by the global
+  // store's isPlaying/playheadMs — a canvas given its own clock instance (Preview) owns
+  // its play/pause/duration/UI-tick wiring itself, so it doesn't fight over global state
+  // with whichever other EditorCanvas happens to be mounted at the same time.
+  const drivesGlobalPlayback = clock === defaultTimelineClock;
+
+  useEffect(() => {
+    if (!drivesGlobalPlayback) return;
+    clock.setDuration(page.duration || 0);
+  }, [drivesGlobalPlayback, clock, page.duration]);
+
+  useEffect(() => {
+    if (!drivesGlobalPlayback) return;
+    if (isPlaying) clock.play();
+    else clock.pause();
+  }, [drivesGlobalPlayback, clock, isPlaying]);
+
+  useEffect(() => {
+    if (!drivesGlobalPlayback) return;
+    return clock.subscribeUi((ms) => setPlayheadMs(ms));
+  }, [drivesGlobalPlayback, clock, setPlayheadMs]);
+
+  // The clock can stop itself (reaching the end of the scene's duration) without the
+  // store's isPlaying ever being told — without this, the Play/Pause button would keep
+  // showing "Pause" forever after a scene finishes on its own.
+  useEffect(() => {
+    if (!drivesGlobalPlayback) return;
+    return clock.onEnd(() => setIsPlaying(false));
+  }, [drivesGlobalPlayback, clock, setIsPlaying]);
 
   // Track Shift key for aspect ratio locking
   useEffect(() => {
@@ -632,6 +671,18 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
             element={element}
             commonProps={commonProps}
             data={data}
+            clock={clock}
+          />
+        );
+      }
+      case 'audio': {
+        const data = element.data as AudioData;
+        return (
+          <AudioElement
+            key={element.id}
+            element={element}
+            data={data}
+            clock={clock}
           />
         );
       }
@@ -1343,16 +1394,21 @@ function AnimatedStickerElement({ element, commonProps, data }: { element: Canva
 // use) is to hand a live <video> element to a Konva.Image as its image source and keep
 // redrawing the layer on every animation frame, so each redraw just samples whatever
 // frame the video is currently showing.
-function VideoElement({ element, commonProps, data }: { element: CanvasElement; commonProps: any; data: VideoData }) {
+function VideoElement({ element, commonProps, data, clock }: { element: CanvasElement; commonProps: any; data: VideoData; clock: TimelineClock }) {
   const videoElRef = useRef<HTMLVideoElement | null>(null);
   const imageNodeRef = useRef<Konva.Image>(null);
   const animRef = useRef<Konva.Animation | null>(null);
   const [ready, setReady] = useState(false);
+  // A clip that belongs to a timeline track is driven by the shared clock (play/pause/
+  // seek/visibility all come from it); one with no trackId keeps today's exact
+  // independent-autoplay-on-mount behavior, so ordinary (non-timeline) video placements
+  // are unaffected by any of this.
+  const clocked = !!element.trackId;
 
   useEffect(() => {
     const video = document.createElement('video');
     video.crossOrigin = 'anonymous';
-    video.loop = data.loop ?? true;
+    video.loop = clocked ? false : (data.loop ?? true);
     video.muted = data.muted ?? true;
     video.playsInline = true;
     video.src = data.src;
@@ -1361,7 +1417,7 @@ function VideoElement({ element, commonProps, data }: { element: CanvasElement; 
 
     const handleReady = () => {
       setReady(true);
-      if (data.autoplay ?? true) video.play().catch(() => { /* browser blocked autoplay — still shows first frame */ });
+      if (!clocked && (data.autoplay ?? true)) video.play().catch(() => { /* browser blocked autoplay — still shows first frame */ });
     };
     video.addEventListener('loadeddata', handleReady);
 
@@ -1370,7 +1426,7 @@ function VideoElement({ element, commonProps, data }: { element: CanvasElement; 
       video.pause();
       video.src = '';
     };
-  }, [data.src]);
+  }, [data.src, clocked]);
 
   useEffect(() => {
     const video = videoElRef.current;
@@ -1379,18 +1435,43 @@ function VideoElement({ element, commonProps, data }: { element: CanvasElement; 
 
   useEffect(() => {
     const video = videoElRef.current;
-    if (video) video.loop = data.loop ?? true;
-  }, [data.loop]);
+    if (video && !clocked) video.loop = data.loop ?? true;
+  }, [data.loop, clocked]);
+
+  // Register with the shared clock only while this clip is on a track. getTiming is
+  // re-read every frame (not snapshotted) so trimming later (Phase 3) doesn't require
+  // re-registering.
+  useEffect(() => {
+    if (!clocked || !ready || !videoElRef.current) return;
+    return clock.registerMedia(
+      element.id,
+      videoElRef.current,
+      () => (element.trackId
+        ? { timelineStart: element.timelineStart ?? 0, timelineEnd: element.timelineEnd ?? 0 }
+        : null),
+      (data.startTime || 0) * 1000
+    );
+  }, [clocked, ready, element.id, element.trackId, element.timelineStart, element.timelineEnd, data.startTime, clock]);
 
   useEffect(() => {
     if (!ready || !imageNodeRef.current) return;
     const layer = imageNodeRef.current.getLayer();
     if (!layer) return;
-    const anim = new Konva.Animation(() => {}, layer);
+    const anim = new Konva.Animation(() => {
+      // Outside its timeline window, a clocked clip is hidden rather than just paused —
+      // matches how a static (non-timeline) element only ever shows while it's the
+      // current page's content, extended here to "current time" instead of "current page."
+      if (clocked && imageNodeRef.current) {
+        const start = element.timelineStart ?? 0;
+        const end = element.timelineEnd ?? 0;
+        const active = clock.getCurrentMs() >= start && clock.getCurrentMs() < end;
+        imageNodeRef.current.visible(active);
+      }
+    }, layer);
     anim.start();
     animRef.current = anim;
     return () => { anim.stop(); };
-  }, [ready]);
+  }, [ready, clocked, element.timelineStart, element.timelineEnd, clock]);
 
   if (!ready) {
     return (
@@ -1413,6 +1494,57 @@ function VideoElement({ element, commonProps, data }: { element: CanvasElement; 
       height={element.height}
     />
   );
+}
+
+// Audio has no visual representation on the Konva Stage — this component exists purely
+// to own a detached <audio> element and register it with the shared clock. It is only
+// meaningful once placed on a track (trackId set); an unclocked audio element (not
+// possible to create yet outside the timeline UI) would simply never play.
+function AudioElement({ element, data, clock }: { element: CanvasElement; data: AudioData; clock: TimelineClock }) {
+  const audioElRef = useRef<HTMLAudioElement | null>(null);
+  const [ready, setReady] = useState(false);
+  const clocked = !!element.trackId;
+
+  useEffect(() => {
+    const audio = document.createElement('audio');
+    audio.crossOrigin = 'anonymous';
+    audio.loop = clocked ? false : (data.loop ?? false);
+    audio.muted = data.muted ?? false;
+    audio.volume = data.volume ?? 1;
+    audio.src = data.src;
+    if (data.startTime) audio.currentTime = data.startTime;
+    audioElRef.current = audio;
+
+    const handleReady = () => setReady(true);
+    audio.addEventListener('loadeddata', handleReady);
+
+    return () => {
+      audio.removeEventListener('loadeddata', handleReady);
+      audio.pause();
+      audio.src = '';
+    };
+  }, [data.src, clocked]);
+
+  useEffect(() => {
+    const audio = audioElRef.current;
+    if (!audio) return;
+    audio.muted = data.muted ?? false;
+    audio.volume = data.volume ?? 1;
+  }, [data.muted, data.volume]);
+
+  useEffect(() => {
+    if (!clocked || !ready || !audioElRef.current) return;
+    return clock.registerMedia(
+      element.id,
+      audioElRef.current,
+      () => (element.trackId
+        ? { timelineStart: element.timelineStart ?? 0, timelineEnd: element.timelineEnd ?? 0 }
+        : null),
+      (data.startTime || 0) * 1000
+    );
+  }, [clocked, ready, element.id, element.trackId, element.timelineStart, element.timelineEnd, data.startTime, clock]);
+
+  return null;
 }
 
 function ShapeElement({ element, commonProps: rawCommonProps, data }: { element: CanvasElement; commonProps: any; data: ShapeData }) {

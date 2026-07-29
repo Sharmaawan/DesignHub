@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { CanvasElement, Page, Project, PageTransition, ElementAnimation } from '../types';
+import { CanvasElement, Page, Project, PageTransition, ElementAnimation, Track } from '../types';
 import { generateId } from '../utils/cn';
 
 interface HistoryEntry {
@@ -42,6 +42,12 @@ interface EditorState {
   activeTool: 'select' | 'pen' | 'highlighter' | 'eraser';
   drawColor: string;
   drawWidth: number;
+
+  // Video-timeline playback — ephemeral, not undo-tracked and not persisted, same
+  // treatment as pageTransitions'/elementAnimations' exclusion from history.
+  isPlaying: boolean;
+  playheadMs: number;
+  playbackRate: number;
 
   setProject: (project: Project) => void;
   addPage: () => void;
@@ -124,6 +130,14 @@ interface EditorState {
   cut: () => void;
   setViewportCenter: (x: number, y: number) => void;
 
+  setIsPlaying: (playing: boolean) => void;
+  setPlayheadMs: (ms: number) => void;
+  setPlaybackRate: (rate: number) => void;
+  addTrack: (type: 'video' | 'text' | 'audio', name?: string) => string;
+  removeTrack: (trackId: string) => void;
+  assignElementToTrack: (elementId: string, trackId: string, timelineStart: number, timelineEnd: number) => void;
+  setPageDuration: (pageIndex: number, duration: number) => void;
+
   get currentPage(): Page | null;
   get selectedElements(): CanvasElement[];
 }
@@ -173,6 +187,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   activeTool: 'select',
   drawColor: '#1E1E1E',
   drawWidth: 4,
+
+  isPlaying: false,
+  playheadMs: 0,
+  playbackRate: 1,
 
   setProject: (project) => {
     set({
@@ -349,6 +367,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         autoplay: false,
         loop: false,
         muted: true,
+        startTime: 0,
+        endTime: 0,
+      },
+      audio: {
+        src: '',
+        volume: 1,
+        muted: false,
+        loop: false,
         startTime: 0,
         endTime: 0,
       },
@@ -724,6 +750,52 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   setViewportCenter: (x, y) => set({ viewportCenter: { x, y } }),
+
+  setIsPlaying: (playing) => set({ isPlaying: playing }),
+  setPlayheadMs: (ms) => set({ playheadMs: ms }),
+  setPlaybackRate: (rate) => set({ playbackRate: rate }),
+
+  addTrack: (type, name) => {
+    const { pages, currentPageIndex } = get();
+    const page = pages[currentPageIndex];
+    const tracks = page.tracks || [];
+    const track: Track = {
+      id: generateId(),
+      type,
+      name: name || `${type[0].toUpperCase()}${type.slice(1)} ${tracks.filter((t) => t.type === type).length + 1}`,
+    };
+    const newPages = [...pages];
+    newPages[currentPageIndex] = { ...page, tracks: [...tracks, track] };
+    set({ pages: newPages });
+    get().pushHistory();
+    return track.id;
+  },
+
+  removeTrack: (trackId) => {
+    const { pages, currentPageIndex } = get();
+    const page = pages[currentPageIndex];
+    const newPages = [...pages];
+    newPages[currentPageIndex] = {
+      ...page,
+      tracks: (page.tracks || []).filter((t) => t.id !== trackId),
+      elements: page.elements.filter((e) => e.trackId !== trackId),
+    };
+    set({ pages: newPages });
+    get().pushHistory();
+  },
+
+  assignElementToTrack: (elementId, trackId, timelineStart, timelineEnd) => {
+    get().updateElement(elementId, { trackId, timelineStart, timelineEnd });
+    get().pushHistory();
+  },
+
+  setPageDuration: (pageIndex, duration) => {
+    const { pages } = get();
+    const newPages = [...pages];
+    newPages[pageIndex] = { ...newPages[pageIndex], duration: Math.max(0, duration) };
+    set({ pages: newPages });
+    get().pushHistory();
+  },
 
   setLayersOpen: (open) => set({ layersOpen: open }),
 

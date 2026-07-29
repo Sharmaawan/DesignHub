@@ -12,7 +12,7 @@ import CommentsPanel from '../components/editor/CommentsPanel';
 import VersionHistory from '../components/editor/VersionHistory';
 import FloatingToolbar from '../components/editor/FloatingToolbar';
 import LayersPanel from '../components/editor/LayersPanel';
-import PageTransitions from '../components/editor/PageTransitions';
+import TimelinePanel from '../components/editor/timeline/TimelinePanel';
 import ElementAnimations from '../components/editor/ElementAnimations';
 import SettingsModal from '../components/editor/SettingsModal';
 import ShareModal from '../components/editor/ShareModal';
@@ -154,8 +154,8 @@ export default function EditorPage() {
             <FloatingToolbar />
           </div>
 
-          {/* Page Navigation */}
-          <PageNavigation />
+          {/* Video timeline — full-width, replaces the page strip while active */}
+          {sidePanelTab === 'timeline' ? <TimelinePanel /> : <PageNavigation />}
         </div>
 
         <RightSidebar />
@@ -172,22 +172,6 @@ export default function EditorPage() {
             </div>
             <div className="flex-1 overflow-y-auto p-2">
               <LayersPanel />
-            </div>
-          </div>
-        )}
-
-        {/* Transitions panel */}
-        {sidePanelTab === 'transitions' && (
-          <div className="w-60 bg-white dark:bg-canva-dark-surface border-l border-gray-200 dark:border-canva-dark-border flex flex-col overflow-hidden flex-shrink-0">
-            <div className="flex items-center justify-between px-3 py-2.5 border-b border-gray-100 dark:border-gray-800">
-              <span className="text-sm font-semibold text-gray-900 dark:text-white">Transitions</span>
-              <button
-                onClick={() => useEditorStore.getState().setSidePanelTab('')}
-                className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 text-lg leading-none"
-              >×</button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-3">
-              <PageTransitions />
             </div>
           </div>
         )}
