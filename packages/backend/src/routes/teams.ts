@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import prisma from '../lib/prisma';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { sendInviteEmail } from '../lib/email';
+import { isAllowedEmailDomain, ALLOWED_DOMAINS_MESSAGE } from '../lib/allowedDomains';
 import crypto from 'crypto';
 
 const router = Router();
@@ -156,6 +157,14 @@ router.post('/:id/invites', authMiddleware, async (req: AuthRequest, res: Respon
     }
     const { email, role } = req.body;
     if (!email) return res.status(400).json({ error: 'Email is required' });
+    // Only invite emails on an allowed domain — a login is domain-restricted the same
+    // way, so inviting anyone else (e.g. a personal gmail) would send a dead invite
+    // they could never sign in with. Fail here with a clear message instead. Students
+    // are reachable because their regn-number address is on an allowed domain
+    // (e.g. 171801120023@cutmap.ac.in).
+    if (!isAllowedEmailDomain(email)) {
+      return res.status(400).json({ error: ALLOWED_DOMAINS_MESSAGE });
+    }
 
     const token = crypto.randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
