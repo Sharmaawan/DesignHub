@@ -3,12 +3,12 @@ import { useEditorStore } from '../../stores/editorStore';
 import { CanvasElement, TextData, ImageData, ShapeData, TableData, ChartData, IconData, VideoData, AudioData } from '../../types';
 import { COLORS_PALETTE, FONT_FAMILIES, FONT_WEIGHT_MAP, FONT_WEIGHT_LABELS, GRADIENT_PRESETS } from '../../utils/cn';
 import { hsvToHex, hexToHsv, isPlainHexColor, getDocumentColors, getPagePhotoSources, extractPhotoColors } from '../../utils/colorTools';
-import { uploadAPI, BACKEND_ORIGIN as BACKEND } from '../../utils/api';
+import { uploadAPI, backgroundRemovalAPI, BACKEND_ORIGIN as BACKEND } from '../../utils/api';
 import {
   HiOutlineX, HiOutlineTrash, HiOutlineDuplicate, HiOutlineLockClosed,
   HiOutlineLockOpen, HiOutlineEye, HiOutlineEyeOff,
   HiOutlineArrowUp, HiOutlineArrowDown, HiOutlinePlus, HiOutlineMinus,
-  HiOutlinePhotograph, HiOutlineAdjustments,
+  HiOutlinePhotograph, HiOutlineAdjustments, HiOutlineSparkles,
   HiOutlineArrowLeft, HiOutlineArrowRight,
   HiOutlineTemplate, HiOutlineCog, HiOutlineChevronDown, HiOutlineChevronUp,
 } from 'react-icons/hi';
@@ -537,6 +537,7 @@ function TextProperties({ element, handleDataUpdate }: { element: CanvasElement;
 function ImageProperties({ element, handleDataUpdate }: { element: CanvasElement; handleDataUpdate: (data: Record<string, unknown>) => void }) {
   const data = element.data as ImageData;
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [removingBg, setRemovingBg] = useState(false);
 
   const aspectRatios = [
     { label: 'Free', ratio: null },
@@ -568,6 +569,41 @@ function ImageProperties({ element, handleDataUpdate }: { element: CanvasElement
     };
     reader.readAsDataURL(file);
     e.target.value = '';
+  };
+
+  // The current image can be either a data URL (just replaced/pasted, not yet
+  // uploaded anywhere) or a /uploads/... URL — resolve either into a real File the
+  // multipart endpoint can accept.
+  const srcToFile = async (src: string): Promise<File> => {
+    if (src.startsWith('data:')) {
+      const [header, base64] = src.split(',');
+      const mime = header.match(/:(.*?);/)?.[1] || 'image/png';
+      const binary = atob(base64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      return new File([bytes], 'image.png', { type: mime });
+    }
+    const url = src.startsWith('http') ? src : `${BACKEND}${src}`;
+    const res = await fetch(url);
+    const blob = await res.blob();
+    return new File([blob], 'image.png', { type: blob.type || 'image/png' });
+  };
+
+  const handleRemoveBackground = async () => {
+    setRemovingBg(true);
+    try {
+      const file = await srcToFile(data.src);
+      const { data: result } = await backgroundRemovalAPI.remove(file);
+      if (result.status !== 'completed' || !result.resultUrl) {
+        throw new Error(result.error || 'Background removal failed');
+      }
+      handleDataUpdate({ src: `${BACKEND}${result.resultUrl}` });
+      toast.success('Background removed!');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || err.message || 'Failed to remove background');
+    } finally {
+      setRemovingBg(false);
+    }
   };
 
   return (
@@ -648,6 +684,17 @@ function ImageProperties({ element, handleDataUpdate }: { element: CanvasElement
             className="w-full h-9 rounded-lg border border-gray-200 dark:border-gray-700 flex items-center justify-center gap-2 text-xs font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
           >
             <HiOutlinePhotograph size={14} /> Replace Image
+          </button>
+        </div>
+
+        {/* Remove Background */}
+        <div className="mb-3">
+          <button
+            onClick={handleRemoveBackground}
+            disabled={removingBg}
+            className="w-full h-9 rounded-lg border border-gray-200 dark:border-gray-700 flex items-center justify-center gap-2 text-xs font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            <HiOutlineSparkles size={14} /> {removingBg ? 'Removing background…' : 'Remove Background'}
           </button>
         </div>
 

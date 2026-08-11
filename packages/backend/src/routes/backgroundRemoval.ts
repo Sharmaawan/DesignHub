@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
 import prisma from '../lib/prisma';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
+import { removeBackground } from '../lib/backgroundRemovalModel';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
@@ -29,29 +30,45 @@ const upload = multer({
   },
 });
 
-// Upload and process background removal
+// Upload and process background removal — runs a real ONNX segmentation model
+// (see lib/backgroundRemovalModel.ts) entirely on this server, synchronously within
+// the request. u2netp inference is a couple of seconds on CPU, which is fine at this
+// scale without a job queue.
 router.post('/remove', authMiddleware, upload.single('image'), async (req: AuthRequest, res: Response) => {
+  let record: { id: string } | null = null;
   try {
     if (!req.file) return res.status(400).json({ error: 'No image uploaded' });
 
     const originalUrl = `/uploads/backgrounds/${req.file.filename}`;
+    record = await prisma.backgroundRemoval.create({
+      data: { userId: req.userId!, originalUrl, status: 'pending' },
+    });
 
-    const record = await prisma.backgroundRemoval.create({
-      data: {
-        userId: req.userId!,
-        originalUrl,
-        status: 'completed',
-        resultUrl: originalUrl,
-      },
+    const resultBuffer = await removeBackground(req.file.path);
+    const resultFilename = `bg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-result.png`;
+    const resultPath = path.join(process.cwd(), 'uploads', 'backgrounds', resultFilename);
+    fs.writeFileSync(resultPath, resultBuffer);
+    const resultUrl = `/uploads/backgrounds/${resultFilename}`;
+
+    const updated = await prisma.backgroundRemoval.update({
+      where: { id: record.id },
+      data: { status: 'completed', resultUrl },
     });
 
     res.json({
-      id: record.id,
-      originalUrl: record.originalUrl,
-      resultUrl: record.resultUrl,
-      status: record.status,
+      id: updated.id,
+      originalUrl: updated.originalUrl,
+      resultUrl: updated.resultUrl,
+      status: updated.status,
     });
   } catch (err: any) {
+    console.error('[background-removal/remove] failed', err);
+    if (record) {
+      await prisma.backgroundRemoval.update({
+        where: { id: record.id },
+        data: { status: 'failed', error: err.message || 'Failed to process image' },
+      }).catch(() => {});
+    }
     res.status(500).json({ error: err.message || 'Failed to process image' });
   }
 });

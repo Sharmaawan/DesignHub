@@ -5,6 +5,8 @@ import { CanvasElement, Page, TextData, ImageData, ShapeData, TableData, ChartDa
 import Konva from 'konva';
 import { Collaborator } from '../../hooks/useCollaboration';
 import { timelineClock as defaultTimelineClock, TimelineClock } from '../../lib/timelineClock';
+import { uploadAPI, BACKEND_ORIGIN as BACKEND } from '../../utils/api';
+import toast from 'react-hot-toast';
 import {
   HiOutlineClipboard, HiOutlineDocumentDownload, HiOutlineDuplicate,
   HiOutlineArrowSmUp, HiOutlineArrowUp, HiOutlineArrowSmDown, HiOutlineArrowDown,
@@ -140,7 +142,7 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
     showGuides: storeShowGuides, showRulers: storeShowRulers,
     panX: storePanX, panY: storePanY,
     selectElement, deselectAll, moveElement, updateElement, setZoom, setPan,
-    setHoveredElement, pushHistory, setViewportCenter,
+    setHoveredElement, pushHistory, setViewportCenter, addElement,
     activeTool, drawColor, drawWidth, addDrawing,
     isPlaying, setPlayheadMs, setIsPlaying,
     copy, paste, duplicateElements, bringForward, sendBackward, bringToFront, sendToBack,
@@ -280,12 +282,14 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
   const handleWheel = useCallback((e: Konva.KonvaEventObject<WheelEvent>) => {
     e.evt.preventDefault();
 
-    // The canvas position is fixed — a plain scroll/trackpad swipe does nothing,
-    // it never pans. Only Ctrl/Cmd+scroll zooms (browsers also report trackpad
-    // pinch-zoom gestures as a wheel event with ctrlKey set, so pinch-to-zoom
-    // still works even though a plain two-finger swipe no longer moves anything).
+    // Ctrl/Cmd+scroll zooms (browsers also report trackpad pinch-zoom gestures as a
+    // wheel event with ctrlKey set, so pinch-to-zoom works too). A plain scroll or
+    // trackpad swipe pans instead, at any zoom level — matching Canva's own
+    // scroll-to-pan convention, so the page can be navigated without needing to
+    // zoom out first just to reach content outside the current viewport.
     const isZoomGesture = e.evt.ctrlKey || e.evt.metaKey;
     if (!isZoomGesture) {
+      setPan(panX - e.evt.deltaX, panY - e.evt.deltaY);
       return;
     }
 
@@ -302,6 +306,69 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
     setZoom(newScale);
     setPan(cx - stageX * newScale, cy - stageY * newScale);
   }, [zoom, panX, panY, containerSize, setZoom, setPan]);
+
+  // Dragging an image file in from the OS (Explorer/Finder/desktop) straight onto
+  // the canvas — the Uploads panel already had a small drop zone for this, but
+  // nothing accepted a drop on the canvas itself, which is where a user naturally
+  // tries it first (matches Canva's own behavior).
+  const [isDraggingFile, setIsDraggingFile] = useState(false);
+  const dragCounterRef = useRef(0);
+
+  const handleCanvasDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+  }, []);
+
+  const handleCanvasDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    dragCounterRef.current += 1;
+    if (e.dataTransfer.types.includes('Files')) setIsDraggingFile(true);
+  }, []);
+
+  const handleCanvasDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    dragCounterRef.current = Math.max(0, dragCounterRef.current - 1);
+    if (dragCounterRef.current === 0) setIsDraggingFile(false);
+  }, []);
+
+  const handleCanvasDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault();
+    dragCounterRef.current = 0;
+    setIsDraggingFile(false);
+
+    const files = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith('image/'));
+    if (files.length === 0) return;
+
+    // Where the drop landed, converted from screen pixels to page coordinates —
+    // the Stage is scaled/panned (scaleX/Y=zoom, x/y=panX/panY), so this undoes
+    // that transform the same way handleWheel's own zoom-anchor math does.
+    const container = containerRef.current?.getBoundingClientRect();
+    const dropX = container ? (e.clientX - container.left - panX) / zoom : page.width / 2;
+    const dropY = container ? (e.clientY - container.top - panY) / zoom : page.height / 2;
+
+    for (const file of files) {
+      try {
+        const { data: saved } = await uploadAPI.upload(file);
+        const serverUrl = `${BACKEND}${saved.url}`;
+        const img = new window.Image();
+        await new Promise<void>((resolve) => {
+          img.onload = () => resolve();
+          img.onerror = () => resolve();
+          img.src = serverUrl;
+        });
+        const w = Math.min(img.naturalWidth || 300, Math.round(page.width * 0.6));
+        const h = img.naturalWidth ? Math.round((img.naturalHeight / img.naturalWidth) * w) : 225;
+        addElement({
+          type: 'image', x: dropX - w / 2, y: dropY - h / 2, width: w, height: h,
+          rotation: 0, opacity: 1, visible: true, locked: false, name: file.name, zIndex: 0,
+          data: { type: 'image', src: serverUrl, objectFit: 'cover', borderRadius: 0, brightness: 100, contrast: 100, saturation: 100, hue: 0, blur: 0, filters: [], cropX: 0, cropY: 0, cropWidth: 100, cropHeight: 100 },
+        });
+        pushHistory();
+        toast.success(`${file.name} added to canvas`);
+      } catch (err: any) {
+        toast.error(err.response?.data?.error || `Failed to upload ${file.name}`);
+      }
+    }
+  }, [panX, panY, zoom, page.width, page.height, addElement, pushHistory]);
 
   // Eraser deliberately never touches images/text/shapes — it only deletes your own
   // pen/highlighter strokes that come within reach of the cursor, checked against each
@@ -757,7 +824,21 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
   };
 
   return (
-    <div ref={containerRef} className="w-full h-full relative">
+    <div
+      ref={containerRef}
+      className="w-full h-full relative"
+      onDragOver={handleCanvasDragOver}
+      onDragEnter={handleCanvasDragEnter}
+      onDragLeave={handleCanvasDragLeave}
+      onDrop={handleCanvasDrop}
+    >
+      {isDraggingFile && (
+        <div className="absolute inset-0 z-50 pointer-events-none flex items-center justify-center bg-canva-purple/10 border-4 border-dashed border-canva-purple">
+          <div className="bg-white dark:bg-gray-800 rounded-xl px-5 py-3 shadow-lg text-sm font-semibold text-canva-purple">
+            Drop image to add it to the canvas
+          </div>
+        </div>
+      )}
       {showRulers && containerSize.width > 0 && (
         <Ruler zoom={zoom} panX={panX} panY={panY} width={containerSize.width} height={containerSize.height} />
       )}
@@ -1440,11 +1521,36 @@ function StaticImageElement({ element, commonProps, data }: { element: CanvasEle
   }, [data.src]);
 
   useEffect(() => {
-    if (imageRef.current && image) {
+    if (!imageRef.current || !image) return;
+    // .cache() rasterizes the node into an offscreen bitmap — the ONLY reason to
+    // pay for that is Konva's pixel filters (Brighten/Contrast/HSL/Blur), which
+    // require a real getImageData/putImageData pass. crop, cornerRadius, and plain
+    // width/height are native Konva.Image drawing properties that render correctly
+    // on their own. Caching unconditionally here used to also run on every crop
+    // change, and combined with a crop rect that doesn't fully cover the cached
+    // canvas, that can leave the uncovered region rendering solid black instead of
+    // transparent (a real Konva cache+crop interaction issue) — skipping cache()
+    // entirely whenever no filter is active avoids that path altogether.
+    const hasActiveFilters = (data.brightness !== undefined && data.brightness !== 100)
+      || (data.contrast !== undefined && data.contrast !== 100)
+      || (data.hue !== undefined && data.hue !== 0)
+      || (data.saturation !== undefined && data.saturation !== 100)
+      || (data.blur !== undefined && data.blur > 0);
+    if (hasActiveFilters) {
       imageRef.current.cache();
-      imageRef.current.getLayer()?.batchDraw();
+    } else {
+      imageRef.current.clearCache();
     }
-  }, [image, data.brightness, data.contrast, data.saturation, data.hue, data.blur, data.borderRadius, element.width, element.height]);
+    imageRef.current.getLayer()?.batchDraw();
+  }, [
+    image, data.brightness, data.contrast, data.saturation, data.hue, data.blur, data.borderRadius,
+    element.width, element.height,
+    // Crop changes the region drawn from the source image — needed here so a
+    // filtered image's cache re-rasterizes with the new crop; an unfiltered image
+    // re-renders natively on every Konva prop change regardless, but re-running
+    // this effect costs nothing and keeps the two paths' triggers identical.
+    (data as any).cropX, (data as any).cropY, (data as any).cropWidth, (data as any).cropHeight,
+  ]);
 
   if (!image) {
     return (
@@ -1751,6 +1857,23 @@ function VideoElement({ element, commonProps, data, clock }: { element: CanvasEl
   }, [clocked, ready, element.id, element.trackId, element.timelineStart, element.timelineEnd, data.startTime, data.reverse, clock]);
 
   const hasFilters = (data.brightness !== undefined && data.brightness !== 100) || (data.contrast !== undefined && data.contrast !== 100);
+
+  // Crop is only re-applied to the cached bitmap here, on change — the per-frame
+  // animation loop below only re-caches while a brightness/contrast filter is
+  // active, so without this a crop edit on an otherwise-unfiltered clip would
+  // update the sidebar values but never actually redraw on the canvas. Only
+  // actually cache() when a filter is active, same reasoning as the image
+  // element's own effect — caching an unfiltered crop risks Konva rendering the
+  // uncovered part of the cache canvas as solid black instead of transparent.
+  useEffect(() => {
+    if (!ready || !imageNodeRef.current) return;
+    if (hasFilters) {
+      imageNodeRef.current.cache();
+    } else {
+      imageNodeRef.current.clearCache();
+    }
+    imageNodeRef.current.getLayer()?.batchDraw();
+  }, [ready, hasFilters, data.cropX, data.cropY, data.cropWidth, data.cropHeight, data.borderRadius, element.width, element.height]);
 
   useEffect(() => {
     if (!ready || !imageNodeRef.current) return;
