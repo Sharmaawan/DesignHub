@@ -36,9 +36,32 @@ export interface Page {
   backgroundColor: string;
   width: number;
   height: number;
+  // Set via an image element's "Set as background" action — deliberately a page-level
+  // property, not a CanvasElement, so it's automatically excluded from selection,
+  // dragging, resizing, deletion, and z-order reordering, and always renders behind
+  // every element with no extra locking logic needed. Opaque and fully covers the
+  // page, so it visually overrides backgroundColor while set — picking a new
+  // background color/gradient clears it (see setPageBackgroundColor), matching real
+  // Canva's single-slot page background.
+  backgroundImage?: PageBackgroundImage;
   // Video timeline — undefined on every non-video page, preserving today's static-slide behavior.
   duration?: number;
   tracks?: Track[];
+  // How this page transitions IN when it becomes the current scene (Preview
+  // auto-advance, multi-scene export) — undefined/'none' means an instant cut,
+  // today's exact existing behavior.
+  transition?: PageTransition;
+}
+
+// Crop fields are percentages (0-100) of the SOURCE image, same convention as
+// ImageData's cropX/Y/Width/Height — computed once, at "Set as background" time, to
+// cover the page's exact dimensions (letterbox-free, center-cropped).
+export interface PageBackgroundImage {
+  src: string;
+  cropX: number;
+  cropY: number;
+  cropWidth: number;
+  cropHeight: number;
 }
 
 export interface Track {
@@ -74,6 +97,11 @@ export interface CanvasElement {
   trackId?: string;
   timelineStart?: number;
   timelineEnd?: number;
+  // Entrance animation — undefined/'none' means no animation, today's exact existing
+  // behavior. Single canonical field for every element type (text included); replaces
+  // the old text-only `data.animation` string, which is still read as a one-time
+  // migration fallback wherever this is undefined (see readElementAnimation).
+  animation?: ElementAnimation;
   data: TextData | ImageData | ShapeData | IconData | ChartData | TableData | VideoData | AudioData | DrawingData;
 }
 
@@ -173,6 +201,20 @@ export interface VideoData {
   muted: boolean;
   startTime: number;
   endTime: number;
+  // All optional — absent means "unchanged from today's behavior," so existing
+  // saved projects render/export exactly as before without needing a migration.
+  volume?: number;
+  brightness?: number;
+  contrast?: number;
+  playbackRate?: number;
+  cropX?: number;
+  cropY?: number;
+  cropWidth?: number;
+  cropHeight?: number;
+  flipH?: boolean;
+  flipV?: boolean;
+  borderRadius?: number;
+  reverse?: boolean;
 }
 
 export interface AudioData {

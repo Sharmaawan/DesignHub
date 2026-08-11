@@ -11,6 +11,8 @@
     "lint": "eslint src --ext .ts,.tsx"
   },
   "dependencies": {
+    "@ffmpeg/ffmpeg": "^0.12.15",
+    "@ffmpeg/util": "^0.12.2",
     "@tanstack/react-virtual": "^3.0.4",
     "axios": "^1.6.5",
     "clsx": "^2.1.0",

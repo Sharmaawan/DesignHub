@@ -15,13 +15,29 @@ import WhatsNew from '../components/dashboard/WhatsNew';
 import RecommendedDesigns from '../components/dashboard/RecommendedDesigns';
 import NotificationCenter from '../components/dashboard/NotificationCenter';
 import { formatDate, CANVAS_PRESETS } from '../utils/cn';
-import { projectAPI } from '../utils/api';
+import { projectAPI, templateAPI } from '../utils/api';
 import {
   HiOutlinePlus, HiOutlineTemplate, HiOutlineBell, HiOutlineHeart,
   HiOutlineFolder, HiOutlineDotsHorizontal, HiOutlineSearch, HiOutlineViewGrid,
   HiOutlinePencilAlt, HiOutlineTrash, HiOutlineDownload, HiOutlineShare,
 } from 'react-icons/hi';
 import toast from 'react-hot-toast';
+
+// Fixed, hand-placed positions for the Magic AI Studio banner's floating sparkles —
+// hardcoded rather than Math.random() so the layout is stable across renders with
+// no need for useMemo, and so it reads as a natural scatter rather than a grid.
+const AI_BANNER_SPARKLES = [
+  { left: '8%', top: '20%', size: 5, delay: 0, duration: 2.2 },
+  { left: '18%', top: '70%', size: 3, delay: 0.6, duration: 2.6 },
+  { left: '30%', top: '15%', size: 4, delay: 1.1, duration: 2.1 },
+  { left: '42%', top: '82%', size: 3, delay: 0.3, duration: 2.8 },
+  { left: '55%', top: '25%', size: 5, delay: 1.4, duration: 2.3 },
+  { left: '68%', top: '65%', size: 3, delay: 0.8, duration: 2.5 },
+  { left: '80%', top: '18%', size: 4, delay: 0.2, duration: 2.4 },
+  { left: '92%', top: '55%', size: 3, delay: 1.2, duration: 2.7 },
+  { left: '15%', top: '45%', size: 3, delay: 1.7, duration: 2.2 },
+  { left: '88%', top: '80%', size: 4, delay: 0.9, duration: 2.6 },
+];
 
 export default function DashboardPage({ initialSection }: { initialSection?: string } = {}) {
   const navigate = useNavigate();
@@ -44,6 +60,14 @@ export default function DashboardPage({ initialSection }: { initialSection?: str
   const [contextMenu, setContextMenu] = useState<{ projectId: string; x: number; y: number } | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  // Built-in/shared templates (ownerId: null) can't be deleted server-side without
+  // removing them for every user — so "delete" on one of those just hides it from
+  // this browser's own Trending Templates view instead. Templates the user actually
+  // owns still go through the real delete/recycle-bin flow below.
+  const [hiddenTemplateIds, setHiddenTemplateIds] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem('designhub-hidden-templates') || '[]'); }
+    catch { return []; }
+  });
 
   useEffect(() => {
     loadTemplates();
@@ -152,11 +176,55 @@ export default function DashboardPage({ initialSection }: { initialSection?: str
     toast.success('Downloaded!');
   };
 
+  // Mirrors TemplatesPage.tsx's handleDeleteTemplate exactly — soft-deletes (moves
+  // to the recycle bin in Workspace Settings). Only used for templates the current
+  // user actually owns; built-in/shared templates (ownerId: null) can never be
+  // deleted server-side by anyone, so those go through handleHideTemplate instead.
+  const handleDeleteTemplate = async (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    try {
+      await templateAPI.delete(id);
+      toast.success('Moved to recycle bin — manage it from Workspace Settings');
+      loadTemplates();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to delete template');
+    }
+  };
+
+  // Personal, client-side-only "not interested" — removes a shared/built-in
+  // template from just this browser's own Trending Templates, without touching
+  // the shared catalog everyone else still sees.
+  const handleHideTemplate = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    const updated = [...hiddenTemplateIds, id];
+    setHiddenTemplateIds(updated);
+    localStorage.setItem('designhub-hidden-templates', JSON.stringify(updated));
+    toast.success('Removed from your Trending Templates');
+  };
+
   const getGreeting = () => {
     const hour = new Date().getHours();
     if (hour < 12) return 'Good morning';
     if (hour < 17) return 'Good afternoon';
     return 'Good evening';
+  };
+
+  // 3D tilt-toward-cursor for template cards — driven imperatively (direct DOM
+  // style writes, not React state) since it needs to update at mousemove
+  // frequency without triggering a re-render on every pixel of movement.
+  const handleTiltMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    const card = e.currentTarget.querySelector<HTMLElement>('.tilt-target');
+    if (!card) return;
+    const rect = card.getBoundingClientRect();
+    const px = (e.clientX - rect.left) / rect.width;
+    const py = (e.clientY - rect.top) / rect.height;
+    const rotateY = (px - 0.5) * 14;
+    const rotateX = (0.5 - py) * 14;
+    card.style.transform = `rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale3d(1.04, 1.04, 1.04)`;
+  };
+  const handleTiltLeave = (e: React.MouseEvent<HTMLDivElement>) => {
+    const card = e.currentTarget.querySelector<HTMLElement>('.tilt-target');
+    if (card) card.style.transform = '';
   };
 
   const recentProjects = [...projects].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()).slice(0, 6);
@@ -225,14 +293,28 @@ export default function DashboardPage({ initialSection }: { initialSection?: str
 
           {/* Magic AI Studio — home only */}
           {activeSection === 'home' && (
-            <section className="mb-10">
-              <div className="relative rounded-2xl overflow-hidden bg-gradient-to-r from-[#6366F1] via-[#8B5CF6] to-[#EC4899] p-px shadow-xl">
-                <div className="rounded-2xl bg-white dark:bg-[#1a1a2e] px-6 py-5">
-                  <div className="flex flex-col md:flex-row md:items-center gap-6">
+            <section className="mb-10 animate-fade-in">
+              <div className="relative rounded-2xl overflow-hidden bg-gradient-to-r from-[#6366F1] via-[#8B5CF6] to-[#EC4899] bg-[length:200%_200%] animate-gradient-shift p-px shadow-xl">
+                <div className="relative overflow-hidden rounded-2xl bg-white dark:bg-[#1a1a2e] px-6 py-5">
+                  {/* Floating sparkles — purely decorative, sits behind the content. */}
+                  <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
+                    {AI_BANNER_SPARKLES.map((s, i) => (
+                      <span
+                        key={i}
+                        className="absolute rounded-full bg-gradient-to-br from-violet-400 to-pink-400 animate-sparkle"
+                        style={{
+                          left: s.left, top: s.top, width: s.size, height: s.size,
+                          animationDelay: `${s.delay}s`, animationDuration: `${s.duration}s`,
+                          boxShadow: '0 0 6px 1px rgba(139, 92, 246, 0.6)',
+                        }}
+                      />
+                    ))}
+                  </div>
+                  <div className="relative flex flex-col md:flex-row md:items-center gap-6">
                     {/* Left: headline */}
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-1">
-                        <span className="text-xl">✨</span>
+                        <span className="text-xl inline-block animate-gentle-bounce">✨</span>
                         <h2 className="text-lg font-extrabold bg-gradient-to-r from-[#6366F1] to-[#EC4899] bg-clip-text text-transparent">
                           Magic AI Studio
                         </h2>
@@ -245,13 +327,14 @@ export default function DashboardPage({ initialSection }: { initialSection?: str
                     {/* Right: quick-action cards */}
                     <div className="flex gap-3 flex-wrap">
                       {[
-                        { emoji: '✍️', label: 'Magic Write', desc: 'AI copywriting', color: 'from-violet-500 to-purple-600', aiTab: 'write' },
-                        { emoji: '🖼️', label: 'Image Ideas', desc: 'Visual concepts', color: 'from-pink-500 to-rose-600', aiTab: 'image' },
-                        { emoji: '💡', label: 'Design Ideas', desc: 'Inspiration', color: 'from-amber-500 to-orange-600', aiTab: 'suggest' },
-                        { emoji: '🎨', label: 'Color Palette', desc: 'AI colors', color: 'from-teal-500 to-cyan-600', aiTab: 'suggest' },
-                      ].map((action) => (
+                        { emoji: '✍️', label: 'Magic Write', desc: 'AI copywriting', color: 'from-violet-500 to-purple-600', hoverGradient: 'hover:from-violet-500 hover:to-purple-600', aiTab: 'write' },
+                        { emoji: '🖼️', label: 'Image Ideas', desc: 'Visual concepts', color: 'from-pink-500 to-rose-600', hoverGradient: 'hover:from-pink-500 hover:to-rose-600', aiTab: 'image' },
+                        { emoji: '💡', label: 'Design Ideas', desc: 'Inspiration', color: 'from-amber-500 to-orange-600', hoverGradient: 'hover:from-amber-500 hover:to-orange-600', aiTab: 'suggest' },
+                        { emoji: '🎨', label: 'Color Palette', desc: 'AI colors', color: 'from-teal-500 to-cyan-600', hoverGradient: 'hover:from-teal-500 hover:to-cyan-600', aiTab: 'suggest' },
+                      ].map((action, i) => (
                         <button
                           key={action.label}
+                          style={{ animationDelay: `${i * 60}ms`, animationFillMode: 'backwards' }}
                           onClick={async () => {
                             try {
                               const pages = [{ id: `page-${Date.now()}`, name: 'Page 1', elements: [], backgroundColor: '#FFFFFF', width: 1920, height: 1080 }];
@@ -264,11 +347,11 @@ export default function DashboardPage({ initialSection }: { initialSection?: str
                               toast.error('Failed to create design');
                             }
                           }}
-                          className="flex flex-col items-center gap-1.5 px-4 py-3 rounded-xl bg-gray-50 dark:bg-gray-800/60 hover:bg-gray-100 dark:hover:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 transition-all group min-w-[80px]"
+                          className={`flex flex-col items-center gap-1.5 px-4 py-3 rounded-xl bg-gray-50 dark:bg-gray-800/60 hover:bg-gradient-to-br ${action.hoverGradient} border border-gray-200 dark:border-gray-700 hover:border-transparent hover:-translate-y-0.5 hover:shadow-lg transition-all group min-w-[80px] animate-slide-up`}
                         >
                           <span className="text-2xl group-hover:scale-110 transition-transform">{action.emoji}</span>
-                          <span className="text-xs font-semibold text-gray-800 dark:text-gray-200">{action.label}</span>
-                          <span className="text-[9px] text-gray-400">{action.desc}</span>
+                          <span className="text-xs font-semibold text-gray-800 dark:text-gray-200 group-hover:text-white transition-colors">{action.label}</span>
+                          <span className="text-[9px] text-gray-400 group-hover:text-white/80 transition-colors">{action.desc}</span>
                         </button>
                       ))}
                     </div>
@@ -291,12 +374,13 @@ export default function DashboardPage({ initialSection }: { initialSection?: str
                 </button>
               </div>
               <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-                {templates.slice(0, 6).map((template) => {
+                {templates.filter((t) => !hiddenTemplateIds.includes(t.id)).slice(0, 6).map((template, i) => {
                   const page = template.data?.pages?.[0];
                   const bgColor = page?.backgroundColor || '#f3f4f6';
                   return (
-                    <button
+                    <div
                       key={template.id}
+                      style={{ animationDelay: `${i * 50}ms`, animationFillMode: 'backwards' }}
                       onClick={async () => {
                         const tmplPage = template.data?.pages?.[0];
                         if (tmplPage) {
@@ -316,15 +400,26 @@ export default function DashboardPage({ initialSection }: { initialSection?: str
                           }
                         }
                       }}
-                      className="group cursor-pointer text-left"
+                      onMouseMove={handleTiltMove}
+                      onMouseLeave={handleTiltLeave}
+                      className="group cursor-pointer text-left animate-slide-up [perspective:800px]"
                     >
-                      <div className="aspect-[4/3] rounded-xl overflow-hidden relative group-hover:ring-2 ring-[#7B2FBE] transition-all shadow-sm group-hover:shadow-lg" style={{ backgroundColor: bgColor }}>
+                      <div className="tilt-target aspect-[4/3] rounded-xl overflow-hidden relative group-hover:ring-2 ring-[#7B2FBE] transition-transform duration-150 ease-out shadow-sm group-hover:shadow-2xl will-change-transform" style={{ backgroundColor: bgColor }}>
                         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100">
                           <span className="px-3 py-1.5 bg-white dark:bg-gray-900 rounded-lg text-xs font-medium shadow-lg">Use template</span>
                         </div>
                         {template.isPro && (
                           <span className="absolute top-2 left-2 px-1.5 py-0.5 text-[9px] font-bold bg-amber-500 text-white rounded-full">PRO</span>
                         )}
+                        <button
+                          onClick={(e) => (template.ownerId && template.ownerId === user?.id)
+                            ? handleDeleteTemplate(e, template.id)
+                            : handleHideTemplate(e, template.id)}
+                          title={(template.ownerId && template.ownerId === user?.id) ? 'Delete template' : 'Remove from your Trending Templates'}
+                          className="absolute top-2 right-2 p-1.5 rounded-lg bg-white/90 dark:bg-gray-900/90 text-gray-500 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                        >
+                          <HiOutlineTrash size={14} />
+                        </button>
                         {page?.elements?.slice(0, 3).map((el: any, i: number) => {
                           if (el.type === 'image') {
                             return (
@@ -372,7 +467,7 @@ export default function DashboardPage({ initialSection }: { initialSection?: str
                       </div>
                       <p className="mt-2 text-xs font-medium text-gray-700 dark:text-gray-300 truncate">{template.name}</p>
                       <p className="text-[10px] text-gray-400">{template.category}</p>
-                    </button>
+                    </div>
                   );
                 })}
               </div>

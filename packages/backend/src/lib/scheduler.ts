@@ -21,6 +21,17 @@ async function publishDuePost(postId: string) {
   const post = await prisma.socialPost.findUnique({ where: { id: postId }, include: { socialAccount: true } });
   if (!post) return;
 
+  // A maker never picks a platform/account, so their post can never legitimately
+  // reach 'scheduled' status (POST /posts blocks action: 'schedule' without one) —
+  // this only guards the type, not a real runtime path.
+  if (!post.platform || !post.socialAccount) {
+    await prisma.socialPost.update({
+      where: { id: post.id },
+      data: { status: 'failed', errorMessage: 'No social account is attached to this post.' },
+    });
+    return;
+  }
+
   const adapter = getAdapter(post.platform);
   if (!adapter || !adapter.isConfigured()) {
     await prisma.socialPost.update({

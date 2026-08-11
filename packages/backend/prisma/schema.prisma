@@ -537,8 +537,8 @@ model SocialPost {
   id              String    @id @default(cuid())
   userId          String    @map("user_id")
   projectId       String?   @map("project_id")
-  socialAccountId String    @map("social_account_id")
-  platform        String
+  socialAccountId String?   @map("social_account_id")
+  platform        String?
   status          String    @default("draft") // draft|pending_approval|rejected|scheduled|publishing|published|failed
   mediaType       String    @map("media_type") // image|video|carousel|story
   mediaUrls       Json      @map("media_urls")
@@ -565,7 +565,7 @@ model SocialPost {
 
   user          User                 @relation(fields: [userId], references: [id])
   project       Project?             @relation(fields: [projectId], references: [id])
-  socialAccount SocialAccount        @relation(fields: [socialAccountId], references: [id])
+  socialAccount SocialAccount?       @relation(fields: [socialAccountId], references: [id])
   analytics     SocialPostAnalytics?
 
   @@index([status, scheduledFor])

@@ -11,7 +11,7 @@ import prisma from './prisma';
 //               from publishing directly; needs an editor/admin to approve.
 // 'editor' is deliberately excluded from roleForEmail's output — it's a role you're
 // promoted into via an accepted invite, never one assigned automatically by email.
-const DEFAULT_TEAM_NAME = process.env.DEFAULT_TEAM_NAME || 'Cutm Organization';
+export const DEFAULT_TEAM_NAME = process.env.DEFAULT_TEAM_NAME || 'Cutm Organization';
 
 const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || 'kalyankv@cutmap.ac.in,221801370004@cutmap.ac.in')
   .split(',')

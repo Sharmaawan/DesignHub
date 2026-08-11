@@ -218,7 +218,7 @@ export const socialAPI = {
   pending: (pendingId: string) => api.get(`/social/pending/${pendingId}`),
   selectPending: (pendingId: string, platformUserIds: string[]) => api.post(`/social/pending/${pendingId}/select`, { platformUserIds }),
   createPost: (data: {
-    socialAccountId: string; projectId?: string; action: 'now' | 'schedule' | 'draft';
+    socialAccountId?: string; projectId?: string; action: 'now' | 'schedule' | 'draft';
     mediaType: 'image' | 'video' | 'carousel' | 'story'; mediaUrls: string[];
     caption?: string; hashtags?: string[]; altText?: string; firstComment?: string;
     linkUrl?: string; scheduledFor?: string;
@@ -233,7 +233,7 @@ export const socialAPI = {
   pendingApproval: () => api.get('/social/posts/pending-approval'),
   approvePost: (id: string) => api.post(`/social/posts/${id}/approve`),
   rejectPost: (id: string, reason?: string) => api.post(`/social/posts/${id}/reject`, { reason }),
-  sendPost: (id: string) => api.post(`/social/posts/${id}/send`),
+  sendPost: (id: string, socialAccountId?: string) => api.post(`/social/posts/${id}/send`, { socialAccountId }),
 };
 
 export default api;

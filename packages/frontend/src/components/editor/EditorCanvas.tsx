@@ -1,10 +1,15 @@
 import { useRef, useState, useCallback, useEffect, useMemo } from 'react';
 import { Stage, Layer, Rect, Text, Image as KonvaImage, Group, Transformer, Line } from 'react-konva';
 import { useEditorStore } from '../../stores/editorStore';
-import { CanvasElement, Page, TextData, ImageData, ShapeData, TableData, ChartData, VideoData, AudioData } from '../../types';
+import { CanvasElement, Page, TextData, ImageData, ShapeData, TableData, ChartData, VideoData, AudioData, PageBackgroundImage, ElementAnimation, ElementAnimationType } from '../../types';
 import Konva from 'konva';
 import { Collaborator } from '../../hooks/useCollaboration';
 import { timelineClock as defaultTimelineClock, TimelineClock } from '../../lib/timelineClock';
+import {
+  HiOutlineClipboard, HiOutlineDocumentDownload, HiOutlineDuplicate,
+  HiOutlineArrowSmUp, HiOutlineArrowUp, HiOutlineArrowSmDown, HiOutlineArrowDown,
+  HiOutlineLockClosed, HiOutlineLockOpen, HiOutlineEye, HiOutlineEyeOff, HiOutlineTrash,
+} from 'react-icons/hi';
 
 interface EditorCanvasProps {
   page: Page;
@@ -138,9 +143,12 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
     setHoveredElement, pushHistory, setViewportCenter,
     activeTool, drawColor, drawWidth, addDrawing,
     isPlaying, setPlayheadMs, setIsPlaying,
+    copy, paste, duplicateElements, bringForward, sendBackward, bringToFront, sendToBack,
+    lockElement, unlockElement, hideElement, showElement,
   } = useEditorStore();
   const [currentStroke, setCurrentStroke] = useState<number[]>([]);
   const isDrawingRef = useRef(false);
+  const [contextMenu, setContextMenu] = useState<{ elementId: string; x: number; y: number } | null>(null);
 
   const zoom = zoomOverride ?? storeZoom;
   const panX = panOverride?.x ?? storePanX;
@@ -619,6 +627,11 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
       onTransformEnd: (e: Konva.KonvaEventObject<Event>) => handleTransformEnd(e, element.id),
       onMouseEnter: () => setHoveredElement(element.id),
       onMouseLeave: () => setHoveredElement(null),
+      onContextMenu: (e: Konva.KonvaEventObject<PointerEvent>) => {
+        e.evt.preventDefault();
+        if (!selectedElementIds.includes(element.id)) selectElement(element.id);
+        setContextMenu({ elementId: element.id, x: e.evt.clientX, y: e.evt.clientY });
+      },
     };
 
     switch (element.type) {
@@ -780,6 +793,14 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
             cornerRadius={2}
           />
 
+          {page.backgroundImage && (
+            <PageBackgroundImageLayer
+              backgroundImage={page.backgroundImage}
+              pageWidth={page.width}
+              pageHeight={page.height}
+            />
+          )}
+
           {showGrid && (
             <Group>
               {Array.from({ length: Math.ceil(page.width / gridSize) + 1 }).map((_, i) => (
@@ -823,6 +844,9 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
           )}
 
           {sortedElements.map(renderElement)}
+          {sortedElements.some((el) => resolveElementAnimation(el).type !== 'none') && (
+            <ElementAnimationDriver elements={sortedElements} stageRef={stageRef} />
+          )}
 
           {/* Smart alignment guides — pink lines shown only while actively dragging,
               marking where the dragged element's edge/center now lines up with
@@ -850,30 +874,37 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
             />
           )}
 
-          <Transformer
-            ref={transformerRef}
-            borderStroke="#7B2FBE"
-            borderStrokeWidth={2}
-            anchorStroke="#7B2FBE"
-            anchorFill="#FFFFFF"
-            anchorSize={10}
-            anchorCornerRadius={2}
-            rotateAnchorOffset={25}
-            enabledAnchors={isIconSelected
-              ? ['top-left', 'top-right', 'bottom-left', 'bottom-right']
-              : ['top-left', 'top-right', 'bottom-left', 'bottom-right', 'middle-left', 'middle-right', 'top-center', 'bottom-center']}
-            keepRatio={isIconSelected}
-            boundBoxFunc={(oldBox, newBox) => {
-              if (newBox.width < 20 || newBox.height < 20) return oldBox;
-              if (isIconSelected || shiftHeld) {
-                const ratio = oldBox.width / oldBox.height;
-                const newW = Math.max(20, newBox.width);
-                const newH = Math.max(20, newW / ratio);
-                return { ...newBox, width: newW, height: newH };
-              }
-              return newBox;
-            }}
-          />
+          {/* Selection handles read `selectedElementIds` straight off the shared global
+              store, same as the live editor canvas — without this guard, a chrome-free
+              instance (Preview, video export capture) would bake whatever's selected in
+              the still-mounted live editor into its own render, since both instances
+              share that same store. */}
+          {!hideChrome && (
+            <Transformer
+              ref={transformerRef}
+              borderStroke="#7B2FBE"
+              borderStrokeWidth={2}
+              anchorStroke="#7B2FBE"
+              anchorFill="#FFFFFF"
+              anchorSize={10}
+              anchorCornerRadius={2}
+              rotateAnchorOffset={25}
+              enabledAnchors={isIconSelected
+                ? ['top-left', 'top-right', 'bottom-left', 'bottom-right']
+                : ['top-left', 'top-right', 'bottom-left', 'bottom-right', 'middle-left', 'middle-right', 'top-center', 'bottom-center']}
+              keepRatio={isIconSelected}
+              boundBoxFunc={(oldBox, newBox) => {
+                if (newBox.width < 20 || newBox.height < 20) return oldBox;
+                if (isIconSelected || shiftHeld) {
+                  const ratio = oldBox.width / oldBox.height;
+                  const newW = Math.max(20, newBox.width);
+                  const newH = Math.max(20, newW / ratio);
+                  return { ...newBox, width: newW, height: newH };
+                }
+                return newBox;
+              }}
+            />
+          )}
         </Layer>
       </Stage>
 
@@ -897,8 +928,77 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
           </span>
         </div>
       ))}
+
+      {contextMenu && (() => {
+        const menuElement = page.elements.find((e) => e.id === contextMenu.elementId);
+        if (!menuElement) return null;
+        const menuItems: { icon: any; label: string; shortcut?: string; danger?: boolean; action: () => void }[] = [
+          { icon: HiOutlineClipboard, label: 'Copy', shortcut: 'Ctrl+C', action: () => copy() },
+          { icon: HiOutlineDocumentDownload, label: 'Paste', shortcut: 'Ctrl+V', action: () => paste() },
+          { icon: HiOutlineDuplicate, label: 'Duplicate', shortcut: 'Ctrl+D', action: () => duplicateElements([menuElement.id]) },
+          { type: 'divider' } as any,
+          { icon: HiOutlineArrowSmUp, label: 'Forward', action: () => bringForward(menuElement.id) },
+          { icon: HiOutlineArrowUp, label: 'Bring to Front', action: () => bringToFront(menuElement.id) },
+          { icon: HiOutlineArrowSmDown, label: 'Backward', action: () => sendBackward(menuElement.id) },
+          { icon: HiOutlineArrowDown, label: 'Send to Back', action: () => sendToBack(menuElement.id) },
+          { type: 'divider' } as any,
+          menuElement.locked
+            ? { icon: HiOutlineLockOpen, label: 'Unlock', action: () => unlockElement(menuElement.id) }
+            : { icon: HiOutlineLockClosed, label: 'Lock', action: () => lockElement(menuElement.id) },
+          menuElement.visible
+            ? { icon: HiOutlineEyeOff, label: 'Hide', action: () => hideElement(menuElement.id) }
+            : { icon: HiOutlineEye, label: 'Show', action: () => showElement(menuElement.id) },
+          { type: 'divider' } as any,
+          { icon: HiOutlineTrash, label: 'Delete', shortcut: 'Del', danger: true, action: () => hideElement(menuElement.id) },
+        ];
+        return (
+          <>
+            <div className="fixed inset-0 z-50" onClick={() => setContextMenu(null)} onContextMenu={(e) => { e.preventDefault(); setContextMenu(null); }} />
+            <div
+              className="fixed z-50 bg-white dark:bg-gray-800 rounded-xl shadow-canva-xl border border-gray-100 dark:border-gray-700 py-1 w-52"
+              style={{ left: contextMenu.x, top: contextMenu.y }}
+            >
+              {menuItems.map((item, i) => (
+                'type' in item && item.type === 'divider' ? (
+                  <div key={`d${i}`} className="h-px bg-gray-100 dark:bg-gray-700 my-1" />
+                ) : (
+                  <button
+                    key={item.label}
+                    onClick={() => { item.action(); setContextMenu(null); }}
+                    className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left ${
+                      item.danger
+                        ? 'text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20'
+                        : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50'
+                    }`}
+                  >
+                    <item.icon size={14} className="flex-shrink-0" />
+                    <span className="flex-1">{item.label}</span>
+                    {item.shortcut && <span className="text-xs text-gray-400">{item.shortcut}</span>}
+                  </button>
+                )
+              ))}
+            </div>
+          </>
+        );
+      })()}
     </div>
   );
+}
+
+// Maps the OLD text-only `data.animation` string (pre-Phase-2 saved projects) onto
+// the new canonical ElementAnimationType vocabulary, so old projects keep animating
+// on load instead of silently going static — a one-time read-path fallback only,
+// never written back.
+const LEGACY_TEXT_ANIMATION_MAP: Record<string, ElementAnimationType> = {
+  fadeIn: 'fadeIn', slideUp: 'rise', slideLeft: 'slide', zoom: 'zoom', bounce: 'bounce',
+  pulse: 'pulse', typewriter: 'typewriter',
+};
+
+function resolveElementAnimation(element: CanvasElement): ElementAnimation {
+  if (element.animation) return element.animation;
+  const legacy = (element.data as any)?.animation as string | undefined;
+  const mapped = legacy ? LEGACY_TEXT_ANIMATION_MAP[legacy] : undefined;
+  return mapped ? { type: mapped, duration: 0.6, delay: 0 } : { type: 'none', duration: 0.5, delay: 0 };
 }
 
 function AnimatedTextElement({ element, commonProps, data, isTextEdit }: {
@@ -909,8 +1009,8 @@ function AnimatedTextElement({ element, commonProps, data, isTextEdit }: {
 }) {
   const textRef = useRef<Konva.Text>(null);
   const [displayText, setDisplayText] = useState(data.content);
-  const timerRef = useRef<ReturnType<typeof setTimeout>>();
   const intervalRef = useRef<ReturnType<typeof setInterval>>();
+  const animation = resolveElementAnimation(element);
 
   const applyTextTransform = (text: string) => {
     switch (data.textTransform) {
@@ -921,23 +1021,18 @@ function AnimatedTextElement({ element, commonProps, data, isTextEdit }: {
     }
   };
 
-  // Keep displayed text in sync with content
+  // Typewriter is the one animation type that's fundamentally text-specific (reveals
+  // characters progressively) — everything else (fadeIn/pop/bounce/slide/rise/zoom/
+  // rotate/pulse) is handled uniformly for every element type, text included, by the
+  // shared ElementAnimationDriver keyed off element.animation directly.
   useEffect(() => {
-    if (data.animation !== 'typewriter') setDisplayText(data.content);
-  }, [data.content, data.animation]);
-
-  // Run animation — deferred so React-Konva finishes reconciling before we touch the node
-  useEffect(() => {
-    clearTimeout(timerRef.current);
     clearInterval(intervalRef.current);
-
-    const anim = data.animation;
-    if (!anim || anim === 'none') {
+    if (animation.type !== 'typewriter') {
       setDisplayText(data.content);
       return;
     }
-
-    if (anim === 'typewriter') {
+    const startDelayMs = Math.max(0, animation.delay * 1000);
+    const startTimer = setTimeout(() => {
       setDisplayText('');
       let i = 0;
       intervalRef.current = setInterval(() => {
@@ -945,59 +1040,10 @@ function AnimatedTextElement({ element, commonProps, data, isTextEdit }: {
         setDisplayText(data.content.slice(0, i));
         if (i >= data.content.length) clearInterval(intervalRef.current);
       }, 60);
-      return () => { clearInterval(intervalRef.current); };
-    }
-
-    // Defer past React's reconciliation so imperative opacity changes aren't overwritten
-    timerRef.current = setTimeout(() => {
-      const node = textRef.current;
-      if (!node) return;
-
-      // Reset node to clean state before each animation
-      node.stopDrag();
-      node.offsetX(0);
-      node.offsetY(0);
-      node.scaleX(1);
-      node.scaleY(1);
-      node.opacity(element.opacity);
-
-      switch (anim) {
-        case 'fadeIn':
-          node.opacity(0);
-          node.to({ opacity: element.opacity, duration: 0.9, easing: Konva.Easings.EaseInOut });
-          break;
-        case 'slideUp':
-          node.offsetY(-60);
-          node.opacity(0);
-          node.to({ offsetY: 0, opacity: element.opacity, duration: 0.6, easing: Konva.Easings.EaseOut });
-          break;
-        case 'slideLeft':
-          node.offsetX(-80);
-          node.opacity(0);
-          node.to({ offsetX: 0, opacity: element.opacity, duration: 0.6, easing: Konva.Easings.EaseOut });
-          break;
-        case 'zoom':
-          node.scaleX(0.1);
-          node.scaleY(0.1);
-          node.opacity(0);
-          node.to({ scaleX: 1, scaleY: 1, opacity: element.opacity, duration: 0.5, easing: Konva.Easings.EaseOut });
-          break;
-        case 'bounce':
-          node.offsetY(-60);
-          node.to({ offsetY: 0, duration: 0.9, easing: Konva.Easings.BounceEaseOut });
-          break;
-        case 'pulse':
-          node.to({ scaleX: 1.08, scaleY: 1.08, duration: 0.4, easing: Konva.Easings.EaseInOut, onFinish: () => {
-            node.to({ scaleX: 1, scaleY: 1, duration: 0.4, easing: Konva.Easings.EaseInOut });
-          }});
-          break;
-      }
-    }, 30);
-
-    return () => { clearTimeout(timerRef.current); };
-  // Re-run whenever the animation type or element identity changes
+    }, startDelayMs);
+    return () => { clearTimeout(startTimer); clearInterval(intervalRef.current); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [element.id, data.animation]);
+  }, [element.id, animation.type, animation.delay, data.content]);
 
   const text = applyTextTransform(displayText);
 
@@ -1067,6 +1113,181 @@ function AnimatedTextElement({ element, commonProps, data, isTextEdit }: {
       visible={!isTextEdit}
     />
   );
+}
+
+interface AnimTransform {
+  opacityMul: number;
+  offsetX: number;
+  offsetY: number;
+  scaleX: number;
+  scaleY: number;
+  rotationDelta: number;
+}
+
+const ANIM_RESTING: AnimTransform = { opacityMul: 1, offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1, rotationDelta: 0 };
+
+function directionOffset(direction: ElementAnimation['direction'] | undefined, distance: number) {
+  switch (direction) {
+    case 'right': return { dx: distance, dy: 0 };
+    case 'up': return { dx: 0, dy: -distance };
+    case 'down': return { dx: 0, dy: distance };
+    case 'left':
+    default: return { dx: -distance, dy: 0 };
+  }
+}
+
+// Pure function of elapsed time -> transform, evaluated fresh every animation-driver
+// tick (see ElementAnimationDriver) rather than baked into an imperative one-shot
+// Konva .to() tween — this is what makes it a real, re-evaluable animation instead of
+// "fire once on mount and forget," even though full timeline-scrub-to-any-point
+// support is left for a future pass (see ElementAnimationDriver's start-time model).
+function computeAnimationTransform(
+  type: ElementAnimationType,
+  elapsedSinceDelayMs: number,
+  durationMs: number,
+  direction: ElementAnimation['direction'] | undefined,
+  nowMs: number
+): AnimTransform {
+  if (elapsedSinceDelayMs < 0) return computeAnimationTransform(type, 0, durationMs, direction, nowMs);
+  const t = Math.min(elapsedSinceDelayMs, durationMs);
+  switch (type) {
+    case 'fadeIn':
+      return { ...ANIM_RESTING, opacityMul: Konva.Easings.EaseInOut(t, 0, 1, durationMs) };
+    case 'pop': {
+      const s = Konva.Easings.BackEaseOut(t, 0, 1, durationMs);
+      const o = Konva.Easings.EaseOut(t, 0, 1, Math.max(1, durationMs * 0.6));
+      return { ...ANIM_RESTING, opacityMul: Math.min(1, o), scaleX: s, scaleY: s };
+    }
+    case 'bounce': {
+      const { dx, dy } = directionOffset(direction || 'up', 60);
+      const v = Konva.Easings.BounceEaseOut(t, 0, 1, durationMs);
+      const o = Konva.Easings.EaseOut(t, 0, 1, Math.max(1, durationMs * 0.4));
+      return { ...ANIM_RESTING, opacityMul: Math.min(1, o), offsetX: dx * (1 - v), offsetY: dy * (1 - v) };
+    }
+    case 'slide': {
+      const { dx, dy } = directionOffset(direction || 'left', 120);
+      const v = Konva.Easings.EaseOut(t, 0, 1, durationMs);
+      return { ...ANIM_RESTING, opacityMul: v, offsetX: dx * (1 - v), offsetY: dy * (1 - v) };
+    }
+    case 'rise': {
+      const { dx, dy } = directionOffset(direction || 'down', 60);
+      const v = Konva.Easings.EaseOut(t, 0, 1, durationMs);
+      return { ...ANIM_RESTING, opacityMul: v, offsetX: dx * (1 - v), offsetY: dy * (1 - v) };
+    }
+    case 'zoom': {
+      const s = Konva.Easings.EaseOut(t, 0.1, 0.9, durationMs);
+      return { ...ANIM_RESTING, opacityMul: Konva.Easings.EaseOut(t, 0, 1, durationMs), scaleX: s, scaleY: s };
+    }
+    case 'rotate': {
+      const s = Konva.Easings.EaseOut(t, 0.2, 0.8, durationMs);
+      return {
+        ...ANIM_RESTING,
+        opacityMul: Konva.Easings.EaseOut(t, 0, 1, durationMs),
+        scaleX: s, scaleY: s,
+        rotationDelta: Konva.Easings.EaseOut(t, -180, 180, durationMs),
+      };
+    }
+    case 'typewriter':
+      // Text elements get real character-reveal from AnimatedTextElement instead;
+      // this path only runs for non-text elements, which have nothing to "type," so
+      // it falls back to a plain fade rather than doing nothing at all.
+      return { ...ANIM_RESTING, opacityMul: Konva.Easings.EaseInOut(t, 0, 1, durationMs) };
+    case 'pulse': {
+      // A continuous attention-getter, not a one-shot entrance — keeps oscillating
+      // for as long as the element is on screen, unlike every other type here.
+      const period = Math.max(300, durationMs);
+      const phase = (nowMs % period) / period;
+      const s = 1 + Math.sin(phase * Math.PI * 2) * 0.05;
+      return { ...ANIM_RESTING, scaleX: s, scaleY: s };
+    }
+    default:
+      return ANIM_RESTING;
+  }
+}
+
+function applyAnimationTransform(node: Konva.Node, transform: AnimTransform, element: CanvasElement) {
+  node.opacity(element.opacity * transform.opacityMul);
+  node.offsetX(transform.offsetX);
+  node.offsetY(transform.offsetY);
+  node.scaleX(transform.scaleX);
+  node.scaleY(transform.scaleY);
+  node.rotation(element.rotation + transform.rotationDelta);
+}
+
+// One shared driver per page rather than one Konva.Animation per animated element —
+// finds each element's root node generically via its existing `id` (every element
+// type's commonProps already sets `id: element.id` on its outermost Konva node, so
+// this needs no per-type wiring at all). Mounted only while the page actually has at
+// least one non-'none' animation, so pages without any cost nothing.
+function ElementAnimationDriver({ elements, stageRef }: { elements: CanvasElement[]; stageRef: React.RefObject<Konva.Stage> }) {
+  const elementsRef = useRef(elements);
+  elementsRef.current = elements;
+  const startTimesRef = useRef<Map<string, number>>(new Map());
+  const signaturesRef = useRef<Map<string, string>>(new Map());
+  const doneRef = useRef<Set<string>>(new Set());
+
+  // (Re)starts just the elements whose animation config actually changed (new type,
+  // or duration/delay/direction edited, or a brand-new animated element) — editing
+  // one element's animation shouldn't restart every other element's on the page.
+  useEffect(() => {
+    const now = performance.now();
+    const liveIds = new Set<string>();
+    elements.forEach((el) => {
+      const a = resolveElementAnimation(el);
+      liveIds.add(el.id);
+      if (a.type === 'none') {
+        startTimesRef.current.delete(el.id);
+        signaturesRef.current.delete(el.id);
+        doneRef.current.delete(el.id);
+        return;
+      }
+      const sig = `${a.type}:${a.duration}:${a.delay}:${a.direction || ''}`;
+      if (signaturesRef.current.get(el.id) !== sig) {
+        signaturesRef.current.set(el.id, sig);
+        startTimesRef.current.set(el.id, now);
+        doneRef.current.delete(el.id);
+      }
+    });
+    Array.from(signaturesRef.current.keys()).forEach((id) => {
+      if (!liveIds.has(id)) { signaturesRef.current.delete(id); startTimesRef.current.delete(id); doneRef.current.delete(id); }
+    });
+  }, [elements]);
+
+  useEffect(() => {
+    const stage = stageRef.current;
+    const layer = stage?.getLayers()[0];
+    if (!stage || !layer) return;
+
+    const anim = new Konva.Animation(() => {
+      const now = performance.now();
+      elementsRef.current.forEach((el) => {
+        const a = resolveElementAnimation(el);
+        if (a.type === 'none' || (a.type === 'typewriter' && el.type === 'text')) return;
+        if (doneRef.current.has(el.id)) return; // pulse never gets marked done, see below
+
+        const node = stage.findOne('#' + el.id);
+        if (!node) return;
+
+        const startedAt = startTimesRef.current.get(el.id);
+        if (startedAt === undefined) return;
+        const elapsed = now - startedAt;
+        const delayMs = Math.max(0, a.delay * 1000);
+        const durationMs = Math.max(50, a.duration * 1000);
+
+        const transform = computeAnimationTransform(a.type, elapsed - delayMs, durationMs, a.direction, now);
+        applyAnimationTransform(node, transform, el);
+
+        if (a.type !== 'pulse' && elapsed >= delayMs + durationMs) {
+          doneRef.current.add(el.id);
+          applyAnimationTransform(node, ANIM_RESTING, el);
+        }
+      });
+    }, layer);
+    anim.start();
+    return () => { anim.stop(); };
+  }, [stageRef]);
+
+  return null;
 }
 
 function measureCharWidths(text: string, fontFamily: string, fontSize: number, fontWeight: number, fontStyle: string): number[] {
@@ -1141,6 +1362,46 @@ function IconElement({ element, commonProps: rawCommonProps, data }: { element: 
     <Group {...commonProps} width={element.width} height={element.height}>
       <KonvaImage image={image} x={offsetX} y={offsetY} width={drawWidth} height={drawHeight} />
     </Group>
+  );
+}
+
+// Renders a page's locked background image — same manual-Image-load pattern as
+// StaticImageElement, but with no commonProps/drag handlers/selection wiring at all,
+// since a page background is never selectable, draggable, or resizable (see
+// PageBackgroundImage in types/index.ts). Sits between the flat-color canvas-bg Rect
+// and the grid/elements, so it's always beneath every real element.
+function PageBackgroundImageLayer({ backgroundImage, pageWidth, pageHeight }: { backgroundImage: PageBackgroundImage; pageWidth: number; pageHeight: number }) {
+  const [image, setImage] = useState<HTMLImageElement | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setImage(null);
+    const img = new window.Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => { if (!cancelled) setImage(img); };
+    img.onerror = () => { if (!cancelled) console.error('[PageBackgroundImageLayer] failed to load', backgroundImage.src); };
+    img.src = backgroundImage.src;
+    return () => { cancelled = true; };
+  }, [backgroundImage.src]);
+
+  if (!image) return null;
+
+  return (
+    <KonvaImage
+      name="page-background-image"
+      listening={false}
+      image={image}
+      x={0}
+      y={0}
+      width={pageWidth}
+      height={pageHeight}
+      crop={{
+        x: (backgroundImage.cropX / 100) * image.naturalWidth,
+        y: (backgroundImage.cropY / 100) * image.naturalHeight,
+        width: Math.max(1, (backgroundImage.cropWidth / 100) * image.naturalWidth),
+        height: Math.max(1, (backgroundImage.cropHeight / 100) * image.naturalHeight),
+      }}
+    />
   );
 }
 
@@ -1408,16 +1669,28 @@ function VideoElement({ element, commonProps, data, clock }: { element: CanvasEl
   useEffect(() => {
     const video = document.createElement('video');
     video.crossOrigin = 'anonymous';
-    video.loop = clocked ? false : (data.loop ?? true);
+    // Native `loop` always restarts at 0, not at a trim-in point — looping a clip
+    // whose start/end were trimmed away from the source's own bounds has to be
+    // handled manually via the timeupdate listener below instead.
+    video.loop = false;
     video.muted = data.muted ?? true;
     video.playsInline = true;
     video.src = data.src;
     if (data.startTime) video.currentTime = data.startTime;
+    // Kept out of layout/visible flow but genuinely attached to the document — a
+    // fully detached (never-appended) <video> plays and decodes frames fine (canvas
+    // drawImage() doesn't care), but Web Audio's createMediaElementSource() on it
+    // silently produces a dead/sample-less track for export's audio mix, which in
+    // turn poisons the whole combined MediaRecorder (0 bytes output, no error).
+    // Real DOM attachment fixes the audio tap without changing anything visible.
     videoElRef.current = video;
 
     const handleReady = () => {
       setReady(true);
-      if (!clocked && (data.autoplay ?? true)) video.play().catch(() => { /* browser blocked autoplay — still shows first frame */ });
+      // A reversed clip is driven manually (currentTime scrubbed backward every
+      // animation frame below) — native play() only ever moves forward, so it must
+      // stay paused here regardless of autoplay.
+      if (!clocked && (data.autoplay ?? true) && !data.reverse) video.play().catch(() => { /* browser blocked autoplay — still shows first frame */ });
     };
     video.addEventListener('loadeddata', handleReady);
 
@@ -1435,8 +1708,32 @@ function VideoElement({ element, commonProps, data, clock }: { element: CanvasEl
 
   useEffect(() => {
     const video = videoElRef.current;
-    if (video && !clocked) video.loop = data.loop ?? true;
-  }, [data.loop, clocked]);
+    if (video) video.volume = data.volume ?? 1;
+  }, [data.volume]);
+
+  useEffect(() => {
+    const video = videoElRef.current;
+    if (video) video.playbackRate = data.playbackRate ?? 1;
+  }, [data.playbackRate]);
+
+  // Enforce the clip's trim in/out points during ordinary forward playback — an
+  // unclocked video otherwise plays from startTime straight through to the end of
+  // the SOURCE file, ignoring endTime entirely (native `loop` only ever restarts at
+  // 0, not at a trim-in point), so a clip trimmed shorter than its source needs this
+  // to actually stop/loop where the user set it.
+  useEffect(() => {
+    const video = videoElRef.current;
+    if (!video || clocked || data.reverse) return;
+    const inSec = data.startTime || 0;
+    const handleTimeUpdate = () => {
+      if (data.endTime && video.currentTime >= data.endTime - 0.05) {
+        if (data.loop ?? true) video.currentTime = inSec;
+        else video.pause();
+      }
+    };
+    video.addEventListener('timeupdate', handleTimeUpdate);
+    return () => video.removeEventListener('timeupdate', handleTimeUpdate);
+  }, [clocked, data.reverse, data.startTime, data.endTime, data.loop]);
 
   // Register with the shared clock only while this clip is on a track. getTiming is
   // re-read every frame (not snapshotted) so trimming later (Phase 3) doesn't require
@@ -1447,17 +1744,20 @@ function VideoElement({ element, commonProps, data, clock }: { element: CanvasEl
       element.id,
       videoElRef.current,
       () => (element.trackId
-        ? { timelineStart: element.timelineStart ?? 0, timelineEnd: element.timelineEnd ?? 0 }
+        ? { timelineStart: element.timelineStart ?? 0, timelineEnd: element.timelineEnd ?? 0, reverse: data.reverse }
         : null),
       (data.startTime || 0) * 1000
     );
-  }, [clocked, ready, element.id, element.trackId, element.timelineStart, element.timelineEnd, data.startTime, clock]);
+  }, [clocked, ready, element.id, element.trackId, element.timelineStart, element.timelineEnd, data.startTime, data.reverse, clock]);
+
+  const hasFilters = (data.brightness !== undefined && data.brightness !== 100) || (data.contrast !== undefined && data.contrast !== 100);
 
   useEffect(() => {
     if (!ready || !imageNodeRef.current) return;
     const layer = imageNodeRef.current.getLayer();
     if (!layer) return;
-    const anim = new Konva.Animation(() => {
+    const video = videoElRef.current;
+    const anim = new Konva.Animation((frame) => {
       // Outside its timeline window, a clocked clip is hidden rather than just paused —
       // matches how a static (non-timeline) element only ever shows while it's the
       // current page's content, extended here to "current time" instead of "current page."
@@ -1467,11 +1767,29 @@ function VideoElement({ element, commonProps, data, clock }: { element: CanvasEl
         const active = clock.getCurrentMs() >= start && clock.getCurrentMs() < end;
         imageNodeRef.current.visible(active);
       }
+      // An unclocked reverse clip has no shared clock driving it (see the clocked
+      // path in timelineClock.ts's syncOne) — step currentTime backward manually
+      // here instead, since <video> doesn't support negative playbackRate.
+      if (!clocked && data.reverse && video) {
+        const dtSec = (frame?.timeDiff ?? 16) / 1000 * (data.playbackRate ?? 1);
+        const inSec = data.startTime || 0;
+        const outSec = data.endTime || video.duration || 0;
+        let next = video.currentTime - dtSec;
+        if (next <= inSec) next = (data.loop ?? true) ? outSec : inSec;
+        video.currentTime = next;
+      }
+      // Video frames update continuously outside React's render cycle, so a
+      // brightness/contrast filter (which Konva applies to a cached raster
+      // snapshot, not live) needs re-caching every frame it's active — cheap to
+      // skip entirely via hasFilters when neither slider is touched (the common case).
+      if (hasFilters && imageNodeRef.current) {
+        imageNodeRef.current.cache();
+      }
     }, layer);
     anim.start();
     animRef.current = anim;
     return () => { anim.stop(); };
-  }, [ready, clocked, element.timelineStart, element.timelineEnd, clock]);
+  }, [ready, clocked, element.timelineStart, element.timelineEnd, clock, data.reverse, data.startTime, data.endTime, data.playbackRate, hasFilters]);
 
   if (!ready) {
     return (
@@ -1485,13 +1803,53 @@ function VideoElement({ element, commonProps, data, clock }: { element: CanvasEl
     );
   }
 
+  const video = videoElRef.current!;
+
+  // Flip and crop mirror StaticImageElement's exact conventions (percentages of the
+  // source, 0/0/100/100 = uncropped) so the same mental model applies to both.
+  const flipH = !!data.flipH;
+  const flipV = !!data.flipV;
+  const flipProps = (flipH || flipV) ? {
+    ...commonProps,
+    x: commonProps.x + (flipH ? element.width : 0),
+    y: commonProps.y + (flipV ? element.height : 0),
+    scaleX: flipH ? -1 : 1,
+    scaleY: flipV ? -1 : 1,
+  } : commonProps;
+
+  const cropXPct = data.cropX ?? 0;
+  const cropYPct = data.cropY ?? 0;
+  const cropWPct = data.cropWidth ?? 100;
+  const cropHPct = data.cropHeight ?? 100;
+  const isCropped = cropXPct !== 0 || cropYPct !== 0 || cropWPct !== 100 || cropHPct !== 100;
+  const cropProp = (isCropped && video.videoWidth) ? {
+    crop: {
+      x: (cropXPct / 100) * video.videoWidth,
+      y: (cropYPct / 100) * video.videoHeight,
+      width: Math.max(1, (cropWPct / 100) * video.videoWidth),
+      height: Math.max(1, (cropHPct / 100) * video.videoHeight),
+    },
+  } : {};
+
+  const brightness = ((data.brightness ?? 100) - 100) / 100;
+  const contrast = (data.contrast ?? 100) - 100;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const filters: any[] = [];
+  if (data.brightness !== undefined && data.brightness !== 100) filters.push(Konva.Filters.Brighten);
+  if (data.contrast !== undefined && data.contrast !== 100) filters.push(Konva.Filters.Contrast);
+
   return (
     <KonvaImage
       ref={imageNodeRef}
-      {...commonProps}
-      image={videoElRef.current!}
+      {...flipProps}
+      {...cropProp}
+      image={video}
       width={element.width}
       height={element.height}
+      cornerRadius={data.borderRadius || 0}
+      filters={filters}
+      brightness={brightness}
+      contrast={contrast}
     />
   );
 }
@@ -1513,6 +1871,10 @@ function AudioElement({ element, data, clock }: { element: CanvasElement; data: 
     audio.volume = data.volume ?? 1;
     audio.src = data.src;
     if (data.startTime) audio.currentTime = data.startTime;
+    // See the matching comment in VideoElement — real DOM attachment (invisible)
+    // is required for Web Audio's createMediaElementSource() to reliably tap this
+    // element's decoded audio during export; a fully detached element plays fine
+    // on its own but silently starves the Web Audio graph of samples.
     audioElRef.current = audio;
 
     const handleReady = () => setReady(true);

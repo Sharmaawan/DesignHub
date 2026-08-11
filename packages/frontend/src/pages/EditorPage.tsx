@@ -14,6 +14,7 @@ import FloatingToolbar from '../components/editor/FloatingToolbar';
 import LayersPanel from '../components/editor/LayersPanel';
 import TimelinePanel from '../components/editor/timeline/TimelinePanel';
 import ElementAnimations from '../components/editor/ElementAnimations';
+import PageTransitions from '../components/editor/PageTransitions';
 import SettingsModal from '../components/editor/SettingsModal';
 import ShareModal from '../components/editor/ShareModal';
 import ExportModal from '../components/editor/ExportModal';
@@ -29,7 +30,7 @@ export default function EditorPage() {
   const navigate = useNavigate();
   const { isDark, toggleTheme } = useThemeStore();
   const {
-    pages, currentPageIndex, selectedElementIds, zoom, isSaving, lastSaved,
+    project, pages, currentPageIndex, selectedElementIds, zoom, isSaving, lastSaved,
     setProject, setZoom, zoomIn, zoomOut, undo, redo, copy, paste, cut,
     pushHistory, setSaving, setLastSaved, selectAll, deselectAll,
     setCommentsOpen, setVersionsOpen, commentsOpen, versionsOpen, layersOpen, setLayersOpen,
@@ -70,7 +71,11 @@ export default function EditorPage() {
     projectAPI.get(projectId).then(({ data }) => {
       if (cancelled) return;
       setProject(mapApiProjectToProject(data));
-      setIsReadOnlyView(data.ownerId !== user?.id);
+      // myPermission comes straight from the backend's getProjectPermission (routes/
+      // projects.ts) — 'owner' or 'editor' can save, 'commenter'/'viewer'/none cannot.
+      // Not just an ownership check any more: a collaborator explicitly given Editor
+      // access needs this to be false too, or their autosave would be wrongly blocked.
+      setIsReadOnlyView(data.myPermission !== 'owner' && data.myPermission !== 'editor');
     }).catch(() => {
       if (!cancelled) toast.error("Couldn't load that design — it may not exist or you may not have access.");
     });
@@ -222,6 +227,22 @@ export default function EditorPage() {
           </div>
         )}
 
+        {/* Page transitions panel */}
+        {sidePanelTab === 'transitions' && (
+          <div className="w-60 bg-white dark:bg-canva-dark-surface border-l border-gray-200 dark:border-canva-dark-border flex flex-col overflow-hidden flex-shrink-0">
+            <div className="flex items-center justify-between px-3 py-2.5 border-b border-gray-100 dark:border-gray-800">
+              <span className="text-sm font-semibold text-gray-900 dark:text-white">Page Transition</span>
+              <button
+                onClick={() => useEditorStore.getState().setSidePanelTab('')}
+                className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 text-lg leading-none"
+              >×</button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-3">
+              <PageTransitions />
+            </div>
+          </div>
+        )}
+
         {commentsOpen && <CommentsPanel />}
         {versionsOpen && <VersionHistory />}
       </div>
@@ -246,6 +267,8 @@ export default function EditorPage() {
         open={showShare}
         onClose={() => setShowShare(false)}
         onPublish={(accountId) => { setShowShare(false); setPublishAccountId(accountId); setShowPublish(true); }}
+        projectId={projectId}
+        projectName={project?.name}
       />
       <ExportModal open={showExport} onClose={() => setShowExport(false)} />
       <PublishModal

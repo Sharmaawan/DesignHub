@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../lib/prisma';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
+import { getProjectPermission } from '../lib/permissions';
 
 const router = Router();
 
@@ -24,7 +25,12 @@ router.get('/:id', authMiddleware, async (req: AuthRequest, res: Response) => {
       include: { pages: { include: { elements: true }, orderBy: { index: 'asc' } } },
     });
     if (!project) return res.status(404).json({ error: 'Project not found' });
-    res.json(project);
+    // Still deliberately unrestricted (see PUT/DELETE below for why) — but now also
+    // tells the frontend what the viewer is allowed to DO with it, so e.g. an Editor
+    // collaborator's autosave isn't wrongly treated as read-only just because they
+    // don't own the project.
+    const myPermission = await getProjectPermission(req.params.id, req.userId);
+    res.json({ ...project, myPermission });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch project' });
   }
@@ -53,11 +59,13 @@ router.put('/:id', authMiddleware, async (req: AuthRequest, res: Response) => {
     // Previously unrestricted — any authenticated user could overwrite ANY project by
     // ID (e.g. an approver's project-review feature reads other people's projects by
     // ID, which made this gap directly reachable). GET stays open to any authenticated
-    // user (needed for exactly that review flow); only mutation needs the owner check.
+    // user (needed for exactly that review flow); only mutation needs a permission
+    // check — the owner, or a collaborator explicitly given "editor" access.
     const existing = await prisma.project.findUnique({ where: { id: req.params.id }, select: { ownerId: true } });
     if (!existing) return res.status(404).json({ error: 'Project not found' });
-    if (existing.ownerId !== req.userId) {
-      return res.status(403).json({ error: 'Only the project owner can edit this design' });
+    const permission = await getProjectPermission(req.params.id, req.userId);
+    if (permission !== 'owner' && permission !== 'editor') {
+      return res.status(403).json({ error: 'You only have view access to this design' });
     }
     const { name, description, canvasData, status, thumbnail } = req.body;
     const project = await prisma.project.update({

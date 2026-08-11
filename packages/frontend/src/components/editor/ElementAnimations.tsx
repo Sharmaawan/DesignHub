@@ -29,8 +29,8 @@ const SHOW_DIRECTION_FOR: ElementAnimationType[] = ['slide', 'rise'];
 export default function ElementAnimations() {
   const {
     selectedElementIds,
-    elementAnimations,
     setElementAnimation,
+    pushHistory,
     pages,
     currentPageIndex,
   } = useEditorStore();
@@ -39,12 +39,11 @@ export default function ElementAnimations() {
   const previewRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const selectedElementId = selectedElementIds[0] || null;
-  const currentAnimation = selectedElementId
-    ? elementAnimations[selectedElementId] || { type: 'none' as ElementAnimationType, duration: 0.5, delay: 0, direction: 'left' as const }
-    : null;
-
   const page = pages[currentPageIndex];
   const selectedElement = page?.elements.find((e) => e.id === selectedElementId);
+  const currentAnimation = selectedElement
+    ? selectedElement.animation || { type: 'none' as ElementAnimationType, duration: 0.5, delay: 0, direction: 'left' as const }
+    : null;
 
   const handleSelectAnimation = useCallback(
     (type: ElementAnimationType) => {
@@ -56,11 +55,12 @@ export default function ElementAnimations() {
         delay: base.delay,
         direction: base.direction,
       });
+      pushHistory();
       if (type !== 'none') {
         toast.success(`Animation: ${ANIMATION_OPTIONS.find((a) => a.type === type)?.label} applied`);
       }
     },
-    [selectedElementId, currentAnimation, setElementAnimation]
+    [selectedElementId, currentAnimation, setElementAnimation, pushHistory]
   );
 
   const handleDurationChange = useCallback(
@@ -83,8 +83,9 @@ export default function ElementAnimations() {
     (direction: 'left' | 'right' | 'up' | 'down') => {
       if (!selectedElementId || !currentAnimation) return;
       setElementAnimation(selectedElementId, { ...currentAnimation, direction });
+      pushHistory();
     },
-    [selectedElementId, currentAnimation, setElementAnimation]
+    [selectedElementId, currentAnimation, setElementAnimation, pushHistory]
   );
 
   const handlePreview = useCallback(() => {
@@ -132,8 +133,9 @@ export default function ElementAnimations() {
   const handleRemoveAnimation = useCallback(() => {
     if (!selectedElementId) return;
     setElementAnimation(selectedElementId, { type: 'none', duration: 0.5, delay: 0 });
+    pushHistory();
     toast.success('Animation removed');
-  }, [selectedElementId, setElementAnimation]);
+  }, [selectedElementId, setElementAnimation, pushHistory]);
 
   if (!selectedElementId || !selectedElement) {
     return (

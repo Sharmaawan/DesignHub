@@ -161,7 +161,7 @@ export default function CreateButton() {
       <VideoSuggestionsModal open={showVideoFormats} onClose={() => setShowVideoFormats(false)} />
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-[#7B2FBE] to-[#9B4DCA] text-white rounded-full font-semibold shadow-lg shadow-[#7B2FBE]/30 hover:shadow-xl hover:shadow-[#7B2FBE]/40 hover:scale-105 active:scale-95 transition-all duration-200"
+        className="flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-[#7B2FBE] to-[#9B4DCA] bg-[length:200%_200%] animate-gradient-shift text-white rounded-full font-semibold shadow-lg shadow-[#7B2FBE]/30 hover:shadow-xl hover:shadow-[#7B2FBE]/40 hover:scale-105 active:scale-95 transition-all duration-200"
       >
         <HiOutlinePlus size={20} strokeWidth={2.5} />
         <span>Create a design</span>

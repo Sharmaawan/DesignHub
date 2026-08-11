@@ -11,6 +11,10 @@ const POPULAR_SEARCHES = [
   'Logo design', 'Social media post', 'Flyer', 'Certificate',
 ];
 
+// The animated placeholder types out `Search "<phrase>"...` — reusing
+// POPULAR_SEARCHES so the two stay in sync instead of maintaining two lists.
+const TYPING_PHRASES = POPULAR_SEARCHES.map((s) => `Search "${s}"...`);
+
 const KEYBOARD_SHORTCUTS = [
   { keys: 'Ctrl + K', action: 'Quick search' },
   { keys: 'Ctrl + N', action: 'New design' },
@@ -27,6 +31,44 @@ export default function HeroSearch() {
   const inputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
   const { projects, templates } = useProjectStore();
+  const [typedText, setTypedText] = useState('');
+
+  // Typewriter loop for the empty-state placeholder — a self-perpetuating
+  // recursive setTimeout (not setInterval) so typing/deleting speed and the
+  // pause-at-full-phrase can each use their own delay. Pauses entirely once the
+  // user focuses or types, so it never fights with real input.
+  useEffect(() => {
+    if (isFocused || query) return;
+    let phraseIdx = 0;
+    let charIdx = 0;
+    let deleting = false;
+    let timeoutId: ReturnType<typeof setTimeout>;
+
+    const tick = () => {
+      const phrase = TYPING_PHRASES[phraseIdx];
+      if (!deleting) {
+        charIdx++;
+        setTypedText(phrase.slice(0, charIdx));
+        if (charIdx === phrase.length) {
+          timeoutId = setTimeout(() => { deleting = true; tick(); }, 1400);
+          return;
+        }
+        timeoutId = setTimeout(tick, 55);
+      } else {
+        charIdx--;
+        setTypedText(phrase.slice(0, charIdx));
+        if (charIdx === 0) {
+          deleting = false;
+          phraseIdx = (phraseIdx + 1) % TYPING_PHRASES.length;
+          timeoutId = setTimeout(tick, 400);
+          return;
+        }
+        timeoutId = setTimeout(tick, 28);
+      }
+    };
+    timeoutId = setTimeout(tick, 400);
+    return () => clearTimeout(timeoutId);
+  }, [isFocused, query]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -126,9 +168,19 @@ export default function HeroSearch() {
             handleSearch(query);
             navigate(`/templates?search=${encodeURIComponent(query)}`);
           }}
-          placeholder="What will you design today?"
+          placeholder=""
           className="w-full pl-14 pr-24 py-4.5 text-lg bg-white dark:bg-[#1e1e30] rounded-2xl border-2 border-gray-200 dark:border-gray-700 focus:outline-none focus:border-[#7B2FBE] focus:ring-4 focus:ring-[#7B2FBE]/10 text-gray-900 dark:text-white placeholder-gray-400 shadow-lg shadow-gray-200/50 dark:shadow-black/20 transition-all"
         />
+        {/* Typewriter placeholder overlay — a real <input placeholder> can't show a
+            blinking caret or animate, so this sits on top of the (intentionally
+            empty) native placeholder and disappears the instant the user focuses
+            or types, handing control straight back to the real input. */}
+        {!isFocused && !query && (
+          <div className="absolute left-14 top-1/2 -translate-y-1/2 flex items-center text-lg text-gray-400 pointer-events-none select-none">
+            <span>{typedText}</span>
+            <span className="ml-0.5 w-[2px] h-6 bg-gray-400 animate-pulse" />
+          </div>
+        )}
         <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2">
           {query && (
             <button onClick={() => setQuery('')} className="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-400">

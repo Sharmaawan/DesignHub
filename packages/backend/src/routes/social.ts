@@ -5,6 +5,7 @@ import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { encryptSecret, decryptSecret } from '../lib/crypto';
 import { remapUpstreamStatus } from '../lib/http';
 import { getAdapter, listAdapters, PLATFORM_SPECS, ExchangedAccount } from '../lib/socialPlatforms';
+import { DEFAULT_TEAM_NAME } from '../lib/defaultTeam';
 
 const router = Router();
 
@@ -85,11 +86,54 @@ function withDecryptedToken<T extends { accessToken: string }>(account: T): T {
 const APPROVER_ROLES = ['editor', 'approver', 'admin', 'owner'];
 
 // A user's team membership drives the workflow: makers submit for approval, approvers
-// act on the queue. We take the first membership — this app has no notion of an
-// "active" team, and social accounts are per-user, not per-team.
+// act on the queue. The app has one shared org team (see defaultTeam.ts) that every
+// user is auto-joined to — but a user can ALSO independently own/belong to other,
+// unrelated teams (e.g. one they created before the shared-team model, or via some
+// other flow). Resolving membership must specifically target the shared org team by
+// name, not just take whichever row `findFirst` happens to return first — an
+// unrelated team where the user is 'owner' would otherwise masquerade as their
+// approver-tier role in the shared team's workflow.
 async function getMembership(userId: string): Promise<{ teamId: string; role: string } | null> {
-  const m = await prisma.teamMember.findFirst({ where: { userId }, select: { teamId: true, role: true } });
+  const team = await prisma.team.findFirst({ where: { name: DEFAULT_TEAM_NAME }, select: { id: true } });
+  if (!team) return null;
+  const m = await prisma.teamMember.findUnique({
+    where: { teamId_userId: { teamId: team.id, userId } },
+    select: { teamId: true, role: true },
+  });
   return m ? { teamId: m.teamId, role: m.role } : null;
+}
+
+// SocialAccount rows are still owned by whichever individual connected them (no
+// teamId column — see the plan doc, avoiding a migration), but on a team they're
+// effectively a shared resource: every APPROVER_ROLES member of a team sees and can
+// use every other approver-tier teammate's connected accounts, and a maker sees that
+// same pool (read-only) instead of needing — or being allowed — a personal
+// connection of their own. A user with no team membership at all keeps exactly
+// today's solo, per-user-only behavior.
+async function accountOwnerScope(userId: string): Promise<string | { in: string[] }> {
+  const membership = await getMembership(userId);
+  if (!membership) return userId;
+  const approverTeammates = await prisma.teamMember.findMany({
+    where: { teamId: membership.teamId, role: { in: APPROVER_ROLES } },
+    select: { userId: true },
+  });
+  const ids = approverTeammates.map((m) => m.userId);
+  // The caller's own team has no approver-tier member yet (shouldn't normally
+  // happen — someone has to have created the team) — fall back to their own
+  // accounts rather than an empty/impossible `in: []` filter.
+  return ids.length > 0 ? { in: ids } : userId;
+}
+
+// Authoritative check for whether `userId` may submit/act using an account owned by
+// someone else — mirrors accountOwnerScope's sharing model exactly (same team, and
+// the account's owner is approver-tier) so a request can never reach further with an
+// account GET /accounts wouldn't have offered it in the first place.
+async function canUseAccount(userId: string, account: { userId: string }): Promise<boolean> {
+  if (userId === account.userId) return true;
+  const [callerMembership, ownerMembership] = await Promise.all([getMembership(userId), getMembership(account.userId)]);
+  return !!callerMembership && !!ownerMembership
+    && callerMembership.teamId === ownerMembership.teamId
+    && APPROVER_ROLES.includes(ownerMembership.role);
 }
 
 // Actually run the platform publish for an already-persisted post and move it to
@@ -98,6 +142,17 @@ async function getMembership(userId: string): Promise<{ teamId: string; role: st
 async function executePublish(postId: string) {
   const post = await prisma.socialPost.findUnique({ where: { id: postId }, include: { socialAccount: true } });
   if (!post) throw Object.assign(new Error('Post not found'), { status: 404 });
+
+  // By the time anything calls this, a platform/account must already be attached —
+  // POST /posts sets both together for a direct publish, and POST /:id/send resolves
+  // them (for a maker-originated post that had neither at submission time) before
+  // ever calling this. This is just the type-narrowing guard for that invariant.
+  if (!post.socialAccountId || !post.platform || !post.socialAccount) {
+    return prisma.socialPost.update({
+      where: { id: post.id },
+      data: { status: 'failed', errorMessage: 'No social account is attached to this post yet.' },
+    });
+  }
 
   // Meta/Pinterest publish by handing the media URL to the *platform*, whose servers
   // then fetch it — a localhost URL can never work there. This has to be checked HERE
@@ -161,7 +216,7 @@ router.get('/platforms', authMiddleware, async (_req: AuthRequest, res: Response
 // ===== ACCOUNTS =====
 router.get('/accounts', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
-    const accounts = await prisma.socialAccount.findMany({ where: { userId: req.userId } });
+    const accounts = await prisma.socialAccount.findMany({ where: { userId: await accountOwnerScope(req.userId!) } });
     res.json(accounts.map(maskAccount));
   } catch (err) {
     console.error('[social/accounts] list failed', err);
@@ -172,7 +227,21 @@ router.get('/accounts', authMiddleware, async (req: AuthRequest, res: Response) 
 router.delete('/accounts/:id', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const account = await prisma.socialAccount.findUnique({ where: { id: req.params.id } });
-    if (!account || account.userId !== req.userId) return res.status(404).json({ error: 'Account not found' });
+    if (!account) return res.status(404).json({ error: 'Account not found' });
+    // The account's own connector can always disconnect it; otherwise it's only
+    // disconnectable by an approver-tier teammate on the SAME team as whoever
+    // connected it (mirrors accountOwnerScope's sharing model) — a maker, or an
+    // approver on a different team, still gets a 404.
+    if (account.userId !== req.userId) {
+      const [ownerMembership, callerMembership] = await Promise.all([
+        getMembership(account.userId),
+        getMembership(req.userId!),
+      ]);
+      const authorized = !!ownerMembership && !!callerMembership
+        && ownerMembership.teamId === callerMembership.teamId
+        && APPROVER_ROLES.includes(callerMembership.role);
+      if (!authorized) return res.status(404).json({ error: 'Account not found' });
+    }
     await prisma.socialAccount.delete({ where: { id: req.params.id } });
     res.json({ success: true });
   } catch (err) {
@@ -190,6 +259,10 @@ router.get('/connect/:platform', authMiddleware, async (req: AuthRequest, res: R
   if (!adapter) return res.status(404).json({ error: 'Unknown platform' });
   if (!adapter.isConfigured()) {
     return res.status(400).json({ error: `${req.params.platform} isn't configured yet — add API credentials to enable it.` });
+  }
+  const membership = await getMembership(req.userId!);
+  if (membership && !APPROVER_ROLES.includes(membership.role)) {
+    return res.status(403).json({ error: 'Only a team editor or approver can connect social accounts' });
   }
   try {
     const state = signState(req.userId!, req.params.platform);
@@ -265,6 +338,13 @@ router.post('/pending/:pendingId/select', authMiddleware, async (req: AuthReques
   sweepExpiredPending();
   const entry = pendingSelections.get(req.params.pendingId);
   if (!entry || entry.userId !== req.userId) return res.status(404).json({ error: 'Nothing pending — it may have expired, try connecting again' });
+  // Defense in depth — a maker can never reach a real pending entry via the normal
+  // flow since /connect already blocks them, but re-check here too rather than
+  // trusting that alone.
+  const membership = await getMembership(req.userId!);
+  if (membership && !APPROVER_ROLES.includes(membership.role)) {
+    return res.status(403).json({ error: 'Only a team editor or approver can connect social accounts' });
+  }
   const { platformUserIds } = req.body as { platformUserIds: string[] };
   if (!Array.isArray(platformUserIds) || platformUserIds.length === 0) {
     return res.status(400).json({ error: 'Pick at least one account to connect' });
@@ -302,8 +382,58 @@ router.post('/posts', authMiddleware, async (req: AuthRequest, res: Response) =>
       typeof u === 'string' && u.startsWith('/') ? `${PUBLIC_ORIGIN}${u}` : u
     );
 
+    // A maker submitting for approval doesn't pick a platform/account at all — that
+    // choice is deferred to whichever editor/approver eventually publishes it (see
+    // POST /:id/send). Everyone else (no team, or approver-tier) still has to name
+    // an account up front since they're publishing/scheduling for real right now.
+    const membership = await getMembership(req.userId!);
+    const isMaker = !!membership && !APPROVER_ROLES.includes(membership.role);
+
+    if (!socialAccountId) {
+      if (!isMaker) return res.status(400).json({ error: 'Choose a social account to publish to' });
+      if (action === 'schedule') {
+        return res.status(400).json({ error: 'Scheduling isn\'t available yet — an editor or approver picks the account (and can schedule) once they publish' });
+      }
+
+      const post = await prisma.socialPost.create({
+        data: {
+          userId: req.userId!,
+          projectId: projectId || null,
+          socialAccountId: null,
+          platform: null,
+          status: 'pending_approval',
+          mediaType,
+          mediaUrls,
+          caption,
+          hashtags,
+          altText,
+          firstComment,
+          linkUrl,
+          teamId: membership!.teamId,
+          submittedById: req.userId!,
+        },
+      });
+
+      const approvers = await prisma.teamMember.findMany({
+        where: { teamId: membership!.teamId, role: { in: APPROVER_ROLES } },
+        select: { userId: true },
+      });
+      const author = await prisma.user.findUnique({ where: { id: req.userId! }, select: { name: true, email: true } });
+      const who = author?.name || author?.email || 'A team member';
+      await prisma.notification.createMany({
+        data: approvers
+          .filter((a) => a.userId !== req.userId)
+          .map((a) => ({ userId: a.userId, type: 'social_approval_request', message: `${who} submitted a design for your approval` })),
+      }).catch((e) => console.error('[social/posts] failed to notify approvers', e));
+      const io = req.app.get('io');
+      approvers
+        .filter((a) => a.userId !== req.userId)
+        .forEach((a) => io?.to(`user:${a.userId}`).emit('social:pending-changed'));
+      return res.json(post);
+    }
+
     const account = await prisma.socialAccount.findUnique({ where: { id: socialAccountId } });
-    if (!account || account.userId !== req.userId) return res.status(404).json({ error: 'Social account not found' });
+    if (!account || !(await canUseAccount(req.userId!, account))) return res.status(404).json({ error: 'Social account not found' });
 
     const adapter = getAdapter(account.platform);
     if (!adapter || !adapter.isConfigured()) {
@@ -321,16 +451,10 @@ router.post('/posts', authMiddleware, async (req: AuthRequest, res: Response) =>
       return res.status(400).json({ error: `Caption exceeds ${spec.label}'s ${spec.maxCaptionLength} character limit` });
     }
 
-    // Maker/approver gate: a team member who is NOT an approver is a maker, so any
-    // post they'd send to a platform (now or scheduled) is held for review instead.
-    // Drafts are never gated, and users outside a team publish directly as before.
-    const membership = await getMembership(req.userId!);
-    const isMaker = !!membership && !APPROVER_ROLES.includes(membership.role);
-    const needsApproval = isMaker && (action === 'now' || action === 'schedule');
-
-    const status = needsApproval
-      ? 'pending_approval'
-      : action === 'draft' ? 'draft' : action === 'schedule' ? 'scheduled' : 'publishing';
+    // Reaching this point means an account was supplied, which the branch above
+    // only allows for a non-maker caller — so this always publishes/schedules/drafts
+    // directly, never goes through approval.
+    const status = action === 'draft' ? 'draft' : action === 'schedule' ? 'scheduled' : 'publishing';
 
     const post = await prisma.socialPost.create({
       data: {
@@ -346,32 +470,9 @@ router.post('/posts', authMiddleware, async (req: AuthRequest, res: Response) =>
         altText,
         firstComment,
         linkUrl,
-        // Keep the requested schedule time through the approval hold — on approval a
-        // future time routes back to the scheduler, a past/absent time publishes now.
         scheduledFor: action === 'schedule' && scheduledFor ? new Date(scheduledFor) : null,
-        ...(needsApproval ? { teamId: membership!.teamId, submittedById: req.userId! } : {}),
       },
     });
-
-    if (needsApproval) {
-      // Notify every approver on the team that a post is waiting for review.
-      const approvers = await prisma.teamMember.findMany({
-        where: { teamId: membership!.teamId, role: { in: APPROVER_ROLES } },
-        select: { userId: true },
-      });
-      const author = await prisma.user.findUnique({ where: { id: req.userId! }, select: { name: true, email: true } });
-      const who = author?.name || author?.email || 'A team member';
-      await prisma.notification.createMany({
-        data: approvers
-          .filter((a) => a.userId !== req.userId)
-          .map((a) => ({ userId: a.userId, type: 'social_approval_request', message: `${who} submitted a ${account.platform} post for your approval` })),
-      }).catch((e) => console.error('[social/posts] failed to notify approvers', e));
-      const io = req.app.get('io');
-      approvers
-        .filter((a) => a.userId !== req.userId)
-        .forEach((a) => io?.to(`user:${a.userId}`).emit('social:pending-changed'));
-      return res.json(post);
-    }
 
     if (action === 'now') {
       try {
@@ -424,13 +525,16 @@ router.get('/approval-context', authMiddleware, async (req: AuthRequest, res: Re
   }
 });
 
-// The approver's queue: everything awaiting review on the teams they can approve for.
+// The approver's queue: everything awaiting review OR already approved and waiting
+// to be sent (the send step moved to the approver tier — see POST /:id/send) on the
+// teams they can approve for. The frontend splits this one list into two sections by
+// `status`.
 router.get('/posts/pending-approval', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const membership = await getMembership(req.userId!);
     if (!membership || !APPROVER_ROLES.includes(membership.role)) return res.json([]);
     const posts = await prisma.socialPost.findMany({
-      where: { teamId: membership.teamId, status: 'pending_approval' },
+      where: { teamId: membership.teamId, status: { in: ['pending_approval', 'approved'] } },
       include: {
         socialAccount: { select: { platform: true, platformUsername: true } },
         user: { select: { name: true, email: true } },
@@ -464,9 +568,9 @@ router.post('/posts/:id/approve', authMiddleware, async (req: AuthRequest, res: 
 
     // A future scheduled time still goes straight back to the scheduler — nobody's
     // expected to be at their desk to hand-fire a 3am post, so approval there is
-    // sufficient on its own. For a "now" post, approval only clears it; the maker who
-    // submitted it makes the actual publish happen themselves via POST /:id/send,
-    // rather than it firing the instant an approver clicks Approve.
+    // sufficient on its own. For a "now" post, approval only clears it; an
+    // editor/approver on the team makes the actual publish happen via POST
+    // /:id/send, rather than it firing the instant Approve is clicked.
     const future = post.scheduledFor && post.scheduledFor.getTime() > Date.now();
     const result = await prisma.socialPost.update({
       where: { id: post.id },
@@ -479,8 +583,8 @@ router.post('/posts/:id/approve', authMiddleware, async (req: AuthRequest, res: 
           userId: post.submittedById,
           type: 'social_approval_decision',
           message: future
-            ? `Your ${post.platform} post was approved and scheduled`
-            : `Your ${post.platform} post was approved — you can now send it to ${post.platform}`,
+            ? `Your ${post.platform || 'design'} post was approved and scheduled`
+            : `Your design was approved — an editor or approver on your team will publish it`,
         },
       }).catch((e) => console.error('[social/approve] notify failed', e));
     }
@@ -492,22 +596,55 @@ router.post('/posts/:id/approve', authMiddleware, async (req: AuthRequest, res: 
   }
 });
 
-// The maker's own action, once their post has been approved: actually publish it.
-// Kept separate from /approve so an approver clicking Approve never itself fires the
-// platform call — the submitter decides when it actually goes out.
+// An approver-tier team member's action, once a maker's post has been approved:
+// actually publish it. Kept separate from /approve so an approver clicking Approve
+// never itself fires the platform call — a deliberate second, explicit step. This
+// used to be the submitting maker's own action; it moved to the approver tier
+// alongside restricting social-account connecting to editors/approvers (the account
+// being published through is now theirs, not the maker's).
 router.post('/posts/:id/send', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const post = await prisma.socialPost.findUnique({ where: { id: req.params.id } });
     if (!post) return res.status(404).json({ error: 'Post not found' });
-    if (post.submittedById !== req.userId! && post.userId !== req.userId!) {
-      return res.status(403).json({ error: 'Only the person who submitted this post can send it' });
+    const membership = await getMembership(req.userId!);
+    const authorized = !!membership && APPROVER_ROLES.includes(membership.role) && post.teamId === membership.teamId;
+    if (!authorized) {
+      return res.status(403).json({ error: 'Only a team editor or approver can send this post' });
     }
     if (post.status !== 'approved') {
       return res.status(409).json({ error: 'This post is not approved and ready to send' });
     }
 
+    // A maker never chose a platform/account — this is the first point one gets
+    // attached to the post, by whichever editor/approver is sending it now.
+    let targetPostId = post.id;
+    if (!post.socialAccountId) {
+      const { socialAccountId } = req.body as { socialAccountId?: string };
+      if (!socialAccountId) return res.status(400).json({ error: 'Choose which connected account to publish to' });
+      const account = await prisma.socialAccount.findUnique({ where: { id: socialAccountId } });
+      if (!account || !(await canUseAccount(req.userId!, account))) return res.status(404).json({ error: 'Social account not found' });
+
+      const adapter = getAdapter(account.platform);
+      if (!adapter || !adapter.isConfigured()) {
+        return res.status(400).json({ error: `${account.platform} isn't configured yet — add API credentials to enable it.` });
+      }
+      const spec = PLATFORM_SPECS[account.platform];
+      if (spec && !spec.mediaTypes.includes(post.mediaType as any)) {
+        return res.status(400).json({ error: `${spec.label} doesn't support ${post.mediaType} posts` });
+      }
+      if (spec && post.caption && post.caption.length > spec.maxCaptionLength) {
+        return res.status(400).json({ error: `Caption exceeds ${spec.label}'s ${spec.maxCaptionLength} character limit` });
+      }
+
+      const updated = await prisma.socialPost.update({
+        where: { id: post.id },
+        data: { socialAccountId, platform: account.platform },
+      });
+      targetPostId = updated.id;
+    }
+
     try {
-      const result = await executePublish(post.id);
+      const result = await executePublish(targetPostId);
       res.json(result);
     } catch (err: any) {
       // executePublish already marked the post failed — surface why but still 200
@@ -623,6 +760,12 @@ router.get('/posts/:id/analytics', authMiddleware, async (req: AuthRequest, res:
     if (!post || post.userId !== req.userId) return res.status(404).json({ error: 'Post not found' });
     if (post.status !== 'published' || !post.platformPostId) {
       return res.status(400).json({ error: 'Analytics are only available for published posts' });
+    }
+    // A published post always has a platform/account attached (executePublish only
+    // sets status: 'published' after a real publish, which requires both) — this is
+    // just the type-narrowing guard for that invariant.
+    if (!post.platform || !post.socialAccount) {
+      return res.status(400).json({ error: 'No social account is attached to this post' });
     }
     const adapter = getAdapter(post.platform);
     if (!adapter || !adapter.isConfigured()) {

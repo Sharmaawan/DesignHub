@@ -28,14 +28,14 @@ const SHOW_DIRECTION_FOR: PageTransitionType[] = ['slide', 'wipe', 'pan'];
 export default function PageTransitions() {
   const {
     currentPageIndex,
-    pageTransitions,
     updatePageTransition,
+    pushHistory,
     pages,
   } = useEditorStore();
 
   const [applyToAll, setApplyToAll] = useState(false);
 
-  const currentTransition = pageTransitions[currentPageIndex] || {
+  const currentTransition = pages[currentPageIndex]?.transition || {
     type: 'none' as PageTransitionType,
     duration: 0.5,
     delay: 0,
@@ -50,11 +50,12 @@ export default function PageTransitions() {
         delay: currentTransition.delay,
         direction: currentTransition.direction,
       });
+      pushHistory();
       if (type !== 'none') {
         toast.success(`Transition: ${TRANSITION_OPTIONS.find((t) => t.type === type)?.label} applied to page ${currentPageIndex + 1}`);
       }
     },
-    [currentPageIndex, currentTransition, updatePageTransition]
+    [currentPageIndex, currentTransition, updatePageTransition, pushHistory]
   );
 
   const handleDurationChange = useCallback(
@@ -74,8 +75,9 @@ export default function PageTransitions() {
   const handleDirectionChange = useCallback(
     (direction: 'left' | 'right' | 'up' | 'down') => {
       updatePageTransition(currentPageIndex, { ...currentTransition, direction });
+      pushHistory();
     },
-    [currentPageIndex, currentTransition, updatePageTransition]
+    [currentPageIndex, currentTransition, updatePageTransition, pushHistory]
   );
 
   const handleApplyToAll = useCallback(() => {
@@ -84,9 +86,10 @@ export default function PageTransitions() {
         updatePageTransition(index, { ...currentTransition });
       }
     });
+    pushHistory();
     setApplyToAll(true);
     toast.success(`Transition applied to all ${pages.length} pages`);
-  }, [currentPageIndex, currentTransition, pages, updatePageTransition]);
+  }, [currentPageIndex, currentTransition, pages, updatePageTransition, pushHistory]);
 
   const handlePreview = useCallback(() => {
     const canvasEl = document.querySelector('.konvajs-content');

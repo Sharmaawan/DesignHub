@@ -1,7 +1,9 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { HiOutlineArrowLeft, HiOutlineCheck, HiOutlineStar, HiOutlineClock } from 'react-icons/hi';
 import toast from 'react-hot-toast';
+import DashboardSidebar from '../components/dashboard/DashboardSidebar';
 
 const plans = [
   {
@@ -61,6 +63,8 @@ const plans = [
 export default function SubscriptionBillingPage() {
   const navigate = useNavigate();
   const { user } = useAuthStore();
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('designhub-sidebar-collapsed') === 'true');
+  const [activeSection, setActiveSection] = useState('');
 
   const handleUpgrade = (planId: string) => {
     if (planId === 'free') return;
@@ -69,6 +73,8 @@ export default function SubscriptionBillingPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-[#0f0f23]">
+      <DashboardSidebar collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} activeSection={activeSection} onSectionChange={setActiveSection} />
+      <div className={`transition-all duration-300 ${sidebarCollapsed ? 'ml-[72px]' : 'ml-[240px]'}`}>
       <div className="max-w-4xl mx-auto px-6 py-10">
         {/* Header */}
         <div className="flex items-center gap-4 mb-8">
@@ -158,6 +164,7 @@ export default function SubscriptionBillingPage() {
             </div>
           </div>
         </div>
+      </div>
       </div>
     </div>
   );

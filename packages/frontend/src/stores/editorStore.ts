@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { CanvasElement, Page, Project, PageTransition, ElementAnimation, Track } from '../types';
+import { CanvasElement, Page, Project, PageTransition, ElementAnimation, Track, PageBackgroundImage } from '../types';
 import { generateId } from '../utils/cn';
 
 interface HistoryEntry {
@@ -36,15 +36,14 @@ interface EditorState {
   versionsOpen: boolean;
   viewportCenter: { x: number; y: number };
   layersOpen: boolean;
-  pageTransitions: PageTransition[];
-  elementAnimations: Record<string, ElementAnimation>;
   elementNames: Record<string, string>;
   activeTool: 'select' | 'pen' | 'highlighter' | 'eraser';
   drawColor: string;
   drawWidth: number;
 
-  // Video-timeline playback — ephemeral, not undo-tracked and not persisted, same
-  // treatment as pageTransitions'/elementAnimations' exclusion from history.
+  // Video-timeline playback — ephemeral, not undo-tracked and not persisted (unlike
+  // page transitions and element animations, which are real persisted Page/CanvasElement
+  // fields — see PageTransition/ElementAnimation in types/index.ts).
   isPlaying: boolean;
   playheadMs: number;
   playbackRate: number;
@@ -112,6 +111,10 @@ interface EditorState {
   setElementAnimation: (elementId: string, animation: ElementAnimation) => void;
   renameElement: (elementId: string, name: string) => void;
   setPageBackgroundColor: (pageIndex: number, color: string) => void;
+  // Removes the element and sets it as the page's background in one history step —
+  // see PageBackgroundImage for why this is a page property, not a CanvasElement.
+  setElementAsPageBackground: (elementId: string, backgroundImage: PageBackgroundImage) => void;
+  clearPageBackgroundImage: (pageIndex: number) => void;
 
   importDocumentPages: (defs: Array<{
     name: string;
@@ -137,6 +140,8 @@ interface EditorState {
   removeTrack: (trackId: string) => void;
   assignElementToTrack: (elementId: string, trackId: string, timelineStart: number, timelineEnd: number) => void;
   setPageDuration: (pageIndex: number, duration: number) => void;
+  splitClipAtTime: (elementId: string, atMs: number) => void;
+  duplicateClipOnTimeline: (elementId: string) => void;
 
   get currentPage(): Page | null;
   get selectedElements(): CanvasElement[];
@@ -181,8 +186,6 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   versionsOpen: false,
   viewportCenter: { x: 960, y: 540 },
   layersOpen: false,
-  pageTransitions: [{ type: 'none', duration: 0.5, delay: 0 }],
-  elementAnimations: {},
   elementNames: {},
   activeTool: 'select',
   drawColor: '#1E1E1E',
@@ -424,6 +427,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       strokeWidth: elementData.strokeWidth,
       shadow: elementData.shadow,
       zIndex: maxZ + 1,
+      // Callers that already know this element belongs on a timeline track (video
+      // auto-added to the timeline, see LeftSidebar.tsx's addVideoToCanvas) pass these
+      // through — previously silently dropped here, which was the root cause of newly
+      // added video never actually landing on a track despite the caller intending it to.
+      trackId: elementData.trackId,
+      timelineStart: elementData.timelineStart,
+      timelineEnd: elementData.timelineEnd,
       data: { ...(defaults[elementData.type] || {}), ...(elementData.data || {}) } as CanvasElement['data'],
     };
 
@@ -797,22 +807,102 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     get().pushHistory();
   },
 
+  // Cuts a clip into two independent clips at `atMs` — the original shrinks to end
+  // at the cut point, and a new clip picks up from there to the original's old end.
+  // For video/audio, each half's own media-trim (data.startTime/endTime) is adjusted
+  // so playback content stays continuous across the cut — the viewer should never be
+  // able to tell a split happened just from watching it play.
+  splitClipAtTime: (elementId, atMs) => {
+    const { pages, currentPageIndex } = get();
+    const page = pages[currentPageIndex];
+    const clip = page.elements.find((e) => e.id === elementId);
+    if (!clip || !clip.trackId) return;
+    const start = clip.timelineStart ?? 0;
+    const end = clip.timelineEnd ?? 0;
+    // Splitting only makes sense strictly inside the clip — at or past either edge
+    // there's nothing to cut.
+    if (atMs <= start + 50 || atMs >= end - 50) return;
+
+    const hasMediaTrim = clip.type === 'video' || clip.type === 'audio';
+    const mediaStart = hasMediaTrim ? ((clip.data as any).startTime || 0) : 0;
+    const splitMediaOffset = (atMs - start) / 1000;
+
+    const maxZ = Math.max(...page.elements.map((e) => e.zIndex));
+    const secondHalf: CanvasElement = {
+      ...JSON.parse(JSON.stringify(clip)),
+      id: generateId(),
+      zIndex: maxZ + 1,
+      timelineStart: atMs,
+      timelineEnd: end,
+      data: hasMediaTrim ? { ...clip.data, startTime: mediaStart + splitMediaOffset } : clip.data,
+    };
+
+    const newPages = [...pages];
+    newPages[currentPageIndex] = {
+      ...page,
+      elements: page.elements.map((e) => e.id === elementId
+        ? { ...e, timelineEnd: atMs, data: hasMediaTrim ? { ...e.data, endTime: mediaStart + splitMediaOffset } as any : e.data }
+        : e
+      ).concat(secondHalf),
+    };
+    set({ pages: newPages, selectedElementIds: [secondHalf.id] });
+    get().pushHistory();
+  },
+
+  // Timeline-aware duplicate — unlike the generic duplicateElements (which stacks the
+  // copy directly on top at the same timelineStart/End, invisible until dragged away),
+  // this places the copy immediately after the original on the same track, clamped to
+  // whatever room is actually free before the next clip or the scene's own end.
+  duplicateClipOnTimeline: (elementId) => {
+    const { pages, currentPageIndex } = get();
+    const page = pages[currentPageIndex];
+    const clip = page.elements.find((e) => e.id === elementId);
+    if (!clip || !clip.trackId) return;
+    const start = clip.timelineStart ?? 0;
+    const end = clip.timelineEnd ?? 0;
+    const clipLen = end - start;
+
+    const trackClips = page.elements.filter((e) => e.trackId === clip.trackId && e.id !== elementId);
+    const nextClipStart = trackClips
+      .map((c) => c.timelineStart ?? 0)
+      .filter((s) => s >= end)
+      .reduce((min, s) => Math.min(min, s), page.duration || Infinity);
+    const availableLen = Math.min(clipLen, nextClipStart - end);
+    if (availableLen < 200) return; // no meaningful room right after this clip
+
+    const maxZ = Math.max(...page.elements.map((e) => e.zIndex));
+    const duplicate: CanvasElement = {
+      ...JSON.parse(JSON.stringify(clip)),
+      id: generateId(),
+      zIndex: maxZ + 1,
+      name: `${clip.name} (Copy)`,
+      timelineStart: end,
+      timelineEnd: end + availableLen,
+    };
+    const newPages = [...pages];
+    newPages[currentPageIndex] = { ...page, elements: [...page.elements, duplicate] };
+    set({ pages: newPages, selectedElementIds: [duplicate.id] });
+    get().pushHistory();
+  },
+
   setLayersOpen: (open) => set({ layersOpen: open }),
 
   updatePageTransition: (pageIndex, transition) => {
-    const { pageTransitions } = get();
-    const newTransitions = [...pageTransitions];
-    while (newTransitions.length <= pageIndex) {
-      newTransitions.push({ type: 'none', duration: 0.5, delay: 0 });
-    }
-    newTransitions[pageIndex] = transition;
-    set({ pageTransitions: newTransitions });
+    const { pages } = get();
+    const newPages = [...pages];
+    newPages[pageIndex] = { ...newPages[pageIndex], transition };
+    set({ pages: newPages });
   },
 
   setElementAnimation: (elementId, animation) => {
-    set((state) => ({
-      elementAnimations: { ...state.elementAnimations, [elementId]: animation },
-    }));
+    const { pages, currentPageIndex } = get();
+    const page = pages[currentPageIndex];
+    const newPages = [...pages];
+    newPages[currentPageIndex] = {
+      ...page,
+      elements: page.elements.map((el) => (el.id === elementId ? { ...el, animation } : el)),
+    };
+    set({ pages: newPages });
   },
 
   renameElement: (elementId, name) => {
@@ -824,8 +914,39 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setPageBackgroundColor: (pageIndex, color) => {
     const { pages } = get();
     const newPages = [...pages];
-    newPages[pageIndex] = { ...newPages[pageIndex], backgroundColor: color };
+    // A page-level background image, when present, is opaque and fully covers the
+    // page (see PageBackgroundImage), so it always visually hides backgroundColor
+    // underneath — picking a new color/gradient here has to replace it, or the
+    // picker would look completely broken (color "applies" but nothing changes).
+    // Matches real Canva: choosing a background color clears any background photo.
+    newPages[pageIndex] = { ...newPages[pageIndex], backgroundColor: color, backgroundImage: undefined };
     set({ pages: newPages });
+  },
+
+  setElementAsPageBackground: (elementId, backgroundImage) => {
+    const { pages, currentPageIndex, selectedElementIds } = get();
+    const page = pages[currentPageIndex];
+    const newPages = [...pages];
+    // One atomic update — removing the element AND setting the background together —
+    // so undo reverses both in a single step instead of leaving a half-converted state.
+    newPages[currentPageIndex] = {
+      ...page,
+      backgroundImage,
+      elements: page.elements.filter((el) => el.id !== elementId),
+    };
+    set({
+      pages: newPages,
+      selectedElementIds: selectedElementIds.filter((id) => id !== elementId),
+    });
+    get().pushHistory();
+  },
+
+  clearPageBackgroundImage: (pageIndex) => {
+    const { pages } = get();
+    const newPages = [...pages];
+    newPages[pageIndex] = { ...newPages[pageIndex], backgroundImage: undefined };
+    set({ pages: newPages });
+    get().pushHistory();
   },
 
   importDocumentPages: (defs) => {

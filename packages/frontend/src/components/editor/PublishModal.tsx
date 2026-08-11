@@ -3,6 +3,7 @@ import { HiOutlineX, HiOutlineCheck, HiOutlineExclamation, HiOutlineLink, HiOutl
 import { useEditorStore } from '../../stores/editorStore';
 import { useSocialStore, SocialAccount } from '../../stores/socialStore';
 import { uploadAPI, BACKEND_ORIGIN as BACKEND } from '../../utils/api';
+import { capturePageAsDataUrl } from '../../lib/pageSnapshot';
 import toast from 'react-hot-toast';
 
 interface PublishModalProps {
@@ -44,6 +45,11 @@ export default function PublishModal({ open, onClose, initialAccountId, projectI
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [mediaType, setMediaType] = useState<'image' | 'video' | 'carousel' | 'story'>('image');
+  // Which pages make up the carousel — Instagram (and most platforms) require 2-10
+  // items. Defaults to every page up to that cap, since "the whole multi-page design
+  // is the carousel" is what a maker almost always means by picking this format.
+  const [carouselPages, setCarouselPages] = useState<number[]>([]);
+  const MAX_CAROUSEL_ITEMS = 10;
   const [caption, setCaption] = useState('');
   const [hashtagsInput, setHashtagsInput] = useState('');
   const [altText, setAltText] = useState('');
@@ -55,7 +61,9 @@ export default function PublishModal({ open, onClose, initialAccountId, projectI
   const [result, setResult] = useState<'published' | 'scheduled' | 'draft' | 'failed' | 'pending_approval' | null>(null);
 
   // A maker's post is held for an approver instead of going straight out, so the
-  // primary button and success copy change wording for them.
+  // primary button and success copy change wording for them. A maker also never
+  // picks a platform/account at all — that's deferred to whichever editor/approver
+  // eventually publishes it — so their flow skips step 1 entirely.
   const isMaker = !!approvalContext?.isMaker;
   // The platform's own reason for rejecting the post. Without this the modal showed
   // a fixed "check the platform is connected" line for every failure, which hid the
@@ -77,8 +85,13 @@ export default function PublishModal({ open, onClose, initialAccountId, projectI
       setAltText(rejectedPost.altText || '');
       setFirstComment(rejectedPost.firstComment || '');
       setLinkUrl(rejectedPost.linkUrl || '');
+      // The rejected post only stored already-uploaded image URLs, not which page
+      // indexes produced them, so there's no way to restore the original selection —
+      // default to every page (same as picking Carousel fresh) rather than leaving
+      // it empty and the resubmit button stuck disabled for no visible reason.
+      if (rejectedPost.mediaType === 'carousel') setCarouselPages(pages.slice(0, MAX_CAROUSEL_ITEMS).map((_, i) => i));
     } else {
-      setStep(initialAccountId ? 2 : 1);
+      setStep(initialAccountId ? 2 : isMaker ? 2 : 1);
       setSelectedAccountId(initialAccountId || null);
     }
     setResult(null);
@@ -86,16 +99,7 @@ export default function PublishModal({ open, onClose, initialAccountId, projectI
     loadPlatforms();
     loadAccounts();
     loadApprovalContext();
-  }, [open, initialAccountId, rejectedPost?.id]);
-
-  // The rejected post only stores a socialAccountId, not the account object itself —
-  // resolve it once the accounts list has actually loaded in.
-  useEffect(() => {
-    if (open && rejectedPost && accounts.length > 0 && !selectedAccountId) {
-      const acc = accounts.find((a) => a.platform === rejectedPost.platform);
-      if (acc) setSelectedAccountId(acc.id);
-    }
-  }, [open, rejectedPost, accounts, selectedAccountId]);
+  }, [open, initialAccountId, rejectedPost?.id, isMaker]);
 
   if (!open) return null;
 
@@ -124,10 +128,28 @@ export default function PublishModal({ open, onClose, initialAccountId, projectI
     }
   };
 
+  const handleSetMediaType = (mt: 'image' | 'video' | 'carousel' | 'story') => {
+    setMediaType(mt);
+    if (mt === 'carousel' && carouselPages.length === 0) {
+      setCarouselPages(pages.slice(0, MAX_CAROUSEL_ITEMS).map((_, i) => i));
+    }
+  };
+
+  const toggleCarouselPage = (index: number) => {
+    setCarouselPages((prev) => {
+      if (prev.includes(index)) return prev.filter((i) => i !== index);
+      if (prev.length >= MAX_CAROUSEL_ITEMS) {
+        toast.error(`Carousels support up to ${MAX_CAROUSEL_ITEMS} images`);
+        return prev;
+      }
+      return [...prev, index].sort((a, b) => a - b);
+    });
+  };
+
   const handleSelectAccount = (a: SocialAccount) => {
     setSelectedAccountId(a.id);
     const spec = platforms.find((pc) => pc.platform === a.platform)?.spec;
-    if (spec && !spec.mediaTypes.includes(mediaType)) setMediaType(spec.mediaTypes[0]);
+    if (spec && !spec.mediaTypes.includes(mediaType)) handleSetMediaType(spec.mediaTypes[0] as any);
   };
 
   const dimensionWarning = (() => {
@@ -139,23 +161,35 @@ export default function PublishModal({ open, onClose, initialAccountId, projectI
   })();
 
   const handleSubmit = async () => {
-    if (!account) return;
+    if (!account && !isMaker) return;
+    if (mediaType === 'carousel' && carouselPages.length < 2) {
+      toast.error('Select at least 2 images for a carousel');
+      return;
+    }
     setSubmitting(true);
     setFailureReason('');
     try {
-      const canvas = document.querySelector('canvas');
-      if (!canvas) throw new Error('Could not find the design canvas to export');
-      const dataUrl = canvas.toDataURL('image/png');
-      const file = dataUrlToFile(dataUrl, `publish-${Date.now()}.png`);
-      const { data: uploaded } = await uploadAPI.upload(file);
-      const mediaUrl = `${BACKEND}${uploaded.url}`;
+      // A carousel needs one real image PER selected page/slide, captured off-screen
+      // (not just whichever page happens to be on screen) so it actually posts as a
+      // genuine multi-image carousel instead of silently collapsing to a single image.
+      const pageIndexesToCapture = mediaType === 'carousel' ? carouselPages : [currentPageIndex];
+      const mediaUrls: string[] = [];
+      for (const pageIndex of pageIndexesToCapture) {
+        const targetPage = pages[pageIndex];
+        if (!targetPage) continue;
+        const dataUrl = await capturePageAsDataUrl(targetPage, { format: 'png' });
+        const file = dataUrlToFile(dataUrl, `publish-${Date.now()}-${pageIndex}.png`);
+        const { data: uploaded } = await uploadAPI.upload(file);
+        mediaUrls.push(`${BACKEND}${uploaded.url}`);
+      }
+      if (mediaUrls.length === 0) throw new Error('Could not find the design canvas to export');
 
       const hashtags = hashtagsInput.split(/[\s,]+/).map((h) => h.replace(/^#/, '').trim()).filter(Boolean);
 
       const post = rejectedPost
         ? await updatePost(rejectedPost.id, {
             mediaType,
-            mediaUrls: [mediaUrl],
+            mediaUrls,
             caption: caption || undefined,
             hashtags: hashtags.length ? hashtags : undefined,
             altText: altText || undefined,
@@ -163,11 +197,11 @@ export default function PublishModal({ open, onClose, initialAccountId, projectI
             linkUrl: linkUrl || undefined,
           })
         : await createPost({
-            socialAccountId: account.id,
+            socialAccountId: account?.id,
             projectId,
             action,
             mediaType,
-            mediaUrls: [mediaUrl],
+            mediaUrls,
             caption: caption || undefined,
             hashtags: hashtags.length ? hashtags : undefined,
             altText: altText || undefined,
@@ -230,7 +264,7 @@ export default function PublishModal({ open, onClose, initialAccountId, projectI
         {!rejectedPost && isMaker && result === null && (
           <div className="px-5 pt-4 -mb-1">
             <p className="text-xs text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/20 rounded-lg px-3 py-2">
-              This won't go live yet — it's sent to an approver first. Once approved, come back here to actually publish it.
+              This won't go live yet — it's sent to an approver first. Once approved, an editor or approver on your team will publish it.
             </p>
           </div>
         )}
@@ -255,15 +289,26 @@ export default function PublishModal({ open, onClose, initialAccountId, projectI
                         <div className="space-y-1.5 mb-1.5">
                           {platformAccounts.map((a) => {
                             const expired = !!a.tokenExpiresAt && new Date(a.tokenExpiresAt) < new Date();
+                            // A maker can select but never reconnect/manage a team
+                            // account — connecting is restricted to editors/approvers
+                            // (see PublishModal's own account list, now team-sourced
+                            // by the backend for makers).
                             return expired ? (
-                              <button
-                                key={a.id}
-                                onClick={() => handleConnect(p.platform)}
-                                className="w-full flex items-center justify-between px-3 py-2 rounded-xl border-2 border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-900/10 text-left"
-                              >
-                                <span className="text-sm text-amber-700 dark:text-amber-400">@{a.platformUsername}</span>
-                                <span className="text-[10px] font-medium text-amber-700 dark:text-amber-400">Expired — Reconnect</span>
-                              </button>
+                              isMaker ? (
+                                <div key={a.id} className="w-full flex items-center justify-between px-3 py-2 rounded-xl border-2 border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-900/10">
+                                  <span className="text-sm text-amber-700 dark:text-amber-400">@{a.platformUsername}</span>
+                                  <span className="text-[10px] font-medium text-amber-700 dark:text-amber-400">Expired — ask an editor to reconnect</span>
+                                </div>
+                              ) : (
+                                <button
+                                  key={a.id}
+                                  onClick={() => handleConnect(p.platform)}
+                                  className="w-full flex items-center justify-between px-3 py-2 rounded-xl border-2 border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-900/10 text-left"
+                                >
+                                  <span className="text-sm text-amber-700 dark:text-amber-400">@{a.platformUsername}</span>
+                                  <span className="text-[10px] font-medium text-amber-700 dark:text-amber-400">Expired — Reconnect</span>
+                                </button>
+                              )
                             ) : (
                               <button
                                 key={a.id}
@@ -282,13 +327,19 @@ export default function PublishModal({ open, onClose, initialAccountId, projectI
                           })}
                         </div>
                       )}
-                      <button
-                        disabled={!p.configured}
-                        onClick={() => handleConnect(p.platform)}
-                        className="text-[11px] text-canva-purple hover:underline disabled:no-underline disabled:cursor-not-allowed flex items-center gap-1"
-                      >
-                        <HiOutlinePlus size={12} /> {platformAccounts.length > 0 ? 'Connect another account' : 'Connect account'}
-                      </button>
+                      {isMaker ? (
+                        platformAccounts.length === 0 && p.configured && (
+                          <p className="text-[11px] text-gray-400">Ask an editor or approver on your team to connect this account first.</p>
+                        )
+                      ) : (
+                        <button
+                          disabled={!p.configured}
+                          onClick={() => handleConnect(p.platform)}
+                          className="text-[11px] text-canva-purple hover:underline disabled:no-underline disabled:cursor-not-allowed flex items-center gap-1"
+                        >
+                          <HiOutlinePlus size={12} /> {platformAccounts.length > 0 ? 'Connect another account' : 'Connect account'}
+                        </button>
+                      )}
                     </div>
                   );
                 })}
@@ -297,7 +348,7 @@ export default function PublishModal({ open, onClose, initialAccountId, projectI
           )}
 
           {/* STEP 2: composer */}
-          {step === 2 && platformConfig && (
+          {step === 2 && (platformConfig || isMaker) && (
             <div className="space-y-4">
               {dimensionWarning && (
                 <div className="flex items-start gap-2 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-xl text-amber-700 dark:text-amber-400 text-xs">
@@ -309,8 +360,8 @@ export default function PublishModal({ open, onClose, initialAccountId, projectI
               <div>
                 <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 block mb-2">Format</label>
                 <div className="flex gap-2 flex-wrap">
-                  {platformConfig.spec.mediaTypes.map((mt) => (
-                    <button key={mt} onClick={() => setMediaType(mt)}
+                  {(platformConfig ? platformConfig.spec.mediaTypes : (['image', 'video', 'carousel', 'story'] as const)).map((mt) => (
+                    <button key={mt} onClick={() => handleSetMediaType(mt)}
                       className={`px-3 py-1.5 rounded-lg text-xs font-medium border-2 capitalize transition-all ${
                         mediaType === mt ? 'border-canva-purple bg-canva-purple/5 text-canva-purple' : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400'
                       }`}>
@@ -320,13 +371,53 @@ export default function PublishModal({ open, onClose, initialAccountId, projectI
                 </div>
               </div>
 
+              {mediaType === 'carousel' && (
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+                      Carousel images ({carouselPages.length}/{MAX_CAROUSEL_ITEMS})
+                    </label>
+                    {pages.length < 2 && (
+                      <span className="text-[11px] text-amber-600 dark:text-amber-400">Add more pages to build a carousel</span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-5 gap-1.5">
+                    {pages.map((p, index) => (
+                      <button
+                        key={p.id}
+                        onClick={() => toggleCarouselPage(index)}
+                        className={`relative aspect-square rounded-lg border-2 overflow-hidden flex items-center justify-center text-[10px] font-medium transition-all ${
+                          carouselPages.includes(index)
+                            ? 'border-canva-purple ring-1 ring-canva-purple/40'
+                            : 'border-gray-200 dark:border-gray-700 opacity-60 hover:opacity-100'
+                        }`}
+                        style={{ backgroundColor: p.backgroundColor }}
+                        title={`Page ${index + 1}`}
+                      >
+                        {carouselPages.includes(index) && (
+                          <span className="absolute top-0.5 right-0.5 w-3.5 h-3.5 rounded-full bg-canva-purple text-white flex items-center justify-center text-[8px] font-bold">
+                            {carouselPages.indexOf(index) + 1}
+                          </span>
+                        )}
+                        <span className="text-gray-500">{index + 1}</span>
+                      </button>
+                    ))}
+                  </div>
+                  {carouselPages.length < 2 && (
+                    <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1.5">Select at least 2 images for a carousel.</p>
+                  )}
+                </div>
+              )}
+
               <div>
                 <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 block mb-1">Caption</label>
                 <textarea value={caption} onChange={(e) => setCaption(e.target.value)} rows={3}
-                  maxLength={platformConfig.spec.maxCaptionLength}
+                  maxLength={platformConfig?.spec.maxCaptionLength}
                   placeholder="Write a caption..."
                   className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-700 rounded-lg resize-none bg-white dark:bg-gray-900 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-canva-purple/30" />
-                <div className="text-[10px] text-gray-400 text-right mt-0.5">{caption.length} / {platformConfig.spec.maxCaptionLength}</div>
+                <div className="text-[10px] text-gray-400 text-right mt-0.5">
+                  {platformConfig ? `${caption.length} / ${platformConfig.spec.maxCaptionLength}` : `${caption.length} characters`}
+                </div>
               </div>
 
               <div>
@@ -356,14 +447,14 @@ export default function PublishModal({ open, onClose, initialAccountId, projectI
           )}
 
           {/* STEP 3: schedule + confirm */}
-          {step === 3 && platformConfig && (
+          {step === 3 && (platformConfig || isMaker) && (
             <div className="space-y-4">
               <div>
                 <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 block mb-2">When?</label>
-                <div className="grid grid-cols-3 gap-2">
+                <div className={`grid gap-2 ${isMaker ? 'grid-cols-2' : 'grid-cols-3'}`}>
                   {([
-                    { id: 'now', label: 'Post now' },
-                    { id: 'schedule', label: 'Schedule' },
+                    { id: 'now', label: isMaker ? 'Submit now' : 'Post now' },
+                    ...(isMaker ? [] : [{ id: 'schedule', label: 'Schedule' }] as const),
                     { id: 'draft', label: 'Save as draft' },
                   ] as const).map((a) => (
                     <button key={a.id} onClick={() => setAction(a.id)}
@@ -399,7 +490,7 @@ export default function PublishModal({ open, onClose, initialAccountId, projectI
                   <span className="min-w-0 break-words">
                     {result === 'published' && 'Published successfully!'}
                     {result === 'scheduled' && 'Scheduled — it will publish automatically at the chosen time.'}
-                    {result === 'pending_approval' && "Sent to your team's approver. Once approved, you'll be able to send it yourself from Social Publishing > History."}
+                    {result === 'pending_approval' && "Sent to your team's approver. Once approved, an editor or approver on your team will publish it."}
                     {result === 'draft' && 'Saved as a draft. Find it in Social Publishing > History.'}
                     {result === 'failed' && (failureReason || "Couldn't publish — check the platform is connected and try again.")}
                   </span>
@@ -411,10 +502,10 @@ export default function PublishModal({ open, onClose, initialAccountId, projectI
 
         <div className="p-4 border-t border-gray-100 dark:border-gray-700 flex items-center justify-between">
           <button
-            onClick={() => (step === 1 ? onClose() : setStep((s) => (s - 1) as 1 | 2))}
+            onClick={() => (step === 1 || (step === 2 && isMaker) ? onClose() : setStep((s) => (s - 1) as 1 | 2))}
             className="btn-secondary text-sm"
           >
-            {step === 1 ? 'Cancel' : 'Back'}
+            {step === 1 || (step === 2 && isMaker) ? 'Cancel' : 'Back'}
           </button>
           {step < 3 ? (
             <button
@@ -427,7 +518,7 @@ export default function PublishModal({ open, onClose, initialAccountId, projectI
           ) : (
             <button
               onClick={handleSubmit}
-              disabled={submitting || (action === 'schedule' && !scheduledFor) || result !== null}
+              disabled={submitting || (action === 'schedule' && !scheduledFor) || result !== null || (mediaType === 'carousel' && carouselPages.length < 2)}
               className="btn-primary text-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {rejectedPost

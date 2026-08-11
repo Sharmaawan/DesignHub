@@ -27,7 +27,7 @@ export interface SocialPostAnalytics {
 
 export interface SocialPost {
   id: string;
-  platform: string;
+  platform: string | null;
   projectId: string | null;
   status: 'draft' | 'pending_approval' | 'approved' | 'rejected' | 'scheduled' | 'publishing' | 'published' | 'failed';
   mediaType: 'image' | 'video' | 'carousel' | 'story';
@@ -85,7 +85,7 @@ interface SocialState {
   loadPendingApproval: () => Promise<void>;
   approvePost: (id: string) => Promise<void>;
   rejectPost: (id: string, reason?: string) => Promise<void>;
-  sendPost: (id: string) => Promise<SocialPost>;
+  sendPost: (id: string, socialAccountId?: string) => Promise<SocialPost>;
 }
 
 export const useSocialStore = create<SocialState>((set, get) => ({
@@ -220,7 +220,12 @@ export const useSocialStore = create<SocialState>((set, get) => ({
   approvePost: async (id) => {
     try {
       await socialAPI.approvePost(id);
-      set((s) => ({ pendingApproval: s.pendingApproval.filter((p) => p.id !== id) }));
+      // A "now" post moves to 'approved' and needs to REAPPEAR (in the "ready to
+      // publish" section) rather than disappear — a future-scheduled one moves to
+      // 'scheduled' and genuinely leaves this list. Refetching (matching the
+      // backend's own pending_approval|approved filter) is simpler and less
+      // error-prone than replicating that branching client-side.
+      await get().loadPendingApproval();
       await get().loadPosts();
     } catch (err: any) {
       throw new Error(err.response?.data?.error || 'Failed to approve post');
@@ -236,13 +241,16 @@ export const useSocialStore = create<SocialState>((set, get) => ({
     }
   },
 
-  // The maker's own action once their post shows status 'approved' — actually sends
-  // it to the platform. Separate from approvePost, which an approver calls and which
-  // no longer publishes anything itself.
-  sendPost: async (id) => {
+  // An editor/approver's action once a post shows status 'approved' — actually sends
+  // it to the platform. Separate from approvePost, which only clears the review step
+  // and never itself publishes anything.
+  sendPost: async (id, socialAccountId) => {
     try {
-      const { data } = await socialAPI.sendPost(id);
-      set((s) => ({ posts: s.posts.map((p) => (p.id === id ? data : p)) }));
+      const { data } = await socialAPI.sendPost(id, socialAccountId);
+      set((s) => ({
+        posts: s.posts.map((p) => (p.id === id ? data : p)),
+        pendingApproval: s.pendingApproval.filter((p) => p.id !== id),
+      }));
       return data;
     } catch (err: any) {
       throw new Error(err.response?.data?.error || 'Failed to send post');

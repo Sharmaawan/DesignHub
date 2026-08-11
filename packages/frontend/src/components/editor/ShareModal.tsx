@@ -3,6 +3,9 @@ import { HiOutlineX, HiOutlineLink, HiOutlineMail, HiOutlineGlobe, HiOutlineGlob
 import toast from 'react-hot-toast';
 import { useAuthStore } from '../../stores/authStore';
 import { useSocialStore, SocialAccount } from '../../stores/socialStore';
+import { collaboratorAPI } from '../../utils/api';
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const PLATFORM_META: Record<string, { label: string; icon: string }> = {
   facebook: { label: 'Facebook', icon: '👍' },
@@ -16,6 +19,8 @@ interface ShareModalProps {
   open: boolean;
   onClose: () => void;
   onPublish: (accountId: string) => void;
+  projectId?: string;
+  projectName?: string;
 }
 
 interface Collaborator {
@@ -26,17 +31,30 @@ interface Collaborator {
   permission: 'viewer' | 'commenter' | 'editor';
 }
 
-const DEMO_COLLABORATORS: Collaborator[] = [
-  { id: '2', name: 'Sarah Chen', email: 'sarah@team.com', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=sarah', permission: 'editor' },
-  { id: '3', name: 'Mike Johnson', email: 'mike@team.com', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=mike', permission: 'commenter' },
-];
+// Shape returned by GET /collaborators/project/:projectId — a Collaborator row
+// with its related User embedded, not the flattened shape the UI wants.
+interface ApiCollaborator {
+  id: string;
+  permission: string;
+  user: { id: string; name: string; email: string; avatar?: string };
+}
 
-export default function ShareModal({ open, onClose, onPublish }: ShareModalProps) {
+const mapApiCollaborator = (c: ApiCollaborator): Collaborator => ({
+  id: c.id,
+  name: c.user.name,
+  email: c.user.email,
+  avatar: c.user.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${c.user.email}`,
+  permission: (c.permission as Collaborator['permission']) || 'viewer',
+});
+
+export default function ShareModal({ open, onClose, onPublish, projectId, projectName }: ShareModalProps) {
   const { user } = useAuthStore();
   const { platforms, accounts, loadPlatforms, loadAccounts, connect } = useSocialStore();
-  const [collaborators, setCollaborators] = useState<Collaborator[]>(DEMO_COLLABORATORS);
+  const [collaborators, setCollaborators] = useState<Collaborator[]>([]);
+  const [loadingCollaborators, setLoadingCollaborators] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
   const [invitePermission, setInvitePermission] = useState<'viewer' | 'commenter' | 'editor'>('editor');
+  const [inviting, setInviting] = useState(false);
   const [linkAccess, setLinkAccess] = useState<'restricted' | 'anyone'>('restricted');
   const [linkCopied, setLinkCopied] = useState(false);
   const [expirationDays, setExpirationDays] = useState<number>(0);
@@ -47,6 +65,15 @@ export default function ShareModal({ open, onClose, onPublish }: ShareModalProps
     loadPlatforms();
     loadAccounts();
   }, [open]);
+
+  useEffect(() => {
+    if (!open || !projectId) return;
+    setLoadingCollaborators(true);
+    collaboratorAPI.listByProject(projectId)
+      .then(({ data }) => setCollaborators((data as ApiCollaborator[]).map(mapApiCollaborator)))
+      .catch(() => toast.error('Failed to load who has access to this design'))
+      .finally(() => setLoadingCollaborators(false));
+  }, [open, projectId]);
 
   if (!open) return null;
 
@@ -66,18 +93,39 @@ export default function ShareModal({ open, onClose, onPublish }: ShareModalProps
     }
   };
 
-  const handleInvite = () => {
-    if (!inviteEmail.trim()) return;
-    const newCollab: Collaborator = {
-      id: Date.now().toString(),
-      name: inviteEmail.split('@')[0],
-      email: inviteEmail,
-      avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${inviteEmail}`,
-      permission: invitePermission,
-    };
-    setCollaborators([...collaborators, newCollab]);
-    setInviteEmail('');
-    toast.success(`Invitation sent to ${inviteEmail}`);
+  const handleInvite = async () => {
+    const email = inviteEmail.trim();
+    if (!email) return;
+    if (!EMAIL_RE.test(email)) {
+      toast.error('Enter a valid email address');
+      return;
+    }
+    if (!projectId) {
+      toast.error("Can't share — no design is open");
+      return;
+    }
+    if (collaborators.some((c) => c.email.toLowerCase() === email.toLowerCase())) {
+      toast.error('This person already has access to this design');
+      return;
+    }
+    setInviting(true);
+    try {
+      const { data } = await collaboratorAPI.add({ projectId, email, permission: invitePermission });
+      setCollaborators([...collaborators, mapApiCollaborator(data)]);
+      setInviteEmail('');
+      if (data.emailSent) {
+        toast.success(`Invitation sent to ${email}`);
+      } else {
+        // Real, common case in local/dev environments with no SMTP configured — the
+        // share itself still worked (they'll see it next time they open DesignHub),
+        // just say so honestly instead of implying an email went out that didn't.
+        toast.success(`${email} now has access — but the invite email couldn't be sent (no email service configured)`);
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to send invitation');
+    } finally {
+      setInviting(false);
+    }
   };
 
   const handleCopyLink = () => {
@@ -88,21 +136,38 @@ export default function ShareModal({ open, onClose, onPublish }: ShareModalProps
     setTimeout(() => setLinkCopied(false), 3000);
   };
 
-  const handleRemoveCollab = (id: string) => {
+  const handleRemoveCollab = async (id: string) => {
+    const prev = collaborators;
     setCollaborators(collaborators.filter((c) => c.id !== id));
-    toast.success('Collaborator removed');
+    try {
+      await collaboratorAPI.remove(id);
+      toast.success('Collaborator removed');
+    } catch (err: any) {
+      setCollaborators(prev);
+      toast.error(err.response?.data?.error || 'Failed to remove collaborator');
+    }
   };
 
-  const handlePermissionChange = (id: string, permission: 'viewer' | 'commenter' | 'editor') => {
+  const handlePermissionChange = async (id: string, permission: 'viewer' | 'commenter' | 'editor') => {
+    const prev = collaborators;
     setCollaborators(collaborators.map((c) => c.id === id ? { ...c, permission } : c));
-    toast.success('Permission updated');
+    try {
+      await collaboratorAPI.update(id, { permission });
+      toast.success('Permission updated');
+    } catch (err: any) {
+      setCollaborators(prev);
+      toast.error(err.response?.data?.error || 'Failed to update permission');
+    }
   };
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
       <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg mx-4 animate-slide-up" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between p-5 border-b border-gray-100 dark:border-gray-700">
-          <h2 className="text-lg font-display font-bold text-gray-900 dark:text-white">Share design</h2>
+          <div>
+            <h2 className="text-lg font-display font-bold text-gray-900 dark:text-white">Share design</h2>
+            {projectName && <p className="text-xs text-gray-400 truncate max-w-xs">{projectName}</p>}
+          </div>
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"><HiOutlineX size={18} /></button>
         </div>
 
@@ -140,8 +205,16 @@ export default function ShareModal({ open, onClose, onPublish }: ShareModalProps
                   <option value="commenter">Commenter</option>
                   <option value="editor">Editor</option>
                 </select>
-                <button onClick={handleInvite} className="btn-primary px-4 text-sm flex-shrink-0">
-                  <HiOutlinePlus size={16} />
+                <button
+                  onClick={handleInvite}
+                  disabled={inviting || !inviteEmail.trim()}
+                  className="btn-primary px-4 text-sm flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {inviting ? (
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <HiOutlinePlus size={16} />
+                  )}
                 </button>
               </div>
 
@@ -156,6 +229,16 @@ export default function ShareModal({ open, onClose, onPublish }: ShareModalProps
               </div>
 
               {/* Collaborators list */}
+              {loadingCollaborators && (
+                <div className="flex justify-center py-4">
+                  <div className="w-5 h-5 border-2 border-canva-purple border-t-transparent rounded-full animate-spin" />
+                </div>
+              )}
+              {!loadingCollaborators && collaborators.length === 0 && (
+                <p className="text-xs text-gray-400 text-center py-2">
+                  Nobody else has access yet — invite someone above.
+                </p>
+              )}
               {collaborators.map((collab) => (
                 <div key={collab.id} className="flex items-center gap-3 p-3 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors">
                   <img src={collab.avatar} alt="" className="w-9 h-9 rounded-full bg-gray-200" />

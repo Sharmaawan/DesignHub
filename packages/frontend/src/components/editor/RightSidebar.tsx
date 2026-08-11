@@ -1,7 +1,8 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { useEditorStore } from '../../stores/editorStore';
-import { CanvasElement, TextData, ImageData, ShapeData, TableData, ChartData, IconData, VideoData } from '../../types';
+import { CanvasElement, TextData, ImageData, ShapeData, TableData, ChartData, IconData, VideoData, AudioData } from '../../types';
 import { COLORS_PALETTE, FONT_FAMILIES, FONT_WEIGHT_MAP, FONT_WEIGHT_LABELS, GRADIENT_PRESETS } from '../../utils/cn';
+import { hsvToHex, hexToHsv, isPlainHexColor, getDocumentColors, getPagePhotoSources, extractPhotoColors } from '../../utils/colorTools';
 import { uploadAPI, BACKEND_ORIGIN as BACKEND } from '../../utils/api';
 import {
   HiOutlineX, HiOutlineTrash, HiOutlineDuplicate, HiOutlineLockClosed,
@@ -19,6 +20,7 @@ export default function RightSidebar() {
     updateElement, removeElements, duplicateElements, bringForward, sendBackward,
     bringToFront, sendToBack, lockElement, unlockElement, hideElement, showElement,
     pushHistory, setPageBackgroundColor, updatePage, duplicatePage, removePage,
+    clearPageBackgroundImage,
     showGrid, showRulers, showGuides, snapEnabled, gridSize,
     toggleGrid, toggleRulers, toggleGuides, toggleSnap, setGridSize,
   } = useEditorStore();
@@ -100,6 +102,23 @@ export default function RightSidebar() {
               </Section>
 
               <Section title="Page Background">
+                {page.backgroundImage && (
+                  <div className="mb-3 flex items-center gap-2 p-2 rounded-lg border border-gray-200 dark:border-gray-700">
+                    <img
+                      src={page.backgroundImage.src}
+                      alt="Background"
+                      className="w-10 h-10 rounded object-cover flex-shrink-0"
+                    />
+                    <span className="text-xs text-gray-500 dark:text-gray-400 flex-1 truncate">Background image</span>
+                    <button
+                      onClick={() => clearPageBackgroundImage(currentPageIndex)}
+                      title="Remove background image"
+                      className="toolbar-btn text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 flex-shrink-0"
+                    >
+                      <HiOutlineTrash size={14} />
+                    </button>
+                  </div>
+                )}
                 <ColorPicker
                   label="Background color"
                   value={/^#/.test(page.backgroundColor) ? page.backgroundColor : '#FFFFFF'}
@@ -249,6 +268,9 @@ export default function RightSidebar() {
         {/* Video Properties */}
         {element.type === 'video' && <VideoProperties element={element} handleDataUpdate={handleDataUpdate} />}
 
+        {/* Audio Properties */}
+        {element.type === 'audio' && <AudioProperties element={element} handleDataUpdate={handleDataUpdate} />}
+
         {/* Shape Properties */}
         {element.type === 'shape' && <ShapeProperties element={element} handleDataUpdate={handleDataUpdate} />}
 
@@ -305,6 +327,9 @@ export default function RightSidebar() {
 function TextProperties({ element, handleDataUpdate }: { element: CanvasElement; handleDataUpdate: (data: Record<string, unknown>) => void }) {
   const data = element.data as TextData;
   const availableWeights = FONT_WEIGHT_MAP[data.fontFamily] || [400, 700];
+  const setElementAnimation = useEditorStore((s) => s.setElementAnimation);
+  const pushHistory = useEditorStore((s) => s.pushHistory);
+  const currentAnimation = element.animation || { type: 'none' as const, duration: 0.5, delay: 0 };
 
   return (
     <>
@@ -481,21 +506,28 @@ function TextProperties({ element, handleDataUpdate }: { element: CanvasElement;
       </Section>
       <Section title="Text Animation">
         <select
-          value={(element.data as any).animation || 'none'}
-          onChange={(e) => handleDataUpdate({ animation: e.target.value })}
+          value={currentAnimation.type}
+          onChange={(e) => {
+            setElementAnimation(element.id, { ...currentAnimation, type: e.target.value as any });
+            pushHistory();
+          }}
           className="input-field"
         >
           <option value="none">— No animation</option>
           <option value="typewriter">⌨️ Typewriter</option>
           <option value="fadeIn">🌅 Fade In</option>
-          <option value="slideUp">⬆️ Slide Up</option>
-          <option value="slideLeft">⬅️ Slide Left</option>
-          <option value="bounce">🏀 Bounce</option>
+          <option value="rise">⬆️ Rise</option>
+          <option value="slide">➡️ Slide</option>
+          <option value="bounce">⚡ Bounce</option>
+          <option value="pop">💥 Pop</option>
           <option value="zoom">🔍 Zoom</option>
+          <option value="rotate">🔄 Rotate</option>
           <option value="pulse">💓 Pulse</option>
         </select>
-        {(element.data as any).animation && (element.data as any).animation !== 'none' && (
-          <p className="text-[10px] text-gray-400 mt-1">Animation plays on canvas load. Re-select to replay.</p>
+        {currentAnimation.type !== 'none' && (
+          <p className="text-[10px] text-gray-400 mt-1">
+            Plays when this scene loads. For duration/delay/direction, open "Animate" from the toolbar above the canvas.
+          </p>
         )}
       </Section>
     </>
@@ -682,43 +714,170 @@ function VideoProperties({ element, handleDataUpdate }: { element: CanvasElement
     }
   };
 
+  const toggleRow = (label: string, checked: boolean, onToggle: () => void) => (
+    <label className="flex items-center justify-between py-1.5 cursor-pointer">
+      <span className="text-sm text-gray-700 dark:text-gray-300">{label}</span>
+      <button
+        onClick={onToggle}
+        className={`w-9 h-5 rounded-full transition-colors duration-200 relative cursor-pointer flex-shrink-0 ${checked ? 'bg-canva-purple' : 'bg-gray-300 dark:bg-gray-600'}`}
+      >
+        <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200 ${checked ? 'translate-x-4' : 'translate-x-0'}`} />
+      </button>
+    </label>
+  );
+
+  const playbackRates = [0.25, 0.5, 1, 1.5, 2];
+
   return (
-    <Section title="Video">
-      <label className="flex items-center justify-between py-1.5 cursor-pointer">
-        <span className="text-sm text-gray-700 dark:text-gray-300">Autoplay</span>
+    <>
+      <Section title="Video">
+        {toggleRow('Autoplay', data.autoplay ?? true, () => handleDataUpdate({ autoplay: !(data.autoplay ?? true) }))}
+        {toggleRow('Loop', data.loop ?? true, () => handleDataUpdate({ loop: !(data.loop ?? true) }))}
+        {toggleRow('Muted', data.muted ?? true, () => handleDataUpdate({ muted: !(data.muted ?? true) }))}
+        {toggleRow('Reverse', data.reverse ?? false, () => handleDataUpdate({ reverse: !(data.reverse ?? false) }))}
+
+        <input ref={fileInputRef} type="file" accept="video/*" className="hidden" onChange={handleReplaceVideo} />
         <button
-          onClick={() => handleDataUpdate({ autoplay: !(data.autoplay ?? true) })}
-          className={`w-9 h-5 rounded-full transition-colors duration-200 relative cursor-pointer flex-shrink-0 ${(data.autoplay ?? true) ? 'bg-canva-purple' : 'bg-gray-300 dark:bg-gray-600'}`}
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading}
+          className="mt-3 w-full flex items-center justify-center gap-1.5 py-2 rounded-lg border border-gray-200 dark:border-gray-700 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
         >
-          <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200 ${(data.autoplay ?? true) ? 'translate-x-4' : 'translate-x-0'}`} />
+          <HiOutlinePhotograph size={14} /> {uploading ? 'Uploading…' : 'Replace Video'}
         </button>
-      </label>
+      </Section>
+
+      <div className="h-px bg-gray-200 dark:bg-gray-700 my-4" />
+
+      <Section title="Trim">
+        <div className="flex items-center gap-2">
+          <NumberInput
+            label="In"
+            value={data.startTime || 0}
+            onChange={(v) => handleDataUpdate({ startTime: Math.max(0, Math.min(v, (data.endTime || v) - 0.1)) })}
+            min={0}
+          />
+          <NumberInput
+            label="Out"
+            value={data.endTime || 0}
+            onChange={(v) => handleDataUpdate({ endTime: Math.max((data.startTime || 0) + 0.1, v) })}
+            min={0.1}
+          />
+        </div>
+        <p className="text-[10px] text-gray-400 mt-1.5">Seconds into the source clip — the video plays only between these two points.</p>
+      </Section>
+
+      <div className="h-px bg-gray-200 dark:bg-gray-700 my-4" />
+
+      <Section title="Video Adjustments">
+        <Slider label="Volume" value={Math.round((data.volume ?? 1) * 100)} onChange={(v) => handleDataUpdate({ volume: v / 100 })} min={0} max={100} />
+        <Slider label="Brightness" value={data.brightness ?? 100} onChange={(v) => handleDataUpdate({ brightness: v })} min={0} max={200} />
+        <Slider label="Contrast" value={data.contrast ?? 100} onChange={(v) => handleDataUpdate({ contrast: v })} min={0} max={200} />
+        <NumberInput label="Radius" value={data.borderRadius ?? 0} onChange={(v) => handleDataUpdate({ borderRadius: v })} min={0} max={500} />
+
+        <div className="flex items-center gap-2 mb-2 mt-2">
+          <label className="text-xs text-gray-500 w-14 flex-shrink-0">Speed</label>
+          <div className="grid grid-cols-5 gap-1 flex-1">
+            {playbackRates.map((r) => (
+              <button
+                key={r}
+                onClick={() => handleDataUpdate({ playbackRate: r })}
+                className={`h-7 rounded-md border text-[10px] font-medium transition-colors ${
+                  (data.playbackRate ?? 1) === r
+                    ? 'border-canva-purple bg-canva-purple/10 text-canva-purple'
+                    : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
+                }`}
+              >
+                {r}x
+              </button>
+            ))}
+          </div>
+        </div>
+      </Section>
+
+      <div className="h-px bg-gray-200 dark:bg-gray-700 my-4" />
+
+      <Section title="Video Editing">
+        <div className="mb-3">
+          <FlipControls data={data} handleDataUpdate={handleDataUpdate} />
+        </div>
+
+        {/* Crop — percentages of the source video; 0/0/100/100 is uncropped, same
+            convention ImageProperties already uses for cropX/Y/Width/Height. */}
+        <div>
+          <div className="flex items-center justify-between mb-1.5">
+            <label className="text-xs text-gray-500 flex items-center gap-1"><HiOutlineAdjustments size={13} /> Crop</label>
+            <button
+              onClick={() => handleDataUpdate({ cropX: 0, cropY: 0, cropWidth: 100, cropHeight: 100 })}
+              className="text-[10px] text-gray-400 hover:text-canva-purple"
+            >
+              Reset
+            </button>
+          </div>
+          <Slider label="Left" value={data.cropX ?? 0} onChange={(v) => handleDataUpdate({ cropX: Math.min(v, 100 - (data.cropWidth ?? 100)) })} min={0} max={99} />
+          <Slider label="Top" value={data.cropY ?? 0} onChange={(v) => handleDataUpdate({ cropY: Math.min(v, 100 - (data.cropHeight ?? 100)) })} min={0} max={99} />
+          <Slider label="Width" value={data.cropWidth ?? 100} onChange={(v) => handleDataUpdate({ cropWidth: Math.min(v, 100 - (data.cropX ?? 0)) })} min={1} max={100} />
+          <Slider label="Height" value={data.cropHeight ?? 100} onChange={(v) => handleDataUpdate({ cropHeight: Math.min(v, 100 - (data.cropY ?? 0)) })} min={1} max={100} />
+        </div>
+      </Section>
+    </>
+  );
+}
+
+function AudioProperties({ element, handleDataUpdate }: { element: CanvasElement; handleDataUpdate: (data: Record<string, unknown>) => void }) {
+  const data = element.data as AudioData;
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+
+  const handleReplaceAudio = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('audio/')) { toast.error('Choose an audio file'); return; }
+    setUploading(true);
+    try {
+      const { data: uploaded } = await uploadAPI.upload(file);
+      handleDataUpdate({ src: `${BACKEND}${uploaded.url}` });
+      toast.success('Audio replaced!');
+    } catch {
+      toast.error('Failed to upload audio');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <Section title="Audio">
+      <Slider label="Volume" value={Math.round((data.volume ?? 1) * 100)} onChange={(v) => handleDataUpdate({ volume: v / 100 })} min={0} max={100} />
       <label className="flex items-center justify-between py-1.5 cursor-pointer">
         <span className="text-sm text-gray-700 dark:text-gray-300">Loop</span>
         <button
-          onClick={() => handleDataUpdate({ loop: !(data.loop ?? true) })}
-          className={`w-9 h-5 rounded-full transition-colors duration-200 relative cursor-pointer flex-shrink-0 ${(data.loop ?? true) ? 'bg-canva-purple' : 'bg-gray-300 dark:bg-gray-600'}`}
+          onClick={() => handleDataUpdate({ loop: !(data.loop ?? false) })}
+          className={`w-9 h-5 rounded-full transition-colors duration-200 relative cursor-pointer flex-shrink-0 ${(data.loop ?? false) ? 'bg-canva-purple' : 'bg-gray-300 dark:bg-gray-600'}`}
         >
-          <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200 ${(data.loop ?? true) ? 'translate-x-4' : 'translate-x-0'}`} />
+          <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200 ${(data.loop ?? false) ? 'translate-x-4' : 'translate-x-0'}`} />
         </button>
       </label>
       <label className="flex items-center justify-between py-1.5 cursor-pointer">
         <span className="text-sm text-gray-700 dark:text-gray-300">Muted</span>
         <button
-          onClick={() => handleDataUpdate({ muted: !(data.muted ?? true) })}
-          className={`w-9 h-5 rounded-full transition-colors duration-200 relative cursor-pointer flex-shrink-0 ${(data.muted ?? true) ? 'bg-canva-purple' : 'bg-gray-300 dark:bg-gray-600'}`}
+          onClick={() => handleDataUpdate({ muted: !(data.muted ?? false) })}
+          className={`w-9 h-5 rounded-full transition-colors duration-200 relative cursor-pointer flex-shrink-0 ${(data.muted ?? false) ? 'bg-canva-purple' : 'bg-gray-300 dark:bg-gray-600'}`}
         >
-          <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200 ${(data.muted ?? true) ? 'translate-x-4' : 'translate-x-0'}`} />
+          <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200 ${(data.muted ?? false) ? 'translate-x-4' : 'translate-x-0'}`} />
         </button>
       </label>
 
-      <input ref={fileInputRef} type="file" accept="video/*" className="hidden" onChange={handleReplaceVideo} />
+      <div className="h-px bg-gray-200 dark:bg-gray-700 my-3" />
+      <NumberInput label="Fade In (s)" value={data.fadeIn ?? 0} onChange={(v) => handleDataUpdate({ fadeIn: v })} min={0} max={10} />
+      <NumberInput label="Fade Out (s)" value={data.fadeOut ?? 0} onChange={(v) => handleDataUpdate({ fadeOut: v })} min={0} max={10} />
+
+      <input ref={fileInputRef} type="file" accept="audio/*" className="hidden" onChange={handleReplaceAudio} />
       <button
         onClick={() => fileInputRef.current?.click()}
         disabled={uploading}
         className="mt-3 w-full flex items-center justify-center gap-1.5 py-2 rounded-lg border border-gray-200 dark:border-gray-700 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
       >
-        <HiOutlinePhotograph size={14} /> {uploading ? 'Uploading…' : 'Replace Video'}
+        <HiOutlinePhotograph size={14} /> {uploading ? 'Uploading…' : 'Replace Audio'}
       </button>
     </Section>
   );
@@ -1029,8 +1188,95 @@ function NumberInput({ label, value, onChange, min, max }: {
   );
 }
 
+// Small swatch grid, reused for Document colors / Photo colors / Default palette so
+// all three sections look and behave identically.
+function SwatchGrid({ colors, onPick }: { colors: string[]; onPick: (c: string) => void }) {
+  return (
+    <div className="grid grid-cols-10 gap-1">
+      {colors.map((color, i) => (
+        <button
+          key={`${color}-${i}`}
+          onClick={() => onPick(color)}
+          title={color}
+          className="w-5 h-5 rounded border border-gray-200 dark:border-gray-600 hover:scale-125 transition-transform"
+          style={{ backgroundColor: color }}
+        />
+      ))}
+    </div>
+  );
+}
+
 function ColorPicker({ label, value, onChange }: { label?: string; value: string; onChange: (v: string) => void }) {
+  const { pages, currentPageIndex } = useEditorStore();
   const [showPalette, setShowPalette] = useState(false);
+  const [photoColors, setPhotoColors] = useState<string[]>([]);
+  const svRef = useRef<HTMLDivElement>(null);
+  const hueRef = useRef<HTMLDivElement>(null);
+  const draggingRef = useRef<'sv' | 'hue' | null>(null);
+
+  const page = pages[currentPageIndex];
+  const documentColors = useMemo(() => getDocumentColors(pages), [pages]);
+
+  // Photo colors are sampled off-thread-ish (async image decode + canvas read), so only
+  // do it while the popover is actually open, and only for photos on the current page.
+  useEffect(() => {
+    if (!showPalette) return;
+    const srcs = getPagePhotoSources(page);
+    if (srcs.length === 0) { setPhotoColors([]); return; }
+    let cancelled = false;
+    (async () => {
+      const perPhoto = await Promise.all(srcs.slice(0, 5).map((s) => extractPhotoColors(s)));
+      if (!cancelled) setPhotoColors(Array.from(new Set(perPhoto.flat())).slice(0, 12));
+    })();
+    return () => { cancelled = true; };
+  }, [showPalette, page]);
+
+  const hsv = isPlainHexColor(value) ? hexToHsv(value) : null;
+  const hue = hsv?.h ?? 0;
+  const sat = hsv?.s ?? 1;
+  const val = hsv?.v ?? 1;
+
+  const updateFromSvEvent = (clientX: number, clientY: number) => {
+    const rect = svRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const x = Math.min(Math.max(clientX - rect.left, 0), rect.width);
+    const y = Math.min(Math.max(clientY - rect.top, 0), rect.height);
+    onChange(hsvToHex(hue, x / rect.width, 1 - y / rect.height));
+  };
+  const updateFromHueEvent = (clientX: number) => {
+    const rect = hueRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const x = Math.min(Math.max(clientX - rect.left, 0), rect.width);
+    onChange(hsvToHex((x / rect.width) * 360, sat, val));
+  };
+
+  useEffect(() => {
+    const handleMove = (e: PointerEvent) => {
+      if (draggingRef.current === 'sv') updateFromSvEvent(e.clientX, e.clientY);
+      else if (draggingRef.current === 'hue') updateFromHueEvent(e.clientX);
+    };
+    const handleUp = () => { draggingRef.current = null; };
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('pointerup', handleUp);
+    return () => {
+      window.removeEventListener('pointermove', handleMove);
+      window.removeEventListener('pointerup', handleUp);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hue, sat, val]);
+
+  const supportsEyedropper = typeof window !== 'undefined' && 'EyeDropper' in window;
+  const handleEyedropper = async () => {
+    try {
+      // EyeDropper is a new-ish browser API with no stable TS lib types yet.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const dropper = new (window as any).EyeDropper();
+      const result = await dropper.open();
+      if (result?.sRGBHex) onChange(result.sRGBHex.toUpperCase());
+    } catch {
+      // User pressed Escape / cancelled the pick — nothing to do.
+    }
+  };
 
   return (
     <div>
@@ -1047,19 +1293,65 @@ function ColorPicker({ label, value, onChange }: { label?: string; value: string
           onChange={(e) => onChange(e.target.value)}
           className="flex-1 px-2 py-1.5 text-xs bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-canva-purple/30 text-gray-900 dark:text-white font-mono"
         />
+        {supportsEyedropper && (
+          <button
+            onClick={handleEyedropper}
+            title="Pick color from screen"
+            className="w-8 h-8 rounded-lg border border-gray-200 dark:border-gray-700 flex-shrink-0 flex items-center justify-center text-gray-500 hover:text-canva-purple hover:border-canva-purple/50 transition-colors"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M2 22l1-4 9.5-9.5" />
+              <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L15 11l-3-3z" />
+            </svg>
+          </button>
+        )}
       </div>
       {showPalette && (
-        <div className="mt-2 p-2 bg-gray-50 dark:bg-gray-800 rounded-lg">
-          <div className="grid grid-cols-10 gap-1 mb-2">
-            {COLORS_PALETTE.map((color) => (
-              <button
-                key={color}
-                onClick={() => { onChange(color); setShowPalette(false); }}
-                className="w-5 h-5 rounded border border-gray-200 dark:border-gray-600 hover:scale-125 transition-transform"
-                style={{ backgroundColor: color }}
-              />
-            ))}
+        <div className="mt-2 p-2 bg-gray-50 dark:bg-gray-800 rounded-lg space-y-3">
+          <div
+            ref={svRef}
+            className="relative w-full h-28 rounded cursor-crosshair touch-none"
+            style={{
+              background: `linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, hsl(${hue}, 100%, 50%))`,
+            }}
+            onPointerDown={(e) => { draggingRef.current = 'sv'; updateFromSvEvent(e.clientX, e.clientY); }}
+          >
+            <div
+              className="absolute w-3 h-3 rounded-full border-2 border-white shadow -translate-x-1/2 -translate-y-1/2 pointer-events-none"
+              style={{ left: `${sat * 100}%`, top: `${(1 - val) * 100}%`, background: value }}
+            />
           </div>
+          <div
+            ref={hueRef}
+            className="relative w-full h-3 rounded cursor-pointer touch-none"
+            style={{ background: 'linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)' }}
+            onPointerDown={(e) => { draggingRef.current = 'hue'; updateFromHueEvent(e.clientX); }}
+          >
+            <div
+              className="absolute top-[-2px] bottom-[-2px] w-1.5 rounded-sm bg-white border border-gray-400 shadow -translate-x-1/2 pointer-events-none"
+              style={{ left: `${(hue / 360) * 100}%` }}
+            />
+          </div>
+
+          {documentColors.length > 0 && (
+            <div>
+              <div className="text-[10px] uppercase tracking-wide text-gray-400 mb-1">Document colors</div>
+              <SwatchGrid colors={documentColors} onPick={(c) => { onChange(c); setShowPalette(false); }} />
+            </div>
+          )}
+
+          {photoColors.length > 0 && (
+            <div>
+              <div className="text-[10px] uppercase tracking-wide text-gray-400 mb-1">Photo colors</div>
+              <SwatchGrid colors={photoColors} onPick={(c) => { onChange(c); setShowPalette(false); }} />
+            </div>
+          )}
+
+          <div>
+            <div className="text-[10px] uppercase tracking-wide text-gray-400 mb-1">Default palette</div>
+            <SwatchGrid colors={COLORS_PALETTE} onPick={(c) => { onChange(c); setShowPalette(false); }} />
+          </div>
+
           <div className="flex gap-1">
             {GRADIENT_PRESETS.slice(0, 6).map((g, i) => (
               <button

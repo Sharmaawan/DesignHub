@@ -1,13 +1,16 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { HiOutlineArrowLeft, HiOutlineUser, HiOutlineCamera, HiOutlineCheck, HiOutlineKey, HiOutlineMail } from 'react-icons/hi';
 import toast from 'react-hot-toast';
-import api, { emailSettingsAPI } from '../utils/api';
+import api, { emailSettingsAPI, uploadAPI, BACKEND_ORIGIN as BACKEND } from '../utils/api';
+import DashboardSidebar from '../components/dashboard/DashboardSidebar';
 
 export default function ProfileSettingsPage() {
   const navigate = useNavigate();
   const { user, setUser } = useAuthStore();
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('designhub-sidebar-collapsed') === 'true');
+  const [activeSection, setActiveSection] = useState('');
   const [name, setName] = useState(user?.name || '');
   const [avatar, setAvatar] = useState(user?.avatar || '');
   const [currentPassword, setCurrentPassword] = useState('');
@@ -25,6 +28,24 @@ export default function ProfileSettingsPage() {
   const [connectingEmail, setConnectingEmail] = useState(false);
   const [testingEmail, setTestingEmail] = useState(false);
   const [disconnectingEmail, setDisconnectingEmail] = useState(false);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingAvatar(true);
+    try {
+      const { data: saved } = await uploadAPI.upload(file);
+      setAvatar(`${BACKEND}${saved.url}`);
+      toast.success('Photo uploaded — click Save Changes to apply it');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || err.message || 'Failed to upload photo');
+    } finally {
+      setUploadingAvatar(false);
+    }
+    e.target.value = '';
+  };
 
   useEffect(() => {
     emailSettingsAPI.get()
@@ -130,6 +151,8 @@ export default function ProfileSettingsPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-[#0f0f23]">
+      <DashboardSidebar collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} activeSection={activeSection} onSectionChange={setActiveSection} />
+      <div className={`transition-all duration-300 ${sidebarCollapsed ? 'ml-[72px]' : 'ml-[240px]'}`}>
       <div className="max-w-2xl mx-auto px-6 py-10">
         {/* Header */}
         <div className="flex items-center gap-4 mb-8">
@@ -155,9 +178,26 @@ export default function ProfileSettingsPage() {
                 alt="Profile"
                 className="w-20 h-20 rounded-full bg-gray-200 dark:bg-gray-700 object-cover"
               />
-              <div className="absolute inset-0 rounded-full bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer">
-                <HiOutlineCamera size={20} className="text-white" />
-              </div>
+              <button
+                type="button"
+                onClick={() => avatarInputRef.current?.click()}
+                disabled={uploadingAvatar}
+                title="Upload a photo"
+                className="absolute inset-0 rounded-full bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer disabled:cursor-wait"
+              >
+                {uploadingAvatar ? (
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <HiOutlineCamera size={20} className="text-white" />
+                )}
+              </button>
+              <input
+                ref={avatarInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleAvatarUpload}
+              />
             </div>
             <div>
               <p className="text-sm font-medium text-gray-900 dark:text-white">{user?.name || 'User'}</p>
@@ -333,6 +373,7 @@ export default function ProfileSettingsPage() {
             </button>
           </div>
         </div>
+      </div>
       </div>
     </div>
   );

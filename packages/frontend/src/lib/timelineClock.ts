@@ -12,6 +12,7 @@
 export interface ClipTiming {
   timelineStart: number; // ms
   timelineEnd: number; // ms
+  reverse?: boolean;
 }
 
 interface RegisteredMedia {
@@ -68,6 +69,14 @@ export class TimelineClock {
 
   getCurrentMs() {
     return this.currentMs;
+  }
+
+  // Used by video export (lib/videoExport.ts) to build a Web Audio graph mixing every
+  // clip's real audio output — the underlying <video>/<audio> elements are otherwise
+  // private to whichever VideoElement/AudioElement registered them (never DOM-attached,
+  // so they can't be found by querying the export canvas's container).
+  getRegisteredElements(): { id: string; el: HTMLVideoElement | HTMLAudioElement }[] {
+    return Array.from(this.media.entries()).map(([id, { el }]) => ({ id, el }));
   }
 
   getIsPlaying() {
@@ -141,9 +150,21 @@ export class TimelineClock {
       if (!el.paused) el.pause();
       return;
     }
-    const { timelineStart, timelineEnd } = timing;
+    const { timelineStart, timelineEnd, reverse } = timing;
     const active = this.currentMs >= timelineStart && this.currentMs < timelineEnd;
     if (!active) {
+      if (!el.paused) el.pause();
+      return;
+    }
+    if (reverse) {
+      // Browsers don't support negative playbackRate, so a reversed clocked clip
+      // can't just call el.play() — instead keep it paused and manually scrub
+      // currentTime backward every tick, mapping forward timeline progress onto
+      // decreasing media time (mirrored around the clip's trim-out point).
+      const clipDurSec = (timelineEnd - timelineStart) / 1000;
+      const trimOutSec = mediaOffsetMs / 1000 + clipDurSec;
+      const targetSec = Math.max(0, trimOutSec - (this.currentMs - timelineStart) / 1000);
+      el.currentTime = targetSec;
       if (!el.paused) el.pause();
       return;
     }

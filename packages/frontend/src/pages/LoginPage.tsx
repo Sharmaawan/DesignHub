@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import GoogleSignIn from '../components/auth/GoogleSignIn';
+import centurionSeal from '../assets/centurion-seal.png';
 
 export default function LoginPage() {
   return (
@@ -12,9 +13,7 @@ export default function LoginPage() {
         </div>
         <div className="relative z-10 flex flex-col justify-center px-16 text-white">
           <div className="flex items-center gap-3 mb-8">
-            <div className="w-12 h-12 bg-white/20 backdrop-blur rounded-xl flex items-center justify-center">
-              <span className="text-2xl font-bold">D</span>
-            </div>
+            <img src={centurionSeal} alt="Centurion University" className="w-12 h-12 rounded-full bg-white shadow-md" />
             <span className="text-2xl font-display font-bold">DesignHub</span>
           </div>
           <h1 className="text-5xl font-display font-bold leading-tight mb-6">
@@ -41,9 +40,7 @@ export default function LoginPage() {
       <div className="flex-1 flex items-center justify-center p-8">
         <div className="w-full max-w-md">
           <div className="lg:hidden flex items-center gap-3 mb-8">
-            <div className="w-10 h-10 bg-gradient-to-br from-canva-purple to-canva-blue rounded-xl flex items-center justify-center">
-              <span className="text-xl font-bold text-white">D</span>
-            </div>
+            <img src={centurionSeal} alt="Centurion University" className="w-10 h-10 rounded-full shadow-md" />
             <span className="text-xl font-display font-bold text-gray-900 dark:text-white">DesignHub</span>
           </div>
 

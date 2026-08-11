@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useEditorStore } from '../../stores/editorStore';
-import { HiOutlinePlus, HiOutlineDuplicate, HiOutlineTrash } from 'react-icons/hi';
+import { HiOutlinePlus, HiOutlineDuplicate, HiOutlineTrash, HiOutlineSparkles } from 'react-icons/hi';
 
 const THUMB_MAX_W = 96;
 const THUMB_MAX_H = 68;
@@ -15,7 +15,7 @@ function getThumbSize(width: number, height: number) {
 
 export default function PageNavigation() {
   const {
-    pages, currentPageIndex, setCurrentPage, addPage, removePage, duplicatePage,
+    pages, currentPageIndex, setCurrentPage, addPage, removePage, duplicatePage, setSidePanelTab,
   } = useEditorStore();
   const [contextMenu, setContextMenu] = useState<{ index: number; x: number; y: number } | null>(null);
 
@@ -103,6 +103,9 @@ export default function PageNavigation() {
                     · {(page.duration / 1000).toFixed(page.duration % 1000 === 0 ? 0 : 1)}s
                   </span>
                 )}
+                {page.transition && page.transition.type !== 'none' && (
+                  <HiOutlineSparkles size={9} className="text-canva-purple flex-shrink-0" title={`Transition: ${page.transition.type}`} />
+                )}
               </div>
 
               {pages.length > 1 && (
@@ -143,6 +146,12 @@ export default function PageNavigation() {
               className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50"
             >
               <HiOutlineDuplicate size={14} /> Duplicate
+            </button>
+            <button
+              onClick={() => { setCurrentPage(contextMenu.index); setSidePanelTab('transitions'); setContextMenu(null); }}
+              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50"
+            >
+              <HiOutlineSparkles size={14} /> Transition…
             </button>
             {pages.length > 1 && (
               <button

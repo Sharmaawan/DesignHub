@@ -49,6 +49,11 @@ export default function SocialConnectionsPage() {
   const [connectingSelected, setConnectingSelected] = useState(false);
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
   const [sendingId, setSendingId] = useState<string | null>(null);
+  // A maker never picks a platform/account — the editor/approver chooses it right
+  // here, at the point they actually publish an approved post. Keyed by post id since
+  // several approved posts can be visible at once.
+  const [publishAccountChoice, setPublishAccountChoice] = useState<Record<string, string>>({});
+  const isMaker = !!approvalContext?.isMaker;
   // The pending id is stripped from the URL as soon as it's read (see effect below),
   // so it has to be kept somewhere across renders for the picker's "select" action —
   // a plain variable would be reset to null on every re-render, hence useRef.
@@ -119,6 +124,11 @@ export default function SocialConnectionsPage() {
       setConnectingSelected(false);
     }
   };
+
+  // GET /posts/pending-approval now returns both statuses in one list (see
+  // socialStore.ts/social.ts) — split them here into the two Approvals-tab sections.
+  const awaitingReview = pendingApproval.filter((p) => p.status === 'pending_approval');
+  const readyToPublish = pendingApproval.filter((p) => p.status === 'approved');
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-[#111127] transition-colors">
@@ -249,35 +259,49 @@ export default function SocialConnectionsPage() {
                           return (
                             <div key={account.id} className="flex items-center justify-between gap-2">
                               {expired ? (
-                                <button onClick={startConnect} className="text-xs text-amber-600 dark:text-amber-400 hover:underline text-left">
-                                  Expired — @{account.platformUsername} — Reconnect
-                                </button>
+                                isMaker ? (
+                                  <span className="text-xs text-amber-600 dark:text-amber-400">Expired — @{account.platformUsername}</span>
+                                ) : (
+                                  <button onClick={startConnect} className="text-xs text-amber-600 dark:text-amber-400 hover:underline text-left">
+                                    Expired — @{account.platformUsername} — Reconnect
+                                  </button>
+                                )
                               ) : (
                                 <span className="text-xs text-green-600 dark:text-green-400">Connected as @{account.platformUsername}</span>
                               )}
-                              <button
-                                onClick={async () => { await disconnect(account.id); toast.success('Disconnected'); }}
-                                className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 flex-shrink-0"
-                              >
-                                <HiOutlineTrash size={14} />
-                              </button>
+                              {/* Disconnecting is a team-account-management action —
+                                  restricted to editors/approvers, same as connecting. */}
+                              {!isMaker && (
+                                <button
+                                  onClick={async () => { await disconnect(account.id); toast.success('Disconnected'); }}
+                                  className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 flex-shrink-0"
+                                >
+                                  <HiOutlineTrash size={14} />
+                                </button>
+                              )}
                             </div>
                           );
                         })}
                       </div>
                     )}
 
-                    <button
-                      disabled={!p.configured}
-                      onClick={startConnect}
-                      className={`w-full py-2 text-sm font-medium rounded-xl disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-1 ${
-                        platformAccounts.length > 0
-                          ? 'border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
-                          : 'bg-[#7B2FBE] text-white hover:bg-[#6A25A8]'
-                      }`}
-                    >
-                      {platformAccounts.length > 0 ? (<><HiOutlinePlus size={14} /> Connect another account</>) : 'Connect'}
-                    </button>
+                    {isMaker ? (
+                      platformAccounts.length === 0 && (
+                        <p className="text-xs text-gray-400 text-center py-2">Ask an editor or approver to connect this account.</p>
+                      )
+                    ) : (
+                      <button
+                        disabled={!p.configured}
+                        onClick={startConnect}
+                        className={`w-full py-2 text-sm font-medium rounded-xl disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-1 ${
+                          platformAccounts.length > 0
+                            ? 'border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+                            : 'bg-[#7B2FBE] text-white hover:bg-[#6A25A8]'
+                        }`}
+                      >
+                        {platformAccounts.length > 0 ? (<><HiOutlinePlus size={14} /> Connect another account</>) : 'Connect'}
+                      </button>
+                    )}
                   </div>
                 );
               })}
@@ -291,13 +315,22 @@ export default function SocialConnectionsPage() {
                 <div className="text-center py-16 text-gray-400 text-sm">No posts yet — publish a design from the editor to see it here.</div>
               )}
               {posts.map((post) => {
-                const meta = PLATFORM_META[post.platform];
+                const meta = post.platform ? PLATFORM_META[post.platform] : undefined;
                 const status = STATUS_META[post.status];
                 return (
                   <div key={post.id} className="bg-white dark:bg-[#1e1e30] rounded-2xl border border-gray-200 dark:border-gray-700 p-4">
                     <div className="flex items-start justify-between gap-4">
                       <div className="flex items-center gap-3 flex-1 min-w-0">
-                        {post.mediaUrls[0] && <img src={post.mediaUrls[0]} alt="" className="w-14 h-14 rounded-lg object-cover flex-shrink-0" />}
+                        {post.mediaUrls[0] && (
+                          <div className="relative flex-shrink-0">
+                            <img src={post.mediaUrls[0]} alt="" className="w-14 h-14 rounded-lg object-cover" />
+                            {post.mediaType === 'carousel' && post.mediaUrls.length > 1 && (
+                              <span className="absolute bottom-0.5 right-0.5 px-1 py-0.5 rounded text-[8px] font-bold bg-black/70 text-white leading-none">
+                                {post.mediaUrls.length}
+                              </span>
+                            )}
+                          </div>
+                        )}
                         <div className="min-w-0">
                           <div className="flex items-center gap-2 mb-1">
                             <span>{meta?.icon}</span>
@@ -315,7 +348,7 @@ export default function SocialConnectionsPage() {
                             <p className="text-[11px] text-purple-500 mt-1">Waiting for a team approver</p>
                           )}
                           {post.status === 'approved' && (
-                            <p className="text-[11px] text-teal-600 mt-1">Approved — send it whenever you're ready</p>
+                            <p className="text-[11px] text-teal-600 mt-1">Approved — an editor or approver on your team will publish it</p>
                           )}
                           {post.status === 'scheduled' && post.scheduledFor && (
                             <p className="text-[11px] text-blue-500 mt-1">Scheduled for {new Date(post.scheduledFor).toLocaleString()}</p>
@@ -327,14 +360,19 @@ export default function SocialConnectionsPage() {
                       </button>
                     </div>
 
-                    {post.status === 'approved' && (
+                    {/* An 'approved' post here is always the maker's own submission —
+                        sending now belongs to editors/approvers (see the Approvals
+                        tab's "ready to publish" section), so no send action is
+                        offered from a maker's own history anymore. */}
+                    {post.status === 'approved' && !isMaker && (
                       <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
                         <button
                           onClick={async () => {
                             setSendingId(post.id);
                             try {
                               const result = await sendPost(post.id);
-                              if (result.status === 'published') toast.success(`Sent to ${PLATFORM_META[post.platform]?.label || post.platform}!`);
+                              const label = (result.platform && PLATFORM_META[result.platform]?.label) || result.platform || 'the platform';
+                              if (result.status === 'published') toast.success(`Sent to ${label}!`);
                               else toast.error(result.errorMessage || 'Failed to send');
                             } catch (err: any) {
                               toast.error(err.message);
@@ -345,7 +383,7 @@ export default function SocialConnectionsPage() {
                           className="w-full py-2 text-sm font-semibold rounded-xl bg-[#7B2FBE] text-white hover:bg-[#6A25A8] disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-1.5"
                         >
                           <HiOutlineCheck size={16} />
-                          {sendingId === post.id ? 'Sending…' : `Send to ${PLATFORM_META[post.platform]?.label || post.platform}`}
+                          {sendingId === post.id ? 'Sending…' : `Send to ${(post.platform && PLATFORM_META[post.platform]?.label) || post.platform || 'the platform'}`}
                         </button>
                       </div>
                     )}
@@ -383,12 +421,16 @@ export default function SocialConnectionsPage() {
 
           {/* APPROVALS TAB — approvers only (tab isn't rendered otherwise) */}
           {activeTab === 'approvals' && (
-            <div className="space-y-3">
+            <div className="space-y-6">
               {pendingApproval.length === 0 && (
                 <div className="text-center py-16 text-gray-400 text-sm">Nothing awaiting approval right now.</div>
               )}
-              {pendingApproval.map((post) => {
-                const meta = PLATFORM_META[post.platform];
+
+              {awaitingReview.length > 0 && (
+                <div className="space-y-3">
+                  <h3 className="text-xs font-bold uppercase tracking-wide text-gray-400">Awaiting your review</h3>
+                  {awaitingReview.map((post) => {
+                const meta = post.platform ? PLATFORM_META[post.platform] : undefined;
                 const submitter = post.user?.name || post.user?.email || 'A team member';
                 const busy = actingId === post.id;
                 return (
@@ -399,9 +441,21 @@ export default function SocialConnectionsPage() {
                           <a href={`/editor/${post.projectId}`} target="_blank" rel="noopener noreferrer" title="Open the design in the editor" className="flex-shrink-0 group relative">
                             <img src={post.mediaUrls[0]} alt="" className="w-16 h-16 rounded-lg object-cover" />
                             <span className="absolute inset-0 rounded-lg bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center text-white text-[9px] font-semibold opacity-0 group-hover:opacity-100">Open</span>
+                            {post.mediaType === 'carousel' && post.mediaUrls.length > 1 && (
+                              <span className="absolute bottom-0.5 right-0.5 px-1 py-0.5 rounded text-[8px] font-bold bg-black/70 text-white leading-none">
+                                {post.mediaUrls.length}
+                              </span>
+                            )}
                           </a>
                         ) : (
-                          <img src={post.mediaUrls[0]} alt="" className="w-16 h-16 rounded-lg object-cover flex-shrink-0" />
+                          <div className="relative flex-shrink-0">
+                            <img src={post.mediaUrls[0]} alt="" className="w-16 h-16 rounded-lg object-cover" />
+                            {post.mediaType === 'carousel' && post.mediaUrls.length > 1 && (
+                              <span className="absolute bottom-0.5 right-0.5 px-1 py-0.5 rounded text-[8px] font-bold bg-black/70 text-white leading-none">
+                                {post.mediaUrls.length}
+                              </span>
+                            )}
+                          </div>
                         )
                       )}
                       <div className="min-w-0 flex-1">
@@ -414,8 +468,14 @@ export default function SocialConnectionsPage() {
                           )}
                         </div>
                         <div className="flex items-center gap-2 mb-1 mt-0.5">
-                          <span>{meta?.icon}</span>
-                          <span className="text-xs text-gray-500 dark:text-gray-400">{meta?.label}</span>
+                          {meta ? (
+                            <>
+                              <span>{meta.icon}</span>
+                              <span className="text-xs text-gray-500 dark:text-gray-400">{meta.label}</span>
+                            </>
+                          ) : (
+                            <span className="text-xs text-gray-400">No platform chosen yet</span>
+                          )}
                           <span className="text-[11px] text-gray-400">· by {submitter}</span>
                           <span className="text-[11px] text-gray-400">· {new Date(post.createdAt).toLocaleString()}</span>
                         </div>
@@ -469,7 +529,7 @@ export default function SocialConnectionsPage() {
                             setActingId(post.id);
                             try {
                               await approvePost(post.id);
-                              toast.success(post.scheduledFor && new Date(post.scheduledFor).getTime() > Date.now() ? 'Approved — scheduled' : "Approved — the sender can now publish it");
+                              toast.success(post.scheduledFor && new Date(post.scheduledFor).getTime() > Date.now() ? 'Approved — scheduled' : 'Approved — ready to publish');
                             } catch (err: any) { toast.error(err.message); }
                             finally { setActingId(null); }
                           }}
@@ -481,7 +541,100 @@ export default function SocialConnectionsPage() {
                     )}
                   </div>
                 );
-              })}
+                  })}
+                </div>
+              )}
+
+              {readyToPublish.length > 0 && (
+                <div className="space-y-3">
+                  <h3 className="text-xs font-bold uppercase tracking-wide text-gray-400">Approved — ready to publish</h3>
+                  {readyToPublish.map((post) => {
+                    // A maker-submitted post never had a platform chosen — this is
+                    // the point that finally happens, so `post.platform` is null
+                    // here unless this is a legacy/direct post that already had one.
+                    const meta = post.platform ? PLATFORM_META[post.platform] : undefined;
+                    const submitter = post.user?.name || post.user?.email || 'A team member';
+                    const busy = actingId === post.id;
+                    const activeAccounts = accounts.filter((a) => a.isActive);
+                    const chosenAccountId = publishAccountChoice[post.id] || '';
+                    return (
+                      <div key={post.id} className="bg-white dark:bg-[#1e1e30] rounded-2xl border border-teal-200 dark:border-teal-900 p-4">
+                        <div className="flex items-start gap-3">
+                          {post.mediaUrls[0] && (
+                            <div className="relative flex-shrink-0">
+                              <img src={post.mediaUrls[0]} alt="" className="w-16 h-16 rounded-lg object-cover" />
+                              {post.mediaType === 'carousel' && post.mediaUrls.length > 1 && (
+                                <span className="absolute bottom-0.5 right-0.5 px-1 py-0.5 rounded text-[8px] font-bold bg-black/70 text-white leading-none">
+                                  {post.mediaUrls.length}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-semibold text-gray-900 dark:text-white truncate">{post.project?.name || 'Untitled Design'}</span>
+                              {post.projectId && (
+                                <a href={`/editor/${post.projectId}`} target="_blank" rel="noopener noreferrer" className="text-[11px] text-[#7B2FBE] hover:underline ml-auto flex-shrink-0">
+                                  Open design ↗
+                                </a>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 mb-1 mt-0.5">
+                              {meta ? (
+                                <>
+                                  <span>{meta.icon}</span>
+                                  <span className="text-xs text-gray-500 dark:text-gray-400">{meta.label}</span>
+                                </>
+                              ) : (
+                                <span className="text-xs text-gray-400">No platform chosen yet</span>
+                              )}
+                              <span className="text-[11px] text-gray-400">· submitted by {submitter}</span>
+                            </div>
+                            <p className="text-xs text-gray-500 break-words">{post.caption || '(no caption)'}</p>
+                          </div>
+                        </div>
+                        <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700 space-y-2">
+                          {!post.platform && (
+                            activeAccounts.length > 0 ? (
+                              <select
+                                value={chosenAccountId}
+                                onChange={(e) => setPublishAccountChoice((prev) => ({ ...prev, [post.id]: e.target.value }))}
+                                className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7B2FBE]/30"
+                              >
+                                <option value="">Choose an account to publish to…</option>
+                                {activeAccounts.map((a) => (
+                                  <option key={a.id} value={a.id}>
+                                    {PLATFORM_META[a.platform]?.label || a.platform} — @{a.platformUsername}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : (
+                              <p className="text-xs text-gray-400">Connect a social account first (Connected Accounts tab) before you can publish this.</p>
+                            )
+                          )}
+                          <button
+                            disabled={busy || (!post.platform && !chosenAccountId)}
+                            onClick={async () => {
+                              setActingId(post.id);
+                              try {
+                                const result = await sendPost(post.id, post.platform ? undefined : chosenAccountId);
+                                const label = (result.platform && PLATFORM_META[result.platform]?.label) || result.platform || 'the platform';
+                                if (result.status === 'published') toast.success(`Sent to ${label}!`);
+                                else toast.error(result.errorMessage || 'Failed to send');
+                                setPublishAccountChoice((prev) => { const next = { ...prev }; delete next[post.id]; return next; });
+                              } catch (err: any) { toast.error(err.message); }
+                              finally { setActingId(null); }
+                            }}
+                            className="w-full py-2 text-sm font-semibold rounded-xl bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-1.5"
+                          >
+                            <HiOutlineCheck size={16} /> {busy ? 'Publishing…' : meta ? `Publish to ${meta.label}` : 'Publish'}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
         </main>

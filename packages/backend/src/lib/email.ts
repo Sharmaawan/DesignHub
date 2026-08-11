@@ -126,6 +126,89 @@ export async function sendInviteEmail({
   }
 }
 
+export async function sendProjectShareEmail({
+  to,
+  inviterName,
+  inviterEmail,
+  projectName,
+  permission,
+  designLink,
+  userSmtp,
+}: {
+  to: string;
+  inviterName: string;
+  inviterEmail: string;
+  projectName: string;
+  permission: string;
+  designLink: string;
+  userSmtp?: SmtpCreds | null;
+}) {
+  const transporter = resolveTransporter(userSmtp);
+  const fromAddress = userSmtp?.user || SYSTEM_FROM;
+
+  if (!transporter) {
+    console.log(`[Email skipped] No mail transport configured (no inviter SMTP, no MSMTP_PATH, no SMTP_USER). Share link for ${to}: ${designLink}`);
+    return false;
+  }
+
+  const mailOptions = {
+    from: `"${inviterName} via DesignHub" <${fromAddress}>`,
+    replyTo: inviterEmail,
+    to,
+    subject: `${inviterName} shared "${projectName}" with you on DesignHub`,
+    html: `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; margin: 0; padding: 40px 20px; }
+          .container { max-width: 500px; margin: 0 auto; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 24px rgba(0,0,0,0.08); }
+          .header { background: linear-gradient(135deg, #7B2FBE, #4A0E8F); padding: 32px; text-align: center; }
+          .header h1 { color: white; font-size: 24px; margin: 0; }
+          .header p { color: rgba(255,255,255,0.8); font-size: 14px; margin-top: 8px; }
+          .body { padding: 32px; }
+          .body h2 { font-size: 18px; color: #1a1a2e; margin: 0 0 12px; }
+          .body p { font-size: 14px; color: #555; line-height: 1.6; margin: 0 0 24px; }
+          .badge { display: inline-block; background: #7B2FBE; color: white; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; text-transform: uppercase; }
+          .btn { display: block; width: 100%; padding: 14px; background: #7B2FBE; color: white; text-decoration: none; border-radius: 10px; font-size: 16px; font-weight: 600; text-align: center; margin: 24px 0; }
+          .btn:hover { background: #6A25A8; }
+          .footer { padding: 24px 32px; background: #f9f9f9; border-top: 1px solid #eee; text-align: center; }
+          .footer p { font-size: 12px; color: #999; margin: 0; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>DesignHub</h1>
+            <p>Collaborative Design Platform</p>
+          </div>
+          <div class="body">
+            <h2>A design was shared with you!</h2>
+            <p><strong>${inviterName}</strong> has given you <span class="badge">${permission}</span> access to <strong>"${projectName}"</strong> on DesignHub.</p>
+            <p>Click the button below to open the design${permission === 'editor' ? ' and start editing together' : ''}.</p>
+            <a href="${designLink}" class="btn">Open design</a>
+            <p style="font-size: 12px; color: #999;">If the button doesn't work, copy and paste this link into your browser:<br><a href="${designLink}" style="color: #7B2FBE;">${designLink}</a></p>
+          </div>
+          <div class="footer">
+            <p>&copy; ${new Date().getFullYear()} DesignHub. All rights reserved.</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `,
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+    console.log(`[Email sent] To: ${to}, From: ${inviterName} <${inviterEmail}>, Project: ${projectName}, Permission: ${permission}`);
+    return true;
+  } catch (error: any) {
+    console.error('Failed to send project share email:', error.message);
+    return false;
+  }
+}
+
 export async function sendNotificationEmail({
   to,
   subject,

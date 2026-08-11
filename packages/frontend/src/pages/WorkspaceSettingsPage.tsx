@@ -6,6 +6,7 @@ import { HiOutlineArrowLeft, HiOutlineUserGroup, HiOutlinePlus, HiOutlineTrash, 
 import { templateAPI } from '../utils/api';
 import { Template } from '../types';
 import toast from 'react-hot-toast';
+import DashboardSidebar from '../components/dashboard/DashboardSidebar';
 
 export default function WorkspaceSettingsPage() {
   const navigate = useNavigate();
@@ -19,6 +20,8 @@ export default function WorkspaceSettingsPage() {
   const [language, setLanguage] = useState('en');
   const [trashItems, setTrashItems] = useState<Template[]>([]);
   const [trashLoading, setTrashLoading] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('designhub-sidebar-collapsed') === 'true');
+  const [activeSection, setActiveSection] = useState('');
 
   useEffect(() => {
     loadTeams();
@@ -73,6 +76,8 @@ export default function WorkspaceSettingsPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-[#0f0f23]">
+      <DashboardSidebar collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} activeSection={activeSection} onSectionChange={setActiveSection} />
+      <div className={`transition-all duration-300 ${sidebarCollapsed ? 'ml-[72px]' : 'ml-[240px]'}`}>
       <div className="max-w-2xl mx-auto px-6 py-10">
         {/* Header */}
         <div className="flex items-center gap-4 mb-8">
@@ -301,6 +306,7 @@ export default function WorkspaceSettingsPage() {
             Save All Changes
           </button>
         </div>
+      </div>
       </div>
     </div>
   );

@@ -398,6 +398,7 @@ export default function LeftSidebar() {
   const {
     addElement, removeElements, pushHistory, pages, currentPageIndex, setPageBackgroundColor, updatePage, importDocumentPages,
     activeTool, setActiveTool, drawColor, setDrawColor, drawWidth, setDrawWidth,
+    addTrack, setPageDuration, setSidePanelTab,
   } = useEditorStore();
   const currentPage = pages[currentPageIndex];
   const cw = currentPage?.width ?? 1920;
@@ -963,7 +964,9 @@ export default function LeftSidebar() {
 
   // Reads the video's real dimensions first (same technique as loadImageSize for
   // template uploads) so it lands on the canvas at its own aspect ratio instead of a
-  // guessed default that would look stretched.
+  // guessed default that would look stretched. Also reads its real duration to set
+  // up the timeline automatically — a video should never require the user to open
+  // the Timeline panel and configure anything by hand before it's export-ready.
   const addVideoToCanvas = (url: string, name: string) => {
     const probe = document.createElement('video');
     probe.preload = 'metadata';
@@ -973,13 +976,36 @@ export default function LeftSidebar() {
       const maxW = 500;
       const w = Math.min(maxW, nw);
       const h = w * (nh / nw);
+
+      const page = pages[currentPageIndex];
+      const existingTrack = page?.tracks?.find((t) => t.type === 'video');
+      const trackId = existingTrack ? existingTrack.id : addTrack('video');
+      // A page can already have other clips on the video track (a second video added
+      // later) — place this one right after whatever's already there instead of
+      // always starting at 0 and silently overlapping it.
+      const trackClips = (page?.elements || []).filter((e) => e.trackId === trackId);
+      const timelineStart = trackClips.reduce((max, c) => Math.max(max, c.timelineEnd ?? 0), 0);
+      // A live stream or otherwise-indeterminate source reports Infinity/NaN here —
+      // fall back to a sane default clip length rather than propagating that into the
+      // scene duration.
+      const probedMs = Number.isFinite(probe.duration) ? Math.round(probe.duration * 1000) : 0;
+      const clipMs = probedMs > 0 ? probedMs : 5000;
+      const timelineEnd = timelineStart + clipMs;
+      if ((page?.duration || 0) < timelineEnd) setPageDuration(currentPageIndex, timelineEnd);
+
       addElement({
         type: 'video', x: cx, y: cy, width: w, height: h,
         rotation: 0, opacity: 1, visible: true, locked: false, name, zIndex: 0,
-        data: { type: 'video', src: url, autoplay: true, loop: true, muted: true, startTime: 0, endTime: 0 },
+        trackId, timelineStart, timelineEnd,
+        data: { type: 'video', src: url, autoplay: true, loop: true, muted: true, startTime: 0, endTime: probe.duration || 0 },
       });
       pushHistory();
-      toast.success(`${name} added to canvas`);
+      // The video timeline panel is opt-in (a toolbar icon toggles it) and easy to
+      // never notice — surface it automatically the moment there's actually a video
+      // to edit, instead of leaving trim/speed/crop/audio controls undiscoverable
+      // behind an icon nobody clicked.
+      setSidePanelTab('timeline');
+      toast.success(`${name} added — timeline set to ${(timelineEnd / 1000).toFixed(1)}s, ready to export as MP4`);
     };
     probe.onerror = () => toast.error('Could not read that video file');
     probe.src = url;
@@ -996,7 +1022,10 @@ export default function LeftSidebar() {
       data: { type: 'audio', src: url, volume: 1, muted: false, loop: false, startTime: 0, endTime: 0 } as any,
     });
     pushHistory();
-    toast.success(`${name} added — open the video timeline panel to place it on a track`);
+    // See the matching comment in addVideoToCanvas — open the timeline automatically
+    // rather than telling the user to go find a panel toggle themselves.
+    setSidePanelTab('timeline');
+    toast.success(`${name} added to the timeline — drag it onto the audio track`);
   };
 
   // Import categories the editor can turn into editable canvas content directly. Video
@@ -1267,13 +1296,21 @@ export default function LeftSidebar() {
 
     // Upload to backend for persistence
     let serverUrl = '';
+    let matchId = fileId;
     try {
       const { data: saved } = await uploadAPI.upload(file, (pct) => {
         setUploadedFiles((prev) => prev.map((f) => f.id === fileId ? { ...f, progress: Math.min(pct, 60) } : f));
       });
       serverUrl = `${BACKEND}${saved.url}`;
+      // The entry's id is swapped from the local placeholder to the real backend id
+      // here (needed so a later upload-history refetch can dedupe against it by
+      // that same id) — every subsequent update must key off this NEW id too, or
+      // importFileIntoCanvas's own f.id === matchId checks silently match nothing
+      // and the row never leaves "still uploading" (progress never reaches 100,
+      // so it's forever unclickable).
+      matchId = saved.id || fileId;
       setUploadedFiles((prev) => prev.map((f) => f.id === fileId ? {
-        ...f, id: saved.id || fileId, url: serverUrl, progress: 70,
+        ...f, id: matchId, url: serverUrl, progress: 70,
       } : f));
     } catch (err: any) {
       const msg = err?.response?.data?.error || 'Upload failed';
@@ -1282,7 +1319,7 @@ export default function LeftSidebar() {
       return;
     }
 
-    await importFileIntoCanvas(file, serverUrl, fileId);
+    await importFileIntoCanvas(file, serverUrl, matchId);
   };
 
   // Re-opens a file from a previous session (loaded from upload history, which only has

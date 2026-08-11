@@ -46,10 +46,9 @@ export default function TopToolbar({ onThemeToggle, isDark, onShowShortcuts, onO
     project,
   } = useEditorStore();
   const { updateProject } = useProjectStore();
-  const { approvalContext, loadApprovalContext, posts, loadPosts, sendPost } = useSocialStore();
+  const { approvalContext, loadApprovalContext, posts, loadPosts } = useSocialStore();
   const [showZoomMenu, setShowZoomMenu] = useState(false);
   const [showViewMenu, setShowViewMenu] = useState(false);
-  const [sending, setSending] = useState(false);
 
   // Drives the Publish button's label — a maker submits for review instead of
   // publishing directly, and the button should say so up front rather than only
@@ -64,24 +63,11 @@ export default function TopToolbar({ onThemeToggle, isDark, onShowShortcuts, onO
   const projectId = window.location.pathname.split('/').pop();
   const currentPage = pages[currentPageIndex];
   const pendingPostForProject = posts.find((p) => p.projectId === projectId && p.status === 'pending_approval');
-  // Distinct from pending — an approver already signed off on this one, so the maker
-  // should get a real "publish it now" action instead of being routed back through
-  // "Send for Approval" as if nothing had happened yet.
+  // Distinct from pending — an approver already signed off on this one. The maker's
+  // button goes inert here rather than firing a send themselves — an editor/approver
+  // on the team does that from their Approvals queue instead (see SocialConnectionsPage).
   const approvedPostForProject = posts.find((p) => p.projectId === projectId && p.status === 'approved');
   const rejectedPostForProject = posts.find((p) => p.projectId === projectId && p.status === 'rejected');
-
-  const handleSendApprovedPost = async () => {
-    if (!approvedPostForProject) return;
-    setSending(true);
-    try {
-      const result = await sendPost(approvedPostForProject.id);
-      if (result.status === 'published') toast.success('Published!');
-      else toast.error(result.errorMessage || 'Failed to publish');
-    } catch (err: any) {
-      toast.error(err.message);
-    }
-    setSending(false);
-  };
 
   const handleSave = () => {
     if (!projectId) return;
@@ -314,11 +300,15 @@ export default function TopToolbar({ onThemeToggle, isDark, onShowShortcuts, onO
           <HiOutlineChevronDown size={10} />
         </button>
         <button
-          onClick={isMaker && approvedPostForProject ? handleSendApprovedPost : onOpenPublish}
-          disabled={sending || (isMaker && !!pendingPostForProject)}
+          onClick={onOpenPublish}
+          // A maker's involvement ends at submission — once approved, an
+          // editor/approver on the team does the actual send (from their Approvals
+          // queue), not the maker here, so this button goes inert rather than firing
+          // anything for either of those two states.
+          disabled={isMaker && (!!pendingPostForProject || !!approvedPostForProject)}
           className="btn-primary flex items-center gap-1.5 text-sm py-1.5 px-3 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap flex-shrink-0"
           title={
-            isMaker && approvedPostForProject ? 'Approved — publish it now'
+            isMaker && approvedPostForProject ? 'Approved — an editor or approver on your team will publish it'
               : isMaker && pendingPostForProject ? 'Already submitted — waiting on an approver to review it'
               : isMaker && rejectedPostForProject ? 'Rejected — edit and resubmit for another review'
               : isMaker ? 'Send to social media for approval'
@@ -327,8 +317,7 @@ export default function TopToolbar({ onThemeToggle, isDark, onShowShortcuts, onO
         >
           <HiOutlineGlobeAlt size={14} />
           <span className="hidden sm:inline">
-            {sending ? 'Publishing...'
-              : isMaker && approvedPostForProject ? 'Publish Now'
+            {isMaker && approvedPostForProject ? 'Approved'
               : isMaker && pendingPostForProject ? 'Awaiting Approval'
               : isMaker && rejectedPostForProject ? 'Resubmit'
               : isMaker ? 'Send for Approval'

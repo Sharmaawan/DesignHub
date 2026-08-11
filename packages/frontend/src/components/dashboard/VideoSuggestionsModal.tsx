@@ -2,6 +2,7 @@ import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { HiOutlinePlay, HiOutlineX } from 'react-icons/hi';
 import { projectAPI } from '../../utils/api';
+import { useEditorStore } from '../../stores/editorStore';
 
 // Bundled locally (public/sample-video.mp4) rather than fetched from an external host —
 // the Google demo bucket used earlier now returns AccessDenied for anonymous requests,
@@ -33,13 +34,21 @@ export default function VideoSuggestionsModal({ open, onClose }: { open: boolean
   if (!open) return null;
 
   const handlePick = async (format: VideoFormat) => {
+    // Placed on a real video track with a real scene duration from the start — a
+    // freshly quick-created video project must be immediately export-ready, not
+    // require a trip to the Timeline panel before Export stops rejecting it.
+    const trackId = `track-${Date.now()}`;
+    const timelineEnd = 5000;
     const pages = [{
       id: `page-${Date.now()}`,
       name: 'Page 1',
+      duration: timelineEnd,
+      tracks: [{ id: trackId, type: 'video' as const, name: 'Video 1' }],
       elements: [{
         id: `el-${Date.now()}`,
         type: 'video' as const, x: 0, y: 0, width: format.width, height: format.height,
         rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 0, name: 'Video',
+        trackId, timelineStart: 0, timelineEnd,
         data: { type: 'video' as const, src: SAMPLE_VIDEO_URL, autoplay: true, loop: true, muted: true, startTime: 0, endTime: 0 },
       }],
       backgroundColor: '#000000',
@@ -49,6 +58,11 @@ export default function VideoSuggestionsModal({ open, onClose }: { open: boolean
       const { data } = await projectAPI.create({ name: `Untitled ${format.label}`, canvasData: pages });
       toast.success(`Created ${format.label}`);
       onClose();
+      // sidePanelTab is app-level UI state, not project data — it survives the route
+      // change below unless set explicitly, so without this a fresh video project
+      // would land on whatever tab (e.g. "templates") was last open, leaving the
+      // actual video timeline just as undiscoverable as the toggle icon itself.
+      useEditorStore.getState().setSidePanelTab('timeline');
       navigate(`/editor/${data.id}`);
     } catch {
       toast.error('Failed to create design');

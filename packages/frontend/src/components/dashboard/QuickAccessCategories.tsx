@@ -274,17 +274,42 @@ export default function QuickAccessCategories() {
         ref={scrollRef}
         className="flex gap-3 overflow-x-auto no-scrollbar scroll-smooth pb-2"
       >
-        {CATEGORIES.map((cat) => (
-          <button
+        {CATEGORIES.map((cat, i) => (
+          <div
             key={cat.id}
-            onClick={() => handleCategoryClick(cat)}
-            className="flex-shrink-0 group"
+            className="flex-shrink-0 group animate-slide-up"
+            style={{ animationDelay: `${i * 35}ms`, animationFillMode: 'backwards' }}
           >
-            <div className={`w-[120px] h-[120px] rounded-2xl bg-gradient-to-br ${cat.gradient} flex flex-col items-center justify-center gap-2 shadow-lg hover:shadow-xl hover:scale-105 active:scale-95 transition-all duration-200`}>
-              <span className="text-3xl group-hover:scale-110 transition-transform">{cat.icon}</span>
-              <span className="text-[11px] font-semibold text-white text-center leading-tight px-2">{cat.label}</span>
+            <div className="relative w-[120px] h-[120px] [perspective:1000px]">
+              {/* Micro-glow border — a blurred copy of the card's own gradient, sitting
+                  behind it, that only becomes visible on hover. Lives outside the flip
+                  layer below so it doesn't rotate with the card. */}
+              <div
+                className={`absolute -inset-1 rounded-2xl bg-gradient-to-br ${cat.gradient} opacity-0 group-hover:opacity-70 blur-md transition-opacity duration-300`}
+                aria-hidden="true"
+              />
+
+              {/* Flip layer — front face triggers the real create action; hovering
+                  reveals a back face with the same real action, just framed as a CTA. */}
+              <div className="relative w-full h-full transition-transform duration-500 [transform-style:preserve-3d] group-hover:[transform:rotateY(180deg)]">
+                <button
+                  onClick={() => handleCategoryClick(cat)}
+                  className={`absolute inset-0 [backface-visibility:hidden] rounded-2xl bg-gradient-to-br ${cat.gradient} bg-[length:200%_200%] animate-gradient-shift flex flex-col items-center justify-center gap-2 shadow-lg`}
+                >
+                  <span className="text-3xl group-hover:scale-110 transition-transform">{cat.icon}</span>
+                  <span className="text-[11px] font-semibold text-white text-center leading-tight px-2">{cat.label}</span>
+                </button>
+                <button
+                  onClick={() => handleCategoryClick(cat)}
+                  className={`absolute inset-0 [backface-visibility:hidden] [transform:rotateY(180deg)] rounded-2xl bg-gradient-to-br ${cat.gradient} flex flex-col items-center justify-center gap-1.5 shadow-lg`}
+                >
+                  <span className="text-xl">{cat.icon}</span>
+                  <span className="text-[10px] font-bold text-white text-center leading-tight px-2">Start creating</span>
+                  <span className="text-white/80 text-sm">→</span>
+                </button>
+              </div>
             </div>
-          </button>
+          </div>
         ))}
       </div>
     </div>
