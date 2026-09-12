@@ -1938,7 +1938,7 @@ function AnimatedTextElement({ element, commonProps, data, isTextEdit }: {
     });
 
     return () => cancelAnimationFrame(frameId);
-  }, [text, data.content, data.fontSize, data.fontFamily, data.fontWeight, data.fontStyle, data.lineHeight, zoom];
+  }, [text, data.content, data.fontSize, data.fontFamily, data.fontWeight, data.fontStyle, data.lineHeight, zoom]);
 
   const text = applyTextTransform(displayText);
 
