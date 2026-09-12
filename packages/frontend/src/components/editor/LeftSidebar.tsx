@@ -3,7 +3,9 @@ import { useSearchParams } from 'react-router-dom';
 import { uploadAPI, aiAPI, aiSettingsAPI, BACKEND_ORIGIN as BACKEND, resolveAssetUrl } from '../../utils/api';
 import { importPDF, importSVG, importCSV, importXLSX, importDOCX, importPPTX, paginateParagraphs } from '../../utils/documentImport';
 import { useEditorStore } from '../../stores/editorStore';
+import type { CanvasElement, TextData } from '../../types';
 import { COLORS_PALETTE } from '../../utils/cn';
+import { detectVideoHasAudio } from '../../utils/audioWaveform';
 import {
   HiOutlineTemplate, HiOutlineViewGrid, HiOutlinePencil,
   HiOutlineColorSwatch, HiOutlineUpload,
@@ -336,7 +338,9 @@ export default function LeftSidebar() {
   const [aiPrompt, setAiPrompt] = useState('');
   const [aiGenerating, setAiGenerating] = useState(false);
   const [aiResult, setAiResult] = useState('');
-  const [aiTab, setAiTab] = useState<'write' | 'image' | 'suggest'>('write');
+  const [aiTab, setAiTab] = useState<'write' | 'image' | 'suggest' | 'layout'>('write');
+  const [aiLayoutFixing, setAiLayoutFixing] = useState(false);
+  const [aiLayoutSummary, setAiLayoutSummary] = useState('');
   const [aiConfiguredProviders, setAiConfiguredProviders] = useState<string[]>([]);
   const [aiReferenceImages, setAiReferenceImages] = useState<{ dataUrl: string; name: string }[]>([]);
 
@@ -396,9 +400,9 @@ export default function LeftSidebar() {
   };
 
   const {
-    addElement, removeElements, pushHistory, pages, currentPageIndex, setPageBackgroundColor, updatePage, importDocumentPages,
+    addElement, updateElement, removeElements, pushHistory, pages, currentPageIndex, setPageBackgroundColor, updatePage, importDocumentPages,
     activeTool, setActiveTool, drawColor, setDrawColor, drawWidth, setDrawWidth,
-    addTrack, setPageDuration, setSidePanelTab,
+    setSidePanelTab, setPageBackgroundImage, addVideoWithAudio,
   } = useEditorStore();
   const currentPage = pages[currentPageIndex];
   const cw = currentPage?.width ?? 1920;
@@ -496,16 +500,14 @@ export default function LeftSidebar() {
 
     const photoId = (tpl as any).photoId as string | undefined;
     if (photoId) {
-      // Same technique as the standalone "Add background photo" feature — Picsum
-      // crops server-side to exactly tw x th, so it fills any page format cleanly.
-      addElement({
-        type: 'image', x: 0, y: 0, width: tw, height: th,
-        rotation: 0, opacity: 1, visible: true, locked: false, name: 'Background Photo', zIndex: 0,
-        data: {
-          type: 'image', objectFit: 'cover', borderRadius: 0, brightness: 100, contrast: 100, saturation: 100, hue: 0, blur: 0, filters: [],
-          src: `https://picsum.photos/id/${photoId}/${Math.round(tw)}/${Math.round(th)}`,
-          cropX: 0, cropY: 0, cropWidth: 100, cropHeight: 100,
-        } as any,
+      // Goes into page.backgroundImage (same real background mechanism the Design
+      // panel and "Set as Background" use), not a regular selectable image element —
+      // see the comment on replaceBackgroundPhotoElement for why that matters.
+      // Picsum crops server-side to exactly tw x th, so it fills any page format
+      // cleanly with no client-side crop math needed.
+      setPageBackgroundImage(currentPageIndex, {
+        src: `https://picsum.photos/id/${photoId}/${Math.round(tw)}/${Math.round(th)}`,
+        cropX: 0, cropY: 0, cropWidth: 100, cropHeight: 100,
       });
       addElement({
         type: 'shape', x: 0, y: 0, width: tw, height: th,
@@ -600,24 +602,17 @@ export default function LeftSidebar() {
     }
   };
 
-  // Replace, not stack — same pattern as handleApplyTemplate, so picking a different
-  // photo swaps the background instead of layering photos on top of each other.
-  // Inserted unlocked (not full-page-locked) so it behaves like any other image —
-  // the user can select it and resize/move it, e.g. to cover only half the page,
-  // instead of being stuck at exactly full-page size.
+  // Goes straight to the real page.backgroundImage mechanism (same one "Set as
+  // Background" and the Design panel's background controls use) — not a regular
+  // selectable/resizable CanvasElement. A background picked here previously landed
+  // as a giant full-page image element with its own Transformer handles, which
+  // could end up selected and dragged/resized like normal artwork (or just show an
+  // oversized bounding box extending past the page edge) instead of behaving like
+  // an actual page background. setPageBackgroundImage also sweeps out any leftover
+  // element from that old behavior.
   const replaceBackgroundPhotoElement = (data: Record<string, unknown>) => {
-    const existingId = pages[currentPageIndex].elements.find((e) => e.name === 'Background Photo')?.id;
-    if (existingId) removeElements([existingId]);
-    addElement({
-      type: 'image', x: 0, y: 0, width: cw, height: ch,
-      rotation: 0, opacity: 1, visible: true, locked: false, name: 'Background Photo', zIndex: 0,
-      data: {
-        type: 'image', objectFit: 'cover', borderRadius: 0, brightness: 100, contrast: 100, saturation: 100, hue: 0, blur: 0,
-        filters: [], ...data,
-      } as any,
-    });
-    pushHistory();
-    toast.success('Background photo added — drag or resize it like any image');
+    setPageBackgroundImage(currentPageIndex, data as any);
+    toast.success('Background photo set');
   };
 
   const handleAddBackgroundPhoto = (photoId: string) => {
@@ -763,6 +758,60 @@ export default function LeftSidebar() {
       toast.error(message);
     } finally {
       setAiGenerating(false);
+    }
+  };
+
+  // Reads the current page's elements, hands them + the typed instruction to the
+  // backend's tool-use-constrained layout-fix call, then applies whatever
+  // move/resize/delete operations come back directly via the store — unlike
+  // handleAiGenerate's other modes, there's no "Add to canvas" step here since
+  // the whole point is editing what's ALREADY there, not creating something new.
+  const handleAiLayoutFix = async () => {
+    if (!aiPrompt.trim()) { toast.error('Describe what needs fixing'); return; }
+    const page = pages[currentPageIndex];
+    if (!page || page.elements.length === 0) { toast.error('Nothing on this page to fix'); return; }
+
+    const elementSummaries = page.elements.map((el) => ({
+      id: el.id, type: el.type, name: el.name,
+      x: Math.round(el.x), y: Math.round(el.y), width: Math.round(el.width), height: Math.round(el.height),
+      rotation: el.rotation, zIndex: el.zIndex,
+      ...(el.type === 'text' ? { textContent: (el.data as TextData).content } : {}),
+    }));
+
+    setAiLayoutFixing(true);
+    setAiLayoutSummary('');
+    try {
+      const response = await aiAPI.layoutFix({
+        pageWidth: page.width, pageHeight: page.height,
+        elements: elementSummaries, instruction: aiPrompt,
+      });
+      const data = response?.data;
+      if (!data?.success) throw new Error(data?.error || 'Layout fix failed');
+      const operations: Array<{ elementId: string; action: 'update' | 'delete'; x?: number; y?: number; width?: number; height?: number }> = data.operations || [];
+      if (operations.length === 0) {
+        toast('The AI didn\'t find anything to change for that instruction.');
+        return;
+      }
+      const toDelete = operations.filter((op) => op.action === 'delete').map((op) => op.elementId);
+      if (toDelete.length > 0) removeElements(toDelete);
+      for (const op of operations) {
+        if (op.action !== 'update') continue;
+        const changes: Partial<CanvasElement> = {};
+        if (typeof op.x === 'number') changes.x = op.x;
+        if (typeof op.y === 'number') changes.y = op.y;
+        if (typeof op.width === 'number') changes.width = op.width;
+        if (typeof op.height === 'number') changes.height = op.height;
+        if (Object.keys(changes).length > 0) updateElement(op.elementId, changes);
+      }
+      pushHistory();
+      setAiLayoutSummary(data.summary || `Updated ${operations.length} element(s).`);
+      toast.success(data.summary || 'Layout updated');
+    } catch (err: any) {
+      const message = err.response?.data?.error || err.message || 'Layout fix failed';
+      console.error('[AI] layout-fix failed', err);
+      toast.error(message);
+    } finally {
+      setAiLayoutFixing(false);
     }
   };
 
@@ -936,19 +985,27 @@ export default function LeftSidebar() {
 
   // Validates the image actually loads before placing it — without this, a
   // broken/expired URL silently added a permanently-empty gray placeholder
-  // to the canvas with no indication anything went wrong. Also sizes it to
-  // its real aspect ratio instead of a fixed 500x375 that could distort it.
-  const addImageToCanvas = (url: string, name: string, maxSize = 500) => {
+  // to the canvas with no indication anything went wrong.
+  const addImageToCanvas = (url: string, name: string) => {
     const probe = new window.Image();
     probe.crossOrigin = 'anonymous';
     probe.onload = () => {
-      const nw = probe.naturalWidth || maxSize;
-      const nh = probe.naturalHeight || maxSize * 0.75;
-      const scale = Math.min(1, maxSize / Math.max(nw, nh));
+      const nw = probe.naturalWidth || 500;
+      const nh = probe.naturalHeight || 375;
+      // Sized to the image's OWN aspect ratio (capped to fit within ~70% of the
+      // page, centered) — NOT stretched or cropped to fill the whole canvas. Every
+      // upload used to land at exactly the page's own W×H via a cover-fit crop,
+      // which made sense only for the specific case of a full poster meant to BE
+      // the page; applied as the default for every upload it was actively wrong —
+      // e.g. a logo file with its own letterboxed aspect ratio would get force-fit
+      // to a square page and report as page-sized (1080×1080) even though the
+      // actual logo only occupies a fraction of that. No crop, no distortion, no
+      // forced page-size: what you uploaded is the object's real size.
+      const scale = Math.min(1, (cw * 0.7) / nw, (ch * 0.7) / nh);
       const w = Math.round(nw * scale);
       const h = Math.round(nh * scale);
       addElement({
-        type: 'image', x: cx, y: cy, width: w, height: h,
+        type: 'image', x: Math.round(cw / 2 - w / 2), y: Math.round(ch / 2 - h / 2), width: w, height: h,
         rotation: 0, opacity: 1, visible: true, locked: false, name, zIndex: 0,
         data: { type: 'image', src: url, objectFit: 'cover', borderRadius: 0, brightness: 100, contrast: 100, saturation: 100, hue: 0, blur: 0, filters: [], cropX: 0, cropY: 0, cropWidth: 100, cropHeight: 100 },
       });
@@ -970,42 +1027,27 @@ export default function LeftSidebar() {
   const addVideoToCanvas = (url: string, name: string) => {
     const probe = document.createElement('video');
     probe.preload = 'metadata';
-    probe.onloadedmetadata = () => {
+    probe.onloadedmetadata = async () => {
       const nw = probe.videoWidth || 640;
       const nh = probe.videoHeight || 360;
       const maxW = 500;
       const w = Math.min(maxW, nw);
       const h = w * (nh / nw);
+      const endTime = probe.duration || 0;
 
-      const page = pages[currentPageIndex];
-      const existingTrack = page?.tracks?.find((t) => t.type === 'video');
-      const trackId = existingTrack ? existingTrack.id : addTrack('video');
-      // A page can already have other clips on the video track (a second video added
-      // later) — place this one right after whatever's already there instead of
-      // always starting at 0 and silently overlapping it.
-      const trackClips = (page?.elements || []).filter((e) => e.trackId === trackId);
-      const timelineStart = trackClips.reduce((max, c) => Math.max(max, c.timelineEnd ?? 0), 0);
-      // A live stream or otherwise-indeterminate source reports Infinity/NaN here —
-      // fall back to a sane default clip length rather than propagating that into the
-      // scene duration.
-      const probedMs = Number.isFinite(probe.duration) ? Math.round(probe.duration * 1000) : 0;
-      const clipMs = probedMs > 0 ? probedMs : 5000;
-      const timelineEnd = timelineStart + clipMs;
-      if ((page?.duration || 0) < timelineEnd) setPageDuration(currentPageIndex, timelineEnd);
+      // Probing for a decodable audio track up front (decodeAudioData rejects when
+      // there isn't one) so the video lands with its own audio ALREADY split onto a
+      // linked Audio track — instead of the user discovering an empty audio lane and
+      // having to build that pairing by hand. See addVideoWithAudio in editorStore.ts.
+      const hasAudio = await detectVideoHasAudio(url);
 
-      addElement({
-        type: 'video', x: cx, y: cy, width: w, height: h,
-        rotation: 0, opacity: 1, visible: true, locked: false, name, zIndex: 0,
-        trackId, timelineStart, timelineEnd,
-        data: { type: 'video', src: url, autoplay: true, loop: true, muted: true, startTime: 0, endTime: probe.duration || 0 },
-      });
-      pushHistory();
+      addVideoWithAudio({ src: url, name, x: cx, y: cy, width: w, height: h, startTime: 0, endTime, hasAudio });
       // The video timeline panel is opt-in (a toolbar icon toggles it) and easy to
       // never notice — surface it automatically the moment there's actually a video
       // to edit, instead of leaving trim/speed/crop/audio controls undiscoverable
       // behind an icon nobody clicked.
       setSidePanelTab('timeline');
-      toast.success(`${name} added — timeline set to ${(timelineEnd / 1000).toFixed(1)}s, ready to export as MP4`);
+      toast.success(`${name} added${hasAudio ? ' — audio linked to its own track' : ''}, ready to export as MP4`);
     };
     probe.onerror = () => toast.error('Could not read that video file');
     probe.src = url;
@@ -1040,30 +1082,18 @@ export default function LeftSidebar() {
     const cat = getFileCategory(file.type, file.name);
     try {
       // ── IMAGE ────────────────────────────────────────────────────────
+      // Added as a plain flat image, full-bleed on the page — no upfront prompt,
+      // no automatic decomposition. Splitting it into editable text/logo/shape
+      // layers is an explicit, targeted action from here: double-click the
+      // specific part you want to edit (see EditorCanvas's handleElementDblClick),
+      // which analyzes and extracts just that one region instead of the whole
+      // image at once. Whole-image auto-decompose was tried and reverted — a
+      // dense photo-heavy design is close to a worst case for the OCR/pixel-
+      // analysis pipeline this app uses, and kept producing garbled/overlapping
+      // elements even after many rounds of targeted fixes.
       if (cat === 'image') {
-        const img = new window.Image();
-        img.onload = () => {
-          const w = Math.min(img.naturalWidth || 500, Math.round(cw * 0.7));
-          const h = img.naturalWidth ? Math.round((img.naturalHeight / img.naturalWidth) * w) : 375;
-          addElement({
-            type: 'image', x: cx, y: cy, width: w, height: h,
-            rotation: 0, opacity: 1, visible: true, locked: false, name: file.name, zIndex: 0,
-            data: { type: 'image', src: serverUrl, objectFit: 'cover', borderRadius: 0, brightness: 100, contrast: 100, saturation: 100, hue: 0, blur: 0, filters: [], cropX: 0, cropY: 0, cropWidth: 100, cropHeight: 100 },
-          });
-          pushHistory();
-          setUploadedFiles((prev) => prev.map((f) => f.id === matchId ? { ...f, progress: 100, canvasable: true, thumbnail: serverUrl } : f));
-          toast.success(`${file.name} added to canvas`);
-        };
-        img.onerror = () => {
-          addElement({
-            type: 'image', x: cx, y: cy, width: 500, height: 375,
-            rotation: 0, opacity: 1, visible: true, locked: false, name: file.name, zIndex: 0,
-            data: { type: 'image', src: serverUrl, objectFit: 'cover', borderRadius: 0, brightness: 100, contrast: 100, saturation: 100, hue: 0, blur: 0, filters: [], cropX: 0, cropY: 0, cropWidth: 100, cropHeight: 100 },
-          });
-          pushHistory();
-          setUploadedFiles((prev) => prev.map((f) => f.id === matchId ? { ...f, progress: 100, canvasable: true, thumbnail: serverUrl } : f));
-        };
-        img.src = serverUrl;
+        addImageToCanvas(serverUrl, file.name);
+        setUploadedFiles((prev) => prev.map((f) => f.id === matchId ? { ...f, progress: 100, canvasable: true, thumbnail: serverUrl } : f));
         return;
       }
 
@@ -1400,9 +1430,13 @@ export default function LeftSidebar() {
   };
 
   return (
-    <div className="flex h-full flex-shrink-0">
-      {/* Icon strip */}
-      <div className="w-14 flex flex-col items-center gap-1 py-2 bg-white dark:bg-canva-dark-surface border-r border-gray-200 dark:border-canva-dark-border overflow-y-auto">
+    <>
+      {/* Icon strip — the only part of this component that occupies real flex layout
+          space; the content panel below is an absolutely-positioned drawer that
+          floats over the canvas instead, so opening Templates/Elements/etc. never
+          shrinks the canvas's own measured size (and therefore never changes its
+          zoom/fit) the way a flex sibling would. */}
+      <div className="w-14 flex-shrink-0 flex flex-col items-center gap-1 py-2 bg-white dark:bg-canva-dark-surface border-r border-gray-200 dark:border-canva-dark-border overflow-y-auto">
         {TABS.map(({ key, icon: Icon, label }) => (
           <button key={key} onClick={() => handleTabClick(key)} title={label}
             className={`flex flex-col items-center gap-0.5 w-12 py-2 rounded-lg text-[9px] font-medium transition-colors ${
@@ -1415,9 +1449,14 @@ export default function LeftSidebar() {
         ))}
       </div>
 
-      {/* Panel */}
+      {/* Panel — floats over the canvas (absolute, not a flex sibling) so it acts as
+          a drawer: opening it covers part of the canvas visually without shrinking
+          the canvas's own measured width/height, and closing it needs no separate
+          "recalculate fit" step since the canvas's size never changed in the first
+          place. Positioned relative to EditorPage's `relative` canvas-area
+          container, right after the icon strip. */}
       {panelOpen && (
-        <div className="w-64 bg-white dark:bg-canva-dark-surface border-r border-gray-200 dark:border-canva-dark-border flex flex-col overflow-hidden">
+        <div className="absolute left-14 top-0 bottom-0 z-20 w-64 bg-white dark:bg-canva-dark-surface border-r border-gray-200 dark:border-canva-dark-border shadow-2xl flex flex-col overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-gray-800 flex-shrink-0">
             <span className="text-sm font-semibold text-gray-900 dark:text-white capitalize">{activeTab}</span>
             <button
@@ -1446,25 +1485,37 @@ export default function LeftSidebar() {
             {/* TEMPLATES */}
             {activeTab === 'templates' && (
               <div className="p-4">
-                {/* Describe your ideal design — generates a title/subtitle/color scheme via AI */}
-                <div className="mb-4 p-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gradient-to-br from-canva-purple/5 to-pink-500/5">
-                  <textarea
-                    value={aiTemplatePrompt}
-                    onChange={(e) => setAiTemplatePrompt(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handleGenerateTemplateFromPrompt(); }}
-                    placeholder="Describe your ideal design…"
-                    rows={2}
-                    className="w-full px-2.5 py-2 text-xs border border-gray-200 dark:border-gray-700 rounded-lg resize-none bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-canva-purple/30 focus:border-canva-purple mb-2"
-                  />
+                {/* Upload custom template */}
+                <div className="mb-4">
                   <button
-                    onClick={handleGenerateTemplateFromPrompt}
-                    disabled={aiTemplateGenerating || !aiTemplatePrompt.trim()}
-                    className="w-full flex items-center justify-center gap-1.5 py-2 bg-gradient-to-r from-canva-purple to-pink-500 hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg text-xs font-semibold transition-all"
+                    onClick={() => document.getElementById('template-upload-input')?.click()}
+                    className="w-full flex items-center justify-center gap-1.5 py-2 bg-gradient-to-r from-canva-purple to-pink-500 hover:opacity-90 text-white rounded-lg text-xs font-semibold transition-all"
                   >
-                    {aiTemplateGenerating
-                      ? <><svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Generating…</>
-                      : <><HiOutlineSparkles size={13} />Generate design</>}
+                    <HiOutlineUpload size={13} />
+                    Upload Template
                   </button>
+                  <input
+                    id="template-upload-input"
+                    type="file"
+                    accept=".json,.canva"
+                    hidden
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        const reader = new FileReader();
+                        reader.onload = (event) => {
+                          try {
+                            const data = JSON.parse(event.target?.result as string);
+                            handleApplyTemplate(data);
+                            toast.success('Template uploaded successfully');
+                          } catch {
+                            toast.error('Invalid template file');
+                          }
+                        };
+                        reader.readAsText(file);
+                      }
+                    }}
+                  />
                 </div>
 
                 <div className="grid grid-cols-2 gap-2.5">
@@ -1853,14 +1904,21 @@ export default function LeftSidebar() {
                           else if (f.canvasable) handleImportExistingFile(f);
                           else window.open(f.url, '_blank', 'noopener,noreferrer');
                         };
+                        // Video/audio aren't part of the generic "canvasable" import
+                        // pipeline (they get their own handling above), but they should
+                        // still be draggable the same way images are — otherwise the
+                        // card just sits there inert despite looking identical to a
+                        // draggable one, which is exactly what was reported as "audio is
+                        // not dragging".
+                        const isDraggable = (f.canvasable || cat === 'video' || cat === 'audio') && isDone;
                         return (
                           <div
                             key={f.id}
-                            draggable={f.canvasable && isDone}
-                            onDragEnd={() => { if (f.canvasable && isDone) activate(); }}
+                            draggable={isDraggable}
+                            onDragEnd={() => { if (isDraggable) activate(); }}
                             onClick={() => { if (isDone && !f.error) activate(); }}
                             className={`flex items-start gap-2 p-2 rounded-lg transition-colors group ${
-                              f.canvasable && isDone
+                              isDraggable
                                 ? 'bg-gray-50 dark:bg-gray-800 hover:bg-purple-50 dark:hover:bg-purple-900/20 cursor-grab active:cursor-grabbing'
                                 : isDone && f.url && !f.error
                                 ? 'bg-gray-50 dark:bg-gray-800 hover:bg-blue-50 dark:hover:bg-blue-900/20 cursor-pointer'
@@ -1888,18 +1946,20 @@ export default function LeftSidebar() {
                                 </div>
                               )}
                               {f.error && <div className="text-[9px] text-red-500 mt-0.5">{f.error}</div>}
-                              {isDone && !f.error && f.canvasable && (
-                                <div className="text-[9px] text-gray-400">{isImage ? 'Drag to canvas or' : 'Click to import or'}</div>
+                              {isDone && !f.error && isDraggable && (
+                                <div className="text-[9px] text-gray-400">
+                                  {isImage ? 'Drag to canvas or' : cat === 'video' || cat === 'audio' ? 'Drag to timeline or' : 'Click to import or'}
+                                </div>
                               )}
                             </div>
                             {/* Action buttons */}
                             {isDone && !f.error && f.url && (
                               <div className="flex flex-col gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-all">
-                                {f.canvasable ? (
+                                {isDraggable ? (
                                   <button
                                     onClick={(e) => { e.stopPropagation(); activate(); }}
                                     className="text-[9px] px-1.5 py-1 bg-canva-purple hover:bg-canva-purple/90 text-white rounded-lg font-medium whitespace-nowrap">
-                                    {isImage ? '+ Canvas' : 'Import'}
+                                    {isImage ? '+ Canvas' : cat === 'video' || cat === 'audio' ? '+ Add' : 'Import'}
                                   </button>
                                 ) : (
                                   <button
@@ -1944,10 +2004,10 @@ export default function LeftSidebar() {
 
                 {/* Mode pills */}
                 <div className="flex gap-1 p-0.5 bg-gray-100 dark:bg-gray-800 rounded-lg">
-                  {(['write', 'image', 'suggest'] as const).map((t) => (
+                  {(['write', 'image', 'suggest', 'layout'] as const).map((t) => (
                     <button key={t} onClick={() => setAiTab(t)}
                       className={`flex-1 py-1.5 rounded-md text-[10px] font-semibold transition-all ${aiTab === t ? 'bg-white dark:bg-gray-700 text-canva-purple shadow-sm' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-200'}`}>
-                      {t === 'write' ? 'Write' : t === 'image' ? 'Image' : 'Ideas'}
+                      {t === 'write' ? 'Write' : t === 'image' ? 'Image' : t === 'suggest' ? 'Ideas' : 'Fix'}
                     </button>
                   ))}
                 </div>
@@ -1956,13 +2016,15 @@ export default function LeftSidebar() {
                 <textarea
                   value={aiPrompt}
                   onChange={(e) => setAiPrompt(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handleAiGenerate(); }}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) (aiTab === 'layout' ? handleAiLayoutFix() : handleAiGenerate()); }}
                   placeholder={aiTab === 'write'
                     ? 'Catchy headline for a fitness brand…'
                     : aiTab === 'image'
                     ? (aiReferenceImages.length > 0
                         ? 'Optional — describe how to combine the attached image(s), or just press Generate'
                         : 'Neon city skyline at dusk…')
+                    : aiTab === 'layout'
+                    ? 'The pink bar overlaps the text below it — fix that without touching anything else…'
                     : 'Birthday card for a 30-year-old…'}
                   rows={6}
                   className="w-full px-3 py-2.5 text-xs border border-gray-200 dark:border-gray-700 rounded-lg resize-y min-h-[110px] bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-canva-purple/30 focus:border-canva-purple"
@@ -2004,18 +2066,35 @@ export default function LeftSidebar() {
                   </div>
                 )}
 
-                {/* Generate */}
+                {/* Generate / Fix */}
                 <button
-                  onClick={handleAiGenerate}
-                  disabled={aiGenerating || !canAiGenerate}
+                  onClick={aiTab === 'layout' ? handleAiLayoutFix : handleAiGenerate}
+                  disabled={aiTab === 'layout' ? (aiLayoutFixing || !aiPrompt.trim()) : (aiGenerating || !canAiGenerate)}
                   className="w-full flex items-center justify-center gap-1.5 py-2 bg-canva-purple hover:bg-canva-purple/90 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg text-xs font-semibold transition-all">
-                  {aiGenerating
-                    ? <><svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Generating…</>
-                    : <><HiOutlineSparkles size={13} />Generate</>}
+                  {aiTab === 'layout'
+                    ? (aiLayoutFixing
+                        ? <><svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Fixing…</>
+                        : <><HiOutlineSparkles size={13} />Fix layout</>)
+                    : (aiGenerating
+                        ? <><svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Generating…</>
+                        : <><HiOutlineSparkles size={13} />Generate</>)}
                 </button>
 
+                {/* Layout-fix result — operations are already applied directly to the
+                    canvas by handleAiLayoutFix, so this is just a confirmation of what
+                    changed, not an "Add to canvas" step like the other modes. */}
+                {aiTab === 'layout' && aiLayoutSummary && (
+                  <div className="rounded-lg border border-canva-purple/20 bg-canva-purple/5 p-3">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[9px] font-semibold text-canva-purple uppercase tracking-wide">Applied</span>
+                      <button onClick={() => setAiLayoutSummary('')} className="text-[9px] text-gray-400 hover:text-gray-600">clear</button>
+                    </div>
+                    <p className="text-xs text-gray-700 dark:text-gray-300 leading-relaxed">{aiLayoutSummary}</p>
+                  </div>
+                )}
+
                 {/* Result card */}
-                {aiResult && (
+                {aiTab !== 'layout' && aiResult && (
                   <div className="rounded-lg border border-canva-purple/20 bg-canva-purple/5 p-3">
                     <div className="flex items-center justify-between mb-1.5">
                       <span className="text-[9px] font-semibold text-canva-purple uppercase tracking-wide">Result</span>
@@ -2045,7 +2124,7 @@ export default function LeftSidebar() {
                 )}
 
                 {/* Quick prompts */}
-                {!aiResult && (
+                {(aiTab === 'layout' ? !aiLayoutSummary : !aiResult) && (
                   <div>
                     <p className="text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Suggestions</p>
                     <div className="flex flex-wrap gap-1">
@@ -2053,6 +2132,8 @@ export default function LeftSidebar() {
                         ? ['Bold tagline', 'CTA text', 'Event title', 'Product headline', 'Bio line']
                         : aiTab === 'image'
                         ? ['Abstract bg', 'Tech pattern', 'Sunset', 'Watercolor']
+                        : aiTab === 'layout'
+                        ? ['Fix the overlapping elements', 'Move the text back onto the page', 'Remove the duplicate element', 'Space these evenly']
                         : ['Birthday card', 'IG post', 'Logo idea', 'YT thumbnail']
                       ).map((p) => (
                         <button key={p} onClick={() => setAiPrompt(p)}
@@ -2160,6 +2241,6 @@ export default function LeftSidebar() {
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 }
