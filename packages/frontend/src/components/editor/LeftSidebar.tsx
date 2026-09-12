@@ -1485,14 +1485,32 @@ export default function LeftSidebar() {
             {/* TEMPLATES */}
             {activeTab === 'templates' && (
               <div className="p-4">
-                {/* Upload custom template */}
-                <div className="mb-4">
+                {/* Export and Upload templates */}
+                <div className="mb-4 flex gap-2">
+                  <button
+                    onClick={() => {
+                      const templateData = { ...page, id: `template-${Date.now()}` };
+                      const json = JSON.stringify(templateData, null, 2);
+                      const blob = new Blob([json], { type: 'application/json' });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = `template-${page.name || 'untitled'}.json`;
+                      a.click();
+                      URL.revokeObjectURL(url);
+                      toast.success('Template exported');
+                    }}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-blue-500 hover:opacity-90 text-white rounded-lg text-xs font-semibold transition-all"
+                  >
+                    <HiOutlineColorSwatch size={13} />
+                    Export
+                  </button>
                   <button
                     onClick={() => document.getElementById('template-upload-input')?.click()}
-                    className="w-full flex items-center justify-center gap-1.5 py-2 bg-gradient-to-r from-canva-purple to-pink-500 hover:opacity-90 text-white rounded-lg text-xs font-semibold transition-all"
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-gradient-to-r from-canva-purple to-pink-500 hover:opacity-90 text-white rounded-lg text-xs font-semibold transition-all"
                   >
                     <HiOutlineUpload size={13} />
-                    Upload Template
+                    Upload
                   </button>
                   <input
                     id="template-upload-input"
