@@ -1497,7 +1497,6 @@ export default function LeftSidebar() {
                   <input
                     id="template-upload-input"
                     type="file"
-                    accept=".json,.canva"
                     hidden
                     onChange={(e) => {
                       const file = e.target.files?.[0];
@@ -1509,7 +1508,7 @@ export default function LeftSidebar() {
                             handleApplyTemplate(data);
                             toast.success('Template uploaded successfully');
                           } catch {
-                            toast.error('Invalid template file');
+                            toast.error('Invalid template file format');
                           }
                         };
                         reader.readAsText(file);
