@@ -230,10 +230,36 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
     return clock.onEnd(() => setIsPlaying(false));
   }, [drivesGlobalPlayback, clock, setIsPlaying]);
 
-  // Track Shift key for aspect ratio locking
+  // Track Shift key for aspect ratio locking, and Enter key to edit selected text
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Shift') setShiftHeld(true);
+
+      // Press Enter to edit selected text element
+      if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+        const target = e.target as HTMLElement;
+        const tag = target?.tagName;
+        // Don't intercept Enter if user is typing in an input/textarea
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+        // Check if exactly one text element is selected
+        if (selectedElementIds.length === 1) {
+          const selectedId = selectedElementIds[0];
+          const element = page.elements.find((el) => el.id === selectedId);
+          if (element && element.type === 'text') {
+            e.preventDefault();
+            // Trigger double-click on the element to enter edit mode
+            const textNode = stageRef.current?.findOne('#' + selectedId);
+            if (textNode) {
+              setEditingTextId(selectedId);
+              useEditorStore.setState({ isEditing: true });
+              // Simulate the double-click behavior
+              const dblClickEvent = new Konva.KonvaEventObject(new Event('dblclick'), textNode) as any;
+              handleElementDblClick(dblClickEvent, element);
+            }
+          }
+        }
+      }
     };
     const handleKeyUp = (e: KeyboardEvent) => {
       if (e.key === 'Shift') setShiftHeld(false);
@@ -244,7 +270,7 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, []);
+  }, [selectedElementIds, page.elements, stageRef]);
 
   useEffect(() => {
     if (containerSize.width > 0 && containerSize.height > 0) {
