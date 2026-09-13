@@ -440,6 +440,17 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
 
   const lastCursorEmitRef = useRef(0);
 
+  // Single coordinate transformation pipeline for the entire editor
+  // Design space (0-1080 x 0-1350) → Screen space (viewport pixels)
+  const designToScreen = (designX: number, designY: number, designW: number, designH: number) => {
+    return {
+      screenX: (designX * zoom) + panX,
+      screenY: (designY * zoom) + panY,
+      screenW: designW * zoom,
+      screenH: designH * zoom,
+    };
+  };
+
   const handleStageMouseMove = (e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
     if (onCursorMove) {
       // Throttled — this fires on every pixel of mouse movement, and broadcasting
@@ -501,7 +512,6 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
 
       const textNode = stageRef.current?.findOne('#' + element.id);
       if (textNode) {
-        const textPosition = textNode.getAbsolutePosition();
         const stageBox = stageRef.current?.container().getBoundingClientRect();
         if (!stageBox) return;
 
@@ -511,10 +521,15 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
         const data = element.data as TextData;
         textarea.value = data.content;
         textarea.style.position = 'absolute';
-        textarea.style.top = `${stageBox.top + textPosition.y}px`;
-        textarea.style.left = `${stageBox.left + textPosition.x}px`;
-        textarea.style.width = `${element.width * zoom}px`;
-        textarea.style.height = `${element.height * zoom}px`;
+
+        // Use single coordinate transformation: design space → screen space
+        const { screenX, screenY, screenW, screenH } = designToScreen(
+          element.x, element.y, element.width, element.height
+        );
+        textarea.style.top = `${stageBox.top + screenY}px`;
+        textarea.style.left = `${stageBox.left + screenX}px`;
+        textarea.style.width = `${screenW}px`;
+        textarea.style.height = `${screenH}px`;
         textarea.style.fontSize = `${data.fontSize * zoom}px`;
         textarea.style.fontFamily = data.fontFamily;
         textarea.style.fontWeight = String(data.fontWeight);
