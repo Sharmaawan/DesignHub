@@ -473,7 +473,25 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
     e.cancelBubble = true;
     const element = page.elements.find((el) => el.id === id);
     if (element?.locked) return;
-    selectElement(id, e.evt.shiftKey);
+
+    // For text elements: single click enters edit mode directly (like real Canva)
+    if (element?.type === 'text') {
+      // If this text is already selected, clicking again enters edit mode
+      if (selectedElementIds.includes(id) && selectedElementIds.length === 1) {
+        setEditingTextId(id);
+        useEditorStore.setState({ isEditing: true });
+        const textNode = stageRef.current?.findOne('#' + id);
+        if (textNode) {
+          handleElementDblClick(e as any, element);
+        }
+      } else {
+        // First click: select the text
+        selectElement(id, e.evt.shiftKey);
+      }
+    } else {
+      // For other elements: just select
+      selectElement(id, e.evt.shiftKey);
+    }
   };
 
   const handleElementDblClick = (e: Konva.KonvaEventObject<MouseEvent>, element: CanvasElement) => {
