@@ -8,7 +8,14 @@ import toast from 'react-hot-toast';
 
 type Tab = 'recent' | 'favorites' | 'trending' | 'team' | 'suggested';
 
-export default function RecommendedDesigns() {
+interface RecommendedDesignsProps {
+  // Opens the same rename/duplicate/download/share/delete context menu the
+  // "All Projects" grid on this page already uses — passed down rather than
+  // reimplemented here, so there's one context menu, not two.
+  onCardMenu?: (e: React.MouseEvent, projectId: string) => void;
+}
+
+export default function RecommendedDesigns({ onCardMenu }: RecommendedDesignsProps = {}) {
   const [activeTab, setActiveTab] = useState<Tab>('recent');
   const { projects, toggleFavorite } = useProjectStore();
   const { setProject } = useEditorStore();
@@ -43,7 +50,16 @@ export default function RecommendedDesigns() {
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-bold text-gray-900 dark:text-white">Your Designs</h2>
+        <div>
+          <h2 className="text-lg font-bold text-gray-900 dark:text-white">Recent designs</h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400">Pick up where you left off</p>
+        </div>
+        <button
+          onClick={() => navigate('/projects')}
+          className="text-sm font-medium text-[#7B2FBE] hover:underline flex-shrink-0"
+        >
+          View all →
+        </button>
       </div>
 
       {/* Tabs */}
@@ -77,14 +93,15 @@ export default function RecommendedDesigns() {
         </div>
       ) : (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4">
-          {displayProjects.map((project) => {
+          {displayProjects.map((project, i) => {
             const firstPage = project.pages?.[0];
             const bgColor = firstPage?.backgroundColor || '#f3f4f6';
             const elements = firstPage?.elements || [];
             return (
               <div
                 key={project.id}
-                className="group cursor-pointer"
+                className="group cursor-pointer animate-slide-up"
+                style={{ animationDelay: `${i * 40}ms`, animationFillMode: 'backwards' }}
                 onClick={() => handleOpenProject(project)}
               >
                 <div className="aspect-[4/3] bg-gray-100 dark:bg-gray-800 rounded-xl overflow-hidden relative group-hover:ring-2 ring-[#7B2FBE] transition-all shadow-sm group-hover:shadow-lg">
@@ -149,10 +166,22 @@ export default function RecommendedDesigns() {
                   >
                     <HiOutlineHeart size={14} fill={project.isFavorite ? 'currentColor' : 'none'} />
                   </button>
+
+                  {/* Three-dot menu */}
+                  {onCardMenu && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onCardMenu(e, project.id); }}
+                      className="absolute top-2 left-2 p-1.5 rounded-full bg-white/80 dark:bg-gray-800/80 text-gray-400 opacity-0 group-hover:opacity-100 transition-all"
+                    >
+                      <HiOutlineDotsHorizontal size={14} />
+                    </button>
+                  )}
                 </div>
-                <div className="mt-2 px-1">
-                  <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{project.name}</p>
-                  <p className="text-[11px] text-gray-400">{formatDate(project.updatedAt)}</p>
+                <div className="mt-2 px-1 flex items-start justify-between gap-1">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{project.name}</p>
+                    <p className="text-[11px] text-gray-400">{formatDate(project.updatedAt)}</p>
+                  </div>
                 </div>
               </div>
             );

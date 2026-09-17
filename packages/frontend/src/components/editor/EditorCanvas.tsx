@@ -6,6 +6,7 @@ import Konva from 'konva';
 import { Collaborator } from '../../hooks/useCollaboration';
 import { timelineClock as defaultTimelineClock, TimelineClock } from '../../lib/timelineClock';
 import { uploadAPI, BACKEND_ORIGIN as BACKEND } from '../../utils/api';
+import { sampleColorsForRegion, detectNearbyTextRegions } from '../../utils/templateDecomposition';
 import toast from 'react-hot-toast';
 import {
   HiOutlineClipboard, HiOutlineDocumentDownload, HiOutlineDuplicate,
@@ -128,6 +129,30 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
   const [shiftHeld, setShiftHeld] = useState(false);
+  // Guards the text-edit textarea against being created twice for the same
+  // element — a real double-click fires both the single-click handler (which
+  // schedules entry into edit mode via setTimeout) and Konva's own dblclick
+  // event, and Enter-to-edit is a third entry point. Without this, two
+  // textareas could exist at once, stealing focus from each other; whichever
+  // one's blur fires while its value still equals the pre-edit content is
+  // harmless, but the failure mode — two live editors racing over the same
+  // element — isn't something to leave to timing luck. See handleElementDblClick.
+  const activeTextEditRef = useRef<{ id: string; textarea: HTMLTextAreaElement } | null>(null);
+  // Which OCR-extracted elements currently have a revealOcrTextWithPatch
+  // sampling call in flight. Revealing used to be synchronous (colors were
+  // precomputed at upload time), so re-editing the same element again right
+  // away was harmless — opacity flipped to 1 immediately, so the second
+  // edit's own wasInvisibleOcrText check correctly read false. Now that
+  // sampling happens on demand and takes a moment, opacity stays 0 until
+  // that async call resolves — so editing the same element again inside that
+  // window still reads opacity 0 and fires a *second*, concurrent sampling
+  // call for the same element, which independently adds its own patch. Two
+  // overlapping patches is already wrong; if either one's sampling happens
+  // to land on the flat-color fallback, it reads as a stray mismatched box.
+  // This set is what the id gets added to for the duration of the first
+  // call, so a second attempt on the same element is skipped rather than
+  // racing it.
+  const revealingOcrTextIdsRef = useRef<Set<string>>(new Set());
 
   // Smart alignment guides (Canva/Figma-style pink lines): computed once at drag
   // start from every other element's bounds on the page, then checked against the
@@ -248,12 +273,11 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
           const element = page.elements.find((el) => el.id === selectedId);
           if (element && element.type === 'text') {
             e.preventDefault();
-            // Trigger double-click on the element to enter edit mode
+            // handleElementDblClick owns editingTextId/isEditing/the node-exists
+            // check itself (and safely no-ops if this element is somehow
+            // already being edited) — this just needs to hand off to it.
             const textNode = stageRef.current?.findOne('#' + selectedId);
             if (textNode) {
-              setEditingTextId(selectedId);
-              useEditorStore.setState({ isEditing: true });
-              // Simulate the double-click behavior
               const dblClickEvent = new Konva.KonvaEventObject(new Event('dblclick'), textNode) as any;
               handleElementDblClick(dblClickEvent, element);
             }
@@ -272,21 +296,40 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
     };
   }, [selectedElementIds, page.elements, stageRef]);
 
+  // Zoom is only auto-picked once per page (an initial "fit to screen"), never
+  // recalculated after that just because the container resized — a side panel
+  // opening/closing, the properties panel toggling, a CSS transition mid-flight
+  // all resize the container, and re-fitting on every one of those snapped the
+  // canvas to a new zoom out from under the user. Real design tools (Canva,
+  // Figma) only auto-fit zoom once, on initial load.
+  //
+  // Pan is different: it's re-centered on every resize (using whatever the
+  // current zoom already is). The design's on-screen size doesn't change, but
+  // the *container* holding it does — without re-centering, a design that was
+  // centered in a wide container stays pinned at that same offset when the
+  // container narrows (panel opens) and drifts off the visible edge, which is
+  // the "detached toolbar / cut-off image" bug this replaced.
+  const fittedPageIdRef = useRef<string | null>(null);
   useEffect(() => {
-    if (containerSize.width > 0 && containerSize.height > 0) {
-      const scale = Math.min(
+    if (containerSize.width <= 0 || containerSize.height <= 0) return;
+
+    let scale = zoom;
+    if (fittedPageIdRef.current !== page.id) {
+      fittedPageIdRef.current = page.id;
+      scale = Math.min(
         (containerSize.width - 100) / page.width,
         (containerSize.height - 100) / page.height,
         1
       ) * 0.8;
       setZoom(scale);
-      const newPanX = (containerSize.width - page.width * scale) / 2;
-      const newPanY = (containerSize.height - page.height * scale) / 2;
-      setPan(newPanX, newPanY);
       // Update viewport center so new elements spawn centered
       setViewportCenter(page.width / 2, page.height / 2);
     }
-  }, [containerSize, page.width, page.height, setZoom, setPan, setViewportCenter]);
+    const newPanX = (containerSize.width - page.width * scale) / 2;
+    const newPanY = (containerSize.height - page.height * scale) / 2;
+    setPan(newPanX, newPanY);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [containerSize, page.id, page.width, page.height, setZoom, setPan, setViewportCenter]);
 
   useEffect(() => {
     const transformer = transformerRef.current;
@@ -480,97 +523,268 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
     }
   };
 
+  // OCR-extracted text is created invisible (opacity 0, see
+  // templateDecomposition.ts) and stays that way until genuinely edited —
+  // it sits exactly on top of the same text already baked into the
+  // background image, so leaving it undrawn is what keeps an untouched
+  // template pixel-identical to the original upload. The moment it IS
+  // edited, revealing it with nothing behind it isn't right either — the
+  // old baked-in pixels are still there underneath, and confirmed directly:
+  // without a cover, old and new text visibly double-expose whenever the
+  // edit doesn't land exactly over the original glyphs. A patch behind just
+  // this one element covers that.
+  //
+  // Sampling the colors/texture for that patch used to happen eagerly for
+  // every detected line during upload — often 70+ on a dense poster, each
+  // needing several canvas reads, which was the dominant cost in the
+  // "Creating…" step even though the overwhelming majority of those lines
+  // are never edited. It's on demand now: this only runs once, the first
+  // time a specific OCR-extracted element is actually changed, against the
+  // live background image and current sibling text boxes (read fresh via
+  // getState() since this resolves after an await, by which point the
+  // render that created this closure may be stale — the store actions
+  // themselves stay correct regardless, they read current state internally,
+  // but the box positions used to pick a non-overlapping donor region need
+  // to be current too).
+  const revealOcrTextWithPatch = async (el: CanvasElement) => {
+    // See revealingOcrTextIdsRef above for why this guard exists — without
+    // it, re-editing the same element before its first reveal finishes
+    // sampling fires a second, concurrent call that adds its own separate
+    // patch.
+    if (revealingOcrTextIdsRef.current.has(el.id)) return;
+    revealingOcrTextIdsRef.current.add(el.id);
+    try {
+      const storeNow = () => {
+        const s = useEditorStore.getState();
+        return s.pages[s.currentPageIndex];
+      };
+      const pageNow = storeNow();
+      const bg = pageNow.elements.find((e) => e.type === 'image' && e.name === 'Background');
+      if (!bg) {
+        updateElement(el.id, { opacity: 1 });
+        return;
+      }
+      const bgData = bg.data as ImageData;
+      const knownBoxes = pageNow.elements
+        .filter((e) => e.type === 'text' && e.id !== el.id)
+        .map((e) => ({ x0: e.x, y0: e.y, x1: e.x + e.width, y1: e.y + e.height }));
+
+      // Some templates draw one word directly overlapping another as a
+      // deliberate layered design (a small caption drawn on top of a much
+      // bigger decorative word, all one flat image) — the bigger word often
+      // has no element of its own (OCR reads garbage on it standalone), so
+      // it's invisible to knownBoxes above and the texture-patch donor
+      // search below would happily crop straight through its letters. A
+      // small, on-demand OCR pass scoped to just this element's local area
+      // (not the whole image, and not run at upload time) catches that and
+      // folds it into the exclusion list.
+      const nearbyBoxes = await detectNearbyTextRegions(
+        bgData.src,
+        { x: el.x, y: el.y, width: el.width, height: el.height },
+        bg.width,
+        bg.height
+      );
+      const otherBoxes = [...knownBoxes, ...nearbyBoxes];
+
+      const { color, bgColor, bgPatchImage } = await sampleColorsForRegion(
+        bgData.src,
+        { x: el.x, y: el.y, width: el.width, height: el.height },
+        otherBoxes,
+        bg.width,
+        bg.height
+      );
+
+      const pageAfter = storeNow();
+      const liveEl = pageAfter.elements.find((e) => e.id === el.id);
+      if (!liveEl || liveEl.type !== 'text') return; // deleted while sampling was in flight
+      const maxZ = Math.max(0, ...pageAfter.elements.map((e) => e.zIndex));
+      const patchBase = {
+        x: el.x, y: el.y, width: el.width, height: el.height,
+        rotation: el.rotation, opacity: 1, visible: true as const, locked: false,
+        name: `${el.name || 'Text'} background`,
+      };
+      if (bgPatchImage) {
+        addElement({
+          ...patchBase,
+          type: 'image',
+          data: {
+            type: 'image', src: bgPatchImage, objectFit: 'cover', borderRadius: 0,
+            brightness: 100, contrast: 100, saturation: 100, hue: 0, blur: 0,
+            filters: [], cropX: 0, cropY: 0, cropWidth: 100, cropHeight: 100,
+          },
+        });
+      } else {
+        addElement({
+          ...patchBase,
+          type: 'shape',
+          data: { type: 'shape', shapeType: 'rectangle', fill: bgColor, stroke: 'transparent', strokeWidth: 0, cornerRadius: 0 },
+        });
+      }
+      updateElement(el.id, {
+        opacity: 1,
+        zIndex: maxZ + 2,
+        data: { ...(liveEl.data as TextData), color } as TextData,
+      });
+    } finally {
+      revealingOcrTextIdsRef.current.delete(el.id);
+    }
+  };
+
   const handleElementClick = (e: Konva.KonvaEventObject<MouseEvent>, id: string) => {
     e.cancelBubble = true;
     const element = page.elements.find((el) => el.id === id);
     if (element?.locked) return;
 
-    // For text elements: single click enters edit mode directly (like real Canva)
+    // Single click enters edit mode directly for text (like real Canva) —
+    // deferred one tick so the click's own selection change settles first.
+    // handleElementDblClick owns all of editingTextId/isEditing/the node-exists
+    // check/duplicate-session guarding itself now, so this only needs to select
+    // and hand off; see handleElementDblClick for why calling it here, from its
+    // own dblclick wiring, and from Enter-to-edit can't create duplicate
+    // textareas for the same element.
     if (element?.type === 'text') {
-      // If this text is already selected, clicking again enters edit mode
-      if (selectedElementIds.includes(id) && selectedElementIds.length === 1) {
-        setEditingTextId(id);
-        useEditorStore.setState({ isEditing: true });
-        const textNode = stageRef.current?.findOne('#' + id);
-        if (textNode) {
-          handleElementDblClick(e as any, element);
-        }
-      } else {
-        // First click: select the text
-        selectElement(id, e.evt.shiftKey);
-      }
+      selectElement(id, e.evt.shiftKey);
+      setTimeout(() => handleElementDblClick(e as any, element), 0);
     } else {
       // For other elements: just select
       selectElement(id, e.evt.shiftKey);
     }
   };
 
-  const handleElementDblClick = (e: Konva.KonvaEventObject<MouseEvent>, element: CanvasElement) => {
+  const handleElementDblClick = async (e: Konva.KonvaEventObject<MouseEvent>, element: CanvasElement) => {
     if (element.type === 'text') {
-      setEditingTextId(element.id);
-      useEditorStore.setState({ isEditing: true });
+      // Already editing this exact element (single-click's deferred entry,
+      // Konva's native dblclick, and Enter-to-edit can all reach here for the
+      // same click/keystroke) — re-focus the existing textarea instead of
+      // creating a second one. Two live textareas for one element would steal
+      // focus from each other and each independently commit on blur, which is
+      // exactly the kind of race that could commit a stale value over a real
+      // edit depending on timing.
+      if (activeTextEditRef.current?.id === element.id) {
+        activeTextEditRef.current.textarea.focus();
+        return;
+      }
+      // Editing a different element was somehow still open (its blur should
+      // already have closed it) — close it out first rather than letting two
+      // unrelated edit sessions coexist.
+      if (activeTextEditRef.current) {
+        activeTextEditRef.current.textarea.blur();
+      }
 
-      const textNode = stageRef.current?.findOne('#' + element.id);
-      if (textNode) {
-        const stageBox = stageRef.current?.container().getBoundingClientRect();
-        if (!stageBox) return;
+      // A near-simultaneous second call for this same not-yet-revealed
+      // element (single-click's deferred entry racing Konva's native
+      // dblclick on a literal double-click gesture) would otherwise slip
+      // past the activeTextEditRef guards above, since those are only set
+      // once the first call's reveal finishes — open a second textarea
+      // against still-black, pre-reveal data. Bail out; the in-flight call
+      // will finish the job.
+      if (element.opacity === 0 && revealingOcrTextIdsRef.current.has(element.id)) {
+        return;
+      }
 
-        const textarea = document.createElement('textarea');
-        document.body.appendChild(textarea);
-
-        const data = element.data as TextData;
-        textarea.value = data.content;
-        textarea.style.position = 'absolute';
-
-        // Use single coordinate transformation: design space → screen space
-        const { screenX, screenY, screenW, screenH } = designToScreen(
-          element.x, element.y, element.width, element.height
-        );
-        textarea.style.top = `${stageBox.top + screenY}px`;
-        textarea.style.left = `${stageBox.left + screenX}px`;
-        textarea.style.width = `${screenW}px`;
-        textarea.style.height = `${screenH}px`;
-        textarea.style.fontSize = `${data.fontSize * zoom}px`;
-        textarea.style.fontFamily = data.fontFamily;
-        textarea.style.fontWeight = String(data.fontWeight);
-        textarea.style.fontStyle = data.fontStyle;
-        textarea.style.textAlign = data.textAlign;
-        textarea.style.color = data.color;
-        textarea.style.lineHeight = String(data.lineHeight);
-        textarea.style.letterSpacing = `${data.letterSpacing}px`;
-        textarea.style.textDecoration = data.textDecoration;
-        textarea.style.background = 'rgba(255,255,255,0.9)';
-        textarea.style.border = '2px solid #7B2FBE';
-        textarea.style.borderRadius = '4px';
-        textarea.style.padding = '4px';
-        textarea.style.outline = 'none';
-        textarea.style.resize = 'none';
-        textarea.style.zIndex = '10000';
-        textarea.style.transformOrigin = 'left top';
-        textarea.style.overflow = 'hidden';
-        textarea.style.wordWrap = 'break-word';
-
-        textarea.focus();
-
-        const finishEdit = () => {
-          updateElement(element.id, {
-            data: { ...data, content: textarea.value } as TextData,
-          });
-          textarea.remove();
+      // OCR-extracted text starts invisible with a placeholder black color —
+      // the real ink color/background patch is only known once sampled. Do
+      // that sampling BEFORE opening the textarea (not after closing it) so
+      // the edit box shows the correct final color from its first frame,
+      // instead of flashing the OCR-guessed word in black and only fixing
+      // the color once the user clicks away.
+      let liveElement = element;
+      if (element.opacity === 0) {
+        await revealOcrTextWithPatch(element);
+        const s = useEditorStore.getState();
+        const found = s.pages[s.currentPageIndex].elements.find((el) => el.id === element.id);
+        if (!found) {
+          // Deleted while sampling was in flight.
           setEditingTextId(null);
           useEditorStore.setState({ isEditing: false });
-          pushHistory();
-        };
-
-        textarea.addEventListener('blur', finishEdit);
-        textarea.addEventListener('keydown', (ke) => {
-          if (ke.key === 'Enter' && !ke.shiftKey) {
-            ke.preventDefault();
-            finishEdit();
-          }
-          if (ke.key === 'Escape') finishEdit();
-        });
+          return;
+        }
+        liveElement = found;
       }
+
+      setEditingTextId(liveElement.id);
+      useEditorStore.setState({ isEditing: true });
+
+      const textNode = stageRef.current?.findOne('#' + liveElement.id);
+      const stageBox = stageRef.current?.container().getBoundingClientRect();
+
+      if (!textNode || !stageBox) {
+        console.warn('[TextEdit] Node or stage not found', { nodeExists: !!textNode, stageExists: !!stageBox });
+        setEditingTextId(null);
+        useEditorStore.setState({ isEditing: false });
+        return;
+      }
+
+      const textarea = document.createElement('textarea');
+      document.body.appendChild(textarea);
+      activeTextEditRef.current = { id: liveElement.id, textarea };
+
+      const data = liveElement.data as TextData;
+      textarea.value = data.content;
+      textarea.style.position = 'absolute';
+
+      // Use single coordinate transformation: design space → screen space
+      const { screenX, screenY, screenW, screenH } = designToScreen(
+        liveElement.x, liveElement.y, liveElement.width, liveElement.height
+      );
+      textarea.style.top = `${stageBox.top + screenY}px`;
+      textarea.style.left = `${stageBox.left + screenX}px`;
+      textarea.style.width = `${screenW}px`;
+      textarea.style.height = `${screenH}px`;
+      textarea.style.fontSize = `${data.fontSize * zoom}px`;
+      textarea.style.fontFamily = data.fontFamily;
+      textarea.style.fontWeight = String(data.fontWeight);
+      textarea.style.fontStyle = data.fontStyle;
+      textarea.style.textAlign = data.textAlign;
+      textarea.style.color = data.color;
+      textarea.style.lineHeight = String(data.lineHeight);
+      textarea.style.letterSpacing = `${data.letterSpacing}px`;
+      textarea.style.textDecoration = data.textDecoration;
+      textarea.style.background = 'rgba(255,255,255,0.9)';
+      textarea.style.border = '2px solid #7B2FBE';
+      textarea.style.borderRadius = '4px';
+      textarea.style.padding = '4px';
+      textarea.style.outline = 'none';
+      textarea.style.resize = 'none';
+      textarea.style.zIndex = '10000';
+      textarea.style.transformOrigin = 'left top';
+      textarea.style.overflow = 'hidden';
+      textarea.style.wordWrap = 'break-word';
+
+      textarea.focus();
+
+      const finishEdit = () => {
+        // Only touch the store — and undo history — when the text actually
+        // changed. A no-op commit here (e.g. the click that merely opened the
+        // textarea, or a leftover duplicate session guarded against above)
+        // must never overwrite real content with a copy of itself, and
+        // definitely never with something stale.
+        const changed = textarea.value !== data.content;
+        if (changed) {
+          updateElement(liveElement.id, {
+            data: { ...data, content: textarea.value } as TextData,
+          });
+        }
+        // Any OCR reveal (color sampling + background patch) already
+        // happened before this textarea was opened, so there's nothing
+        // further to do here besides committing the text itself.
+        textarea.remove();
+        if (activeTextEditRef.current?.textarea === textarea) {
+          activeTextEditRef.current = null;
+        }
+        setEditingTextId(null);
+        useEditorStore.setState({ isEditing: false });
+        if (changed) pushHistory();
+      };
+
+      textarea.addEventListener('blur', finishEdit);
+      textarea.addEventListener('keydown', (ke) => {
+        if (ke.key === 'Enter' && !ke.shiftKey) {
+          ke.preventDefault();
+          finishEdit();
+        }
+        if (ke.key === 'Escape') finishEdit();
+      });
     }
 
     // Table cell editing

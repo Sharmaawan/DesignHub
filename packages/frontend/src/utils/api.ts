@@ -57,6 +57,8 @@ export const projectAPI = {
   update: (id: string, data: any) => api.put(`/projects/${id}`, data),
   delete: (id: string) => api.delete(`/projects/${id}`),
   duplicate: (id: string) => api.post(`/projects/${id}/duplicate`),
+  // PHASE 1 TEST: Create a project with hardcoded native elements
+  createPhase1Test: () => api.post('/projects/test/phase1-native-elements', {}),
 };
 
 export const templateAPI = {

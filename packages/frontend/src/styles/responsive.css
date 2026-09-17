@@ -1,0 +1,152 @@
+/* Responsive Adjustments for Editor Layout */
+
+/* Mobile/Tablet breakpoints */
+@media (max-width: 1280px) {
+  /* On smaller screens, reduce panel widths slightly */
+  .side-panel-container {
+    width: 280px;
+  }
+
+  .properties-panel-container {
+    width: 280px;
+  }
+}
+
+@media (max-width: 1024px) {
+  /* Tablet: collapse side panels into a stacked layout */
+  .icon-nav-container {
+    width: 52px; /* Slightly smaller */
+  }
+
+  .side-panel-container {
+    width: 260px;
+  }
+
+  .properties-panel-container {
+    width: 260px;
+  }
+
+  /* Hide page panel labels on smaller screens */
+  .page-label {
+    display: none;
+  }
+}
+
+@media (max-width: 768px) {
+  /* Mobile: hide both side panels, show only icons */
+  .side-panel-container {
+    position: absolute;
+    left: 0;
+    top: 60px;
+    width: 280px;
+    height: calc(100vh - 60px - 96px);
+    z-index: 30;
+    box-shadow: 2px 0 8px rgba(0, 0, 0, 0.15);
+  }
+
+  .properties-panel-container {
+    position: absolute;
+    right: 0;
+    top: 60px;
+    width: 280px;
+    height: calc(100vh - 60px - 96px);
+    z-index: 30;
+    box-shadow: -2px 0 8px rgba(0, 0, 0, 0.15);
+  }
+
+  /* Reduce icon nav width */
+  .icon-nav-container {
+    width: 48px;
+  }
+
+  /* Hide some toolbar buttons on mobile */
+  .toolbar-hide-mobile {
+    display: none;
+  }
+
+  /* Reduce padding on panels */
+  .panel-content {
+    padding: 12px;
+  }
+
+  /* Stack pages panel better on mobile */
+  .pages-panel-container {
+    height: 80px;
+  }
+}
+
+@media (max-width: 640px) {
+  /* Small mobile phones */
+  .pages-panel-container {
+    height: 72px;
+  }
+
+  /* Further reduce toolbar elements */
+  .toolbar-hide-small {
+    display: none;
+  }
+
+  /* Single column layout */
+  .editor-layout {
+    flex-direction: column;
+  }
+}
+
+/* Touch device optimizations */
+@media (hover: none) and (pointer: coarse) {
+  /* Increase touch targets */
+  button[class*="icon"] {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  /* Remove hover effects on touch devices */
+  .group:hover > * {
+    opacity: 1;
+  }
+
+  /* Make tooltips less prominent on touch */
+  .tooltip {
+    display: none;
+  }
+
+  /* Faster animations on mobile */
+  .animate-slide-in-left,
+  .animate-slide-in-right,
+  .animate-slide-up {
+    animation-duration: 0.2s;
+  }
+}
+
+/* Dark mode responsive adjustments */
+@media (prefers-color-scheme: dark) {
+  .side-panel-container,
+  .properties-panel-container {
+    box-shadow: 2px 0 12px rgba(0, 0, 0, 0.3);
+  }
+}
+
+/* High DPI screens */
+@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+  /* Sharper elements */
+  button, input, textarea {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+/* Print styles - hide editor UI when printing */
+@media print {
+  .icon-nav-container,
+  .side-panel-container,
+  .properties-panel-container,
+  .toolbar-container,
+  .pages-panel-container {
+    display: none !important;
+  }
+
+  canvas {
+    max-width: 100%;
+    height: auto;
+  }
+}

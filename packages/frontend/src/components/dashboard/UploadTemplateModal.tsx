@@ -1,7 +1,9 @@
 import { useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { HiOutlineX, HiOutlineUpload, HiOutlinePhotograph } from 'react-icons/hi';
-import { uploadAPI, templateAPI, BACKEND_ORIGIN as BACKEND } from '../../utils/api';
+import { uploadAPI, templateAPI, projectAPI, BACKEND_ORIGIN as BACKEND } from '../../utils/api';
 import { generateId } from '../../utils/cn';
+import { decomposeTemplateImage } from '../../utils/templateDecomposition';
 import toast from 'react-hot-toast';
 
 interface UploadTemplateModalProps {
@@ -21,6 +23,7 @@ function loadImageSize(url: string): Promise<{ width: number; height: number }> 
 }
 
 export default function UploadTemplateModal({ open, onClose, onCreated, categories }: UploadTemplateModalProps) {
+  const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState('');
@@ -59,12 +62,20 @@ export default function UploadTemplateModal({ open, onClose, onCreated, categori
 
     setUploading(true);
     try {
+      toast.loading('Uploading and analyzing template...');
       const { data: saved } = await uploadAPI.upload(file);
       const url = `${BACKEND}${saved.url}`;
       const { width, height } = await loadImageSize(url);
 
+      toast.loading('Extracting text and creating elements...');
+      // Decompose template image into individual editable elements
+      const elements = await decomposeTemplateImage(url, width, height);
+
+      // DEBUG: Log the elements array
+      console.log('[Upload] Elements created:', elements.length);
+      console.log('[Upload] Elements:', elements.map(e => ({ type: e.type, name: e.name })));
+
       const pageId = generateId();
-      const elementId = generateId();
       const templateData = {
         id: generateId(),
         name: name.trim(),
@@ -74,22 +85,14 @@ export default function UploadTemplateModal({ open, onClose, onCreated, categori
           width,
           height,
           backgroundColor: '#FFFFFF',
-          elements: [{
-            id: elementId,
-            type: 'image' as const,
-            x: 0, y: 0, width, height,
-            rotation: 0, opacity: 1, visible: true, locked: false,
-            name: 'Background', zIndex: 0,
-            data: {
-              type: 'image' as const, src: url, objectFit: 'cover' as const, borderRadius: 0,
-              brightness: 100, contrast: 100, saturation: 100, hue: 0, blur: 0,
-              filters: [], cropX: 0, cropY: 0, cropWidth: 100, cropHeight: 100,
-            },
-          }],
+          elements, // Use decomposed elements instead of single image
         }],
         ownerId: '1', collaborators: [], isFavorite: false, isTemplate: true,
         createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
       };
+
+      // DEBUG: Log templateData before sending
+      console.log('[Upload] TemplateData pages[0].elements:', templateData.pages[0].elements.length);
 
       await templateAPI.create({
         name: name.trim(),
@@ -100,12 +103,79 @@ export default function UploadTemplateModal({ open, onClose, onCreated, categori
         isPremium: false,
       });
 
-      toast.success('Template uploaded');
+      const textCount = Math.max(0, elements.length - 1);
+      const message = textCount > 0
+        ? `✨ Template uploaded! ${textCount} text element(s) ready to edit`
+        : `✨ Template uploaded! Use Text tool to add text when editing`;
+      toast.success(message);
       onCreated();
       handleClose();
     } catch (err: any) {
-      console.error('[UploadTemplate] failed', err);
-      toast.error(err.response?.data?.error || 'Failed to upload template');
+      console.error('[UploadTemplate] failed:', err);
+      const errorMsg = err.response?.data?.error || err.message || 'Failed to upload template';
+      toast.error(errorMsg);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleUploadAndEdit = async () => {
+    if (!file) { toast.error('Choose an image to upload'); return; }
+    if (!name.trim()) { toast.error('Give your design a name'); return; }
+
+    setUploading(true);
+    try {
+      toast.loading('Uploading image...');
+      const { data: saved } = await uploadAPI.upload(file);
+      const url = `${BACKEND}${saved.url}`;
+      const { width, height } = await loadImageSize(url);
+
+      toast.loading('Processing image...');
+
+      // Try OCR decomposition to extract text elements
+      let elements = await decomposeTemplateImage(url, width, height);
+
+      console.log('[UploadAndEdit] Extracted elements:', elements.length);
+      console.log('[UploadAndEdit] Elements:', elements.map(e => ({ type: e.type, name: e.name })));
+
+      // If OCR only found the background (no text), add helpful message
+      if (elements.length === 1) {
+        console.log('[UploadAndEdit] OCR found no text - user can add text manually');
+        toast.dismiss();
+        toast.success('✨ Image loaded! Click Text tool (pencil) to add/edit text anywhere');
+      } else {
+        console.log('[UploadAndEdit] OCR extracted text - ready to edit');
+        toast.dismiss();
+        toast.success(`✨ Design ready! Found ${elements.length - 1} text element(s) to edit`);
+      }
+
+      const pageId = generateId();
+      const projectData = {
+        name: name.trim(),
+        description: '',
+        status: 'draft',
+        canvasData: [{
+          id: pageId,
+          name: 'Page 1',
+          width,
+          height,
+          backgroundColor: '#FFFFFF',
+          elements: elements, // Use OCR-extracted elements
+        }],
+      };
+
+      // Create project via API
+      const { data: newProject } = await projectAPI.create(projectData);
+
+      toast.success(`✓ Design created! Found ${elements.length - 1} text elements ready to edit`);
+      handleClose();
+
+      // Redirect to editor
+      navigate(`/editor/${newProject.id}`);
+    } catch (err: any) {
+      console.error('[UploadAndEdit] failed:', err);
+      const errorMsg = err.response?.data?.error || err.message || 'Failed to create design';
+      toast.error(errorMsg);
     } finally {
       setUploading(false);
     }
@@ -186,16 +256,23 @@ export default function UploadTemplateModal({ open, onClose, onCreated, categori
           </div>
         </div>
 
-        <div className="flex gap-3 mt-6">
-          <button onClick={handleClose} className="flex-1 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 text-sm font-semibold text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+        <div className="flex gap-3 mt-6 flex-col sm:flex-row">
+          <button onClick={handleClose} className="py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 text-sm font-semibold text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
             Cancel
+          </button>
+          <button
+            onClick={handleUploadAndEdit}
+            disabled={uploading || !file || !name.trim()}
+            className="py-2.5 rounded-xl bg-canva-purple hover:bg-canva-purple/90 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold transition-colors"
+          >
+            {uploading ? 'Creating…' : '✏️ Edit Design'}
           </button>
           <button
             onClick={handleUpload}
             disabled={uploading || !file || !name.trim()}
-            className="flex-1 py-2.5 rounded-xl bg-canva-purple hover:bg-canva-purple/90 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold transition-colors"
+            className="py-2.5 rounded-xl border-2 border-canva-purple text-canva-purple hover:bg-canva-purple/5 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-semibold transition-colors"
           >
-            {uploading ? 'Uploading…' : 'Add template'}
+            {uploading ? 'Uploading…' : '📚 Add Template'}
           </button>
         </div>
       </div>

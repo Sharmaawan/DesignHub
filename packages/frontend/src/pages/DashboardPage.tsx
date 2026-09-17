@@ -8,8 +8,9 @@ import { useTeamStore } from '../stores/teamStore';
 import { useSocialStore } from '../stores/socialStore';
 import DashboardSidebar from '../components/dashboard/DashboardSidebar';
 import CreateButton from '../components/dashboard/CreateButton';
-import HeroSearch from '../components/dashboard/HeroSearch';
-import QuickAccessCategories from '../components/dashboard/QuickAccessCategories';
+import HeaderSearch from '../components/dashboard/HeaderSearch';
+import DashboardHero from '../components/dashboard/DashboardHero';
+import QuickCreateGrid from '../components/dashboard/QuickCreateGrid';
 import TeamRequests from '../components/dashboard/TeamRequests';
 import WhatsNew from '../components/dashboard/WhatsNew';
 import RecommendedDesigns from '../components/dashboard/RecommendedDesigns';
@@ -20,24 +21,9 @@ import {
   HiOutlinePlus, HiOutlineTemplate, HiOutlineBell, HiOutlineHeart,
   HiOutlineFolder, HiOutlineDotsHorizontal, HiOutlineSearch, HiOutlineViewGrid,
   HiOutlinePencilAlt, HiOutlineTrash, HiOutlineDownload, HiOutlineShare,
+  HiOutlineSparkles, HiOutlinePhotograph, HiOutlineLightBulb,
 } from 'react-icons/hi';
 import toast from 'react-hot-toast';
-
-// Fixed, hand-placed positions for the Magic AI Studio banner's floating sparkles —
-// hardcoded rather than Math.random() so the layout is stable across renders with
-// no need for useMemo, and so it reads as a natural scatter rather than a grid.
-const AI_BANNER_SPARKLES = [
-  { left: '8%', top: '20%', size: 5, delay: 0, duration: 2.2 },
-  { left: '18%', top: '70%', size: 3, delay: 0.6, duration: 2.6 },
-  { left: '30%', top: '15%', size: 4, delay: 1.1, duration: 2.1 },
-  { left: '42%', top: '82%', size: 3, delay: 0.3, duration: 2.8 },
-  { left: '55%', top: '25%', size: 5, delay: 1.4, duration: 2.3 },
-  { left: '68%', top: '65%', size: 3, delay: 0.8, duration: 2.5 },
-  { left: '80%', top: '18%', size: 4, delay: 0.2, duration: 2.4 },
-  { left: '92%', top: '55%', size: 3, delay: 1.2, duration: 2.7 },
-  { left: '15%', top: '45%', size: 3, delay: 1.7, duration: 2.2 },
-  { left: '88%', top: '80%', size: 4, delay: 0.9, duration: 2.6 },
-];
 
 export default function DashboardPage({ initialSection }: { initialSection?: string } = {}) {
   const navigate = useNavigate();
@@ -55,6 +41,15 @@ export default function DashboardPage({ initialSection }: { initialSection?: str
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     return localStorage.getItem('designhub-sidebar-collapsed') === 'true';
   });
+  // Below `lg` (1024px) the sidebar is forced to its icon-only width
+  // regardless of the user's manual desktop preference above — a full
+  // 240px sidebar plus the main content at that width pushed everything
+  // else off-screen into horizontal overflow (verified at 420px). The
+  // user's own toggle still applies once the viewport is wide enough.
+  const [isNarrowScreen, setIsNarrowScreen] = useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia('(max-width: 1023px)').matches : false
+  );
+  const effectiveSidebarCollapsed = isNarrowScreen || sidebarCollapsed;
   const [activeSection, setActiveSection] = useState(initialSection || 'home');
   const [showNewDesignModal, setShowNewDesignModal] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ projectId: string; x: number; y: number } | null>(null);
@@ -68,6 +63,7 @@ export default function DashboardPage({ initialSection }: { initialSection?: str
     try { return JSON.parse(localStorage.getItem('designhub-hidden-templates') || '[]'); }
     catch { return []; }
   });
+  const [templateCategoryTab, setTemplateCategoryTab] = useState('All');
 
   useEffect(() => {
     loadTemplates();
@@ -89,6 +85,13 @@ export default function DashboardPage({ initialSection }: { initialSection?: str
   useEffect(() => {
     localStorage.setItem('designhub-sidebar-collapsed', String(sidebarCollapsed));
   }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 1023px)');
+    const handler = (e: MediaQueryListEvent) => setIsNarrowScreen(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
 
   const handleNewDesign = async (preset: any) => {
     const pages = [{
@@ -202,13 +205,6 @@ export default function DashboardPage({ initialSection }: { initialSection?: str
     toast.success('Removed from your Trending Templates');
   };
 
-  const getGreeting = () => {
-    const hour = new Date().getHours();
-    if (hour < 12) return 'Good morning';
-    if (hour < 17) return 'Good afternoon';
-    return 'Good evening';
-  };
-
   // 3D tilt-toward-cursor for template cards — driven imperatively (direct DOM
   // style writes, not React state) since it needs to update at mousemove
   // frequency without triggering a re-render on every pixel of movement.
@@ -233,23 +229,21 @@ export default function DashboardPage({ initialSection }: { initialSection?: str
     <div className="min-h-screen bg-gray-50 dark:bg-[#111127] transition-colors">
       {/* Sidebar */}
       <DashboardSidebar
-        collapsed={sidebarCollapsed}
+        collapsed={effectiveSidebarCollapsed}
         onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
         activeSection={activeSection}
         onSectionChange={setActiveSection}
       />
 
       {/* Main content */}
-      <div className={`transition-all duration-300 ${sidebarCollapsed ? 'ml-[72px]' : 'ml-[240px]'}`}>
+      <div className={`transition-all duration-300 ${effectiveSidebarCollapsed ? 'ml-[72px]' : 'ml-[240px]'}`}>
         {/* Top header */}
         <header className="sticky top-0 z-30 bg-gray-50/80 dark:bg-[#111127]/80 backdrop-blur-xl border-b border-gray-200/50 dark:border-gray-800/50">
-          <div className="flex items-center justify-between px-6 h-16">
-            <div className="flex items-center gap-4">
-              <h2 className="text-lg font-bold text-gray-900 dark:text-white hidden md:block">
-                {getGreeting()}, {user?.name?.split(' ')[0] || 'Designer'}
-              </h2>
+          <div className="flex items-center justify-between gap-4 px-6 h-16">
+            <div className="flex-1 min-w-0 max-w-md">
+              <HeaderSearch />
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 flex-shrink-0">
               <CreateButton />
               <button
                 onClick={() => setNotifOpen(!notifOpen)}
@@ -262,6 +256,13 @@ export default function DashboardPage({ initialSection }: { initialSection?: str
                   </span>
                 )}
               </button>
+              <img
+                src={user?.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.email}`}
+                alt=""
+                className="w-8 h-8 rounded-full bg-gray-200 flex-shrink-0 cursor-pointer"
+                onClick={() => navigate('/settings/profile')}
+                title={user?.name || 'Profile'}
+              />
             </div>
           </div>
         </header>
@@ -271,230 +272,281 @@ export default function DashboardPage({ initialSection }: { initialSection?: str
           {/* Hero section */}
           {activeSection === 'home' && (
             <div className="mb-10">
-              <div className="text-center mb-8">
-                <h1 className="text-3xl md:text-4xl font-extrabold text-gray-900 dark:text-white mb-3">
-                  What will you design today?
-                </h1>
-                <p className="text-gray-500 dark:text-gray-400 text-sm md:text-base max-w-md mx-auto">
-                  Start from a template, upload a file, or begin with a blank canvas
-                </p>
-              </div>
-              <HeroSearch />
+              <DashboardHero />
             </div>
           )}
 
-          {/* Quick Access Categories — home only, already shown there; the
+          {/* Quick create — home only, already shown there; the
               Projects section should show just the project list itself. */}
           {activeSection === 'home' && (
             <section className="mb-10">
-              <QuickAccessCategories />
+              <QuickCreateGrid />
             </section>
           )}
 
-          {/* Magic AI Studio — home only */}
+          {/* Main content + right utility rail — home only. A 2-column grid so
+              the rail (Magic AI, team requests, what's new) sits alongside the
+              main sections on wide screens; below `lg` it collapses to one
+              column, and since the rail's markup comes after the main
+              section's in document order, it naturally lands below the main
+              content instead of breaking the layout. */}
           {activeSection === 'home' && (
-            <section className="mb-10 animate-fade-in">
-              <div className="relative rounded-2xl overflow-hidden bg-gradient-to-r from-[#6366F1] via-[#8B5CF6] to-[#EC4899] bg-[length:200%_200%] animate-gradient-shift p-px shadow-xl">
-                <div className="relative overflow-hidden rounded-2xl bg-white dark:bg-[#1a1a2e] px-6 py-5">
-                  {/* Floating sparkles — purely decorative, sits behind the content. */}
-                  <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
-                    {AI_BANNER_SPARKLES.map((s, i) => (
-                      <span
-                        key={i}
-                        className="absolute rounded-full bg-gradient-to-br from-violet-400 to-pink-400 animate-sparkle"
-                        style={{
-                          left: s.left, top: s.top, width: s.size, height: s.size,
-                          animationDelay: `${s.delay}s`, animationDuration: `${s.duration}s`,
-                          boxShadow: '0 0 6px 1px rgba(139, 92, 246, 0.6)',
-                        }}
-                      />
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              {/* Main column */}
+              <div className="lg:col-span-2 space-y-10">
+                {/* Recent designs */}
+                <section>
+                  <RecommendedDesigns onCardMenu={handleContextMenu} />
+                </section>
+
+                {/* Explore templates */}
+                <section>
+                  <div className="flex items-center justify-between mb-1">
+                    <div>
+                      <h2 className="text-lg font-bold text-gray-900 dark:text-white">Explore templates</h2>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">Beautiful templates to get you started</p>
+                    </div>
+                    <button
+                      onClick={() => navigate('/templates')}
+                      className="text-sm font-medium text-[#7B2FBE] hover:underline flex-shrink-0"
+                    >
+                      View all
+                    </button>
+                  </div>
+
+                  {/* Category tabs — built from the categories actually present
+                      in the loaded templates, not a fixed hardcoded list, so
+                      this never shows a tab with nothing behind it. */}
+                  <div className="flex gap-1 my-4 overflow-x-auto no-scrollbar">
+                    {['All', ...Array.from(new Set(templates.map((t) => t.category).filter(Boolean)))].map((cat) => (
+                      <button
+                        key={cat}
+                        onClick={() => setTemplateCategoryTab(cat)}
+                        className={`px-3.5 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-all ${
+                          templateCategoryTab === cat
+                            ? 'bg-[#7B2FBE] text-white'
+                            : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+                        }`}
+                      >
+                        {cat}
+                      </button>
                     ))}
                   </div>
-                  <div className="relative flex flex-col md:flex-row md:items-center gap-6">
-                    {/* Left: headline */}
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="text-xl inline-block animate-gentle-bounce">✨</span>
-                        <h2 className="text-lg font-extrabold bg-gradient-to-r from-[#6366F1] to-[#EC4899] bg-clip-text text-transparent">
-                          Magic AI Studio
-                        </h2>
-                        <span className="px-1.5 py-0.5 text-[9px] font-bold bg-gradient-to-r from-[#6366F1] to-[#EC4899] text-white rounded-full">NEW</span>
-                      </div>
-                      <p className="text-sm text-gray-500 dark:text-gray-400">
-                        Generate text, design ideas, and image descriptions instantly with AI.
-                      </p>
-                    </div>
-                    {/* Right: quick-action cards */}
-                    <div className="flex gap-3 flex-wrap">
-                      {[
-                        { emoji: '✍️', label: 'Magic Write', desc: 'AI copywriting', color: 'from-violet-500 to-purple-600', hoverGradient: 'hover:from-violet-500 hover:to-purple-600', aiTab: 'write' },
-                        { emoji: '🖼️', label: 'Image Ideas', desc: 'Visual concepts', color: 'from-pink-500 to-rose-600', hoverGradient: 'hover:from-pink-500 hover:to-rose-600', aiTab: 'image' },
-                        { emoji: '💡', label: 'Design Ideas', desc: 'Inspiration', color: 'from-amber-500 to-orange-600', hoverGradient: 'hover:from-amber-500 hover:to-orange-600', aiTab: 'suggest' },
-                        { emoji: '🎨', label: 'Color Palette', desc: 'AI colors', color: 'from-teal-500 to-cyan-600', hoverGradient: 'hover:from-teal-500 hover:to-cyan-600', aiTab: 'suggest' },
-                      ].map((action, i) => (
-                        <button
-                          key={action.label}
-                          style={{ animationDelay: `${i * 60}ms`, animationFillMode: 'backwards' }}
+
+                  <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
+                    {templates
+                      .filter((t) => !hiddenTemplateIds.includes(t.id))
+                      .filter((t) => templateCategoryTab === 'All' || t.category === templateCategoryTab)
+                      .slice(0, 8)
+                      .map((template, i) => {
+                      const page = template.data?.pages?.[0];
+                      const bgColor = page?.backgroundColor || '#f3f4f6';
+                      return (
+                        <div
+                          key={template.id}
+                          style={{ animationDelay: `${i * 50}ms`, animationFillMode: 'backwards' }}
                           onClick={async () => {
-                            try {
-                              const pages = [{ id: `page-${Date.now()}`, name: 'Page 1', elements: [], backgroundColor: '#FFFFFF', width: 1920, height: 1080 }];
-                              const { data } = await projectAPI.create({ name: 'AI Design', canvasData: pages });
-                              // ?ai=<mode> tells the editor's LeftSidebar to open straight
-                              // into the matching AI sub-tab instead of landing on a blank
-                              // page with just a toast telling the user to find it themselves.
-                              navigate(`/editor/${data.id}?ai=${action.aiTab}`);
-                            } catch {
-                              toast.error('Failed to create design');
+                            const tmplPage = template.data?.pages?.[0];
+                            if (tmplPage) {
+                              const pages = [{
+                                id: `page-${Date.now()}`,
+                                name: 'Page 1',
+                                elements: tmplPage.elements || [],
+                                backgroundColor: tmplPage.backgroundColor || '#FFFFFF',
+                                width: tmplPage.width || 1920,
+                                height: tmplPage.height || 1080,
+                              }];
+                              try {
+                                const { data } = await projectAPI.create({ name: template.name, canvasData: pages });
+                                navigate(`/editor/${data.id}`);
+                              } catch {
+                                toast.error('Failed to create design');
+                              }
                             }
                           }}
-                          className={`flex flex-col items-center gap-1.5 px-4 py-3 rounded-xl bg-gray-50 dark:bg-gray-800/60 hover:bg-gradient-to-br ${action.hoverGradient} border border-gray-200 dark:border-gray-700 hover:border-transparent hover:-translate-y-0.5 hover:shadow-lg transition-all group min-w-[80px] animate-slide-up`}
+                          onMouseMove={handleTiltMove}
+                          onMouseLeave={handleTiltLeave}
+                          className="group cursor-pointer text-left animate-slide-up [perspective:800px]"
                         >
-                          <span className="text-2xl group-hover:scale-110 transition-transform">{action.emoji}</span>
-                          <span className="text-xs font-semibold text-gray-800 dark:text-gray-200 group-hover:text-white transition-colors">{action.label}</span>
-                          <span className="text-[9px] text-gray-400 group-hover:text-white/80 transition-colors">{action.desc}</span>
-                        </button>
-                      ))}
-                    </div>
+                          <div className="tilt-target aspect-[4/3] rounded-xl overflow-hidden relative group-hover:ring-2 ring-[#7B2FBE] transition-transform duration-150 ease-out shadow-sm group-hover:shadow-2xl will-change-transform" style={{ backgroundColor: bgColor }}>
+                            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100">
+                              <span className="px-3 py-1.5 bg-white dark:bg-gray-900 rounded-lg text-xs font-medium shadow-lg">Use template</span>
+                            </div>
+                            {template.isPro && (
+                              <span className="absolute top-2 left-2 px-1.5 py-0.5 text-[9px] font-bold bg-amber-500 text-white rounded-full">PRO</span>
+                            )}
+                            <button
+                              onClick={(e) => (template.ownerId && template.ownerId === user?.id)
+                                ? handleDeleteTemplate(e, template.id)
+                                : handleHideTemplate(e, template.id)}
+                              title={(template.ownerId && template.ownerId === user?.id) ? 'Delete template' : 'Remove from your Trending Templates'}
+                              className="absolute top-2 right-2 p-1.5 rounded-lg bg-white/90 dark:bg-gray-900/90 text-gray-500 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                            >
+                              <HiOutlineTrash size={14} />
+                            </button>
+                            {page?.elements?.slice(0, 3).map((el: any, i: number) => {
+                              if (el.type === 'image') {
+                                return (
+                                  <img
+                                    key={i}
+                                    src={el.data?.src}
+                                    alt=""
+                                    className="absolute object-cover"
+                                    style={{
+                                      left: `${(el.x / (page.width || 1920)) * 100}%`,
+                                      top: `${(el.y / (page.height || 1080)) * 100}%`,
+                                      width: `${(el.width / (page.width || 1920)) * 100}%`,
+                                      height: `${(el.height / (page.height || 1080)) * 100}%`,
+                                    }}
+                                  />
+                                );
+                              }
+                              if (el.type === 'text') {
+                                return (
+                                  <div key={i} className="absolute overflow-hidden" style={{
+                                    left: `${(el.x / (page.width || 1920)) * 100}%`,
+                                    top: `${(el.y / (page.height || 1080)) * 100}%`,
+                                    width: `${(el.width / (page.width || 1920)) * 100}%`,
+                                    fontSize: '5px', fontWeight: el.data?.fontWeight || 400,
+                                    color: el.data?.color || '#000', lineHeight: 1.2,
+                                  }}>
+                                    {el.data?.content}
+                                  </div>
+                                );
+                              }
+                              if (el.type === 'shape') {
+                                return (
+                                  <div key={i} className="absolute" style={{
+                                    left: `${(el.x / (page.width || 1920)) * 100}%`,
+                                    top: `${(el.y / (page.height || 1080)) * 100}%`,
+                                    width: `${(el.width / (page.width || 1920)) * 100}%`,
+                                    height: `${(el.height / (page.height || 1080)) * 100}%`,
+                                    backgroundColor: el.data?.fill || '#7B2FBE',
+                                    borderRadius: el.data?.shapeType === 'circle' ? '50%' : '2px',
+                                  }} />
+                                );
+                              }
+                              return null;
+                            })}
+                          </div>
+                          <p className="mt-2 text-xs font-medium text-gray-700 dark:text-gray-300 truncate">{template.name}</p>
+                          <p className="text-[10px] text-gray-400">{template.category}</p>
+                        </div>
+                      );
+                    })}
                   </div>
-                </div>
-              </div>
-            </section>
-          )}
+                </section>
 
-          {/* Templates section (home only) */}
-          {activeSection === 'home' && (
-            <section className="mb-10">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-bold text-gray-900 dark:text-white">Trending Templates</h2>
-                <button
-                  onClick={() => navigate('/templates')}
-                  className="text-sm font-medium text-[#7B2FBE] hover:underline"
-                >
-                  View all
-                </button>
-              </div>
-              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-                {templates.filter((t) => !hiddenTemplateIds.includes(t.id)).slice(0, 6).map((template, i) => {
-                  const page = template.data?.pages?.[0];
-                  const bgColor = page?.backgroundColor || '#f3f4f6';
-                  return (
-                    <div
-                      key={template.id}
-                      style={{ animationDelay: `${i * 50}ms`, animationFillMode: 'backwards' }}
+                {/* Magic AI Studio */}
+                <section className="animate-fade-in">
+                  <div className="relative rounded-2xl overflow-hidden bg-gradient-to-br from-[#F3E8FF] to-white dark:from-[#2A1B45] dark:to-[#1a1a2e] border border-[#EDE4FB] dark:border-gray-800 px-6 py-6">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-lg" aria-hidden="true">✨</span>
+                      <h2 className="text-lg font-bold text-gray-900 dark:text-white">Magic AI Studio</h2>
+                    </div>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 mb-5">
+                      Turn your ideas into stunning designs with AI.
+                    </p>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
+                      {[
+                        { icon: HiOutlineSparkles, label: 'AI Design', desc: 'Generate designs from text', aiTab: 'suggest' },
+                        { icon: HiOutlinePhotograph, label: 'AI Image', desc: 'Create images from ideas', aiTab: 'image' },
+                        { icon: HiOutlineLightBulb, label: 'Idea Generator', desc: 'Get content & design ideas', aiTab: 'write' },
+                      ].map((action) => {
+                        const Icon = action.icon;
+                        return (
+                          <button
+                            key={action.label}
+                            onClick={async () => {
+                              try {
+                                const pages = [{ id: `page-${Date.now()}`, name: 'Page 1', elements: [], backgroundColor: '#FFFFFF', width: 1920, height: 1080 }];
+                                const { data } = await projectAPI.create({ name: 'AI Design', canvasData: pages });
+                                // ?ai=<mode> tells the editor's LeftSidebar to open straight
+                                // into the matching AI sub-tab instead of landing on a blank
+                                // page with just a toast telling the user to find it themselves.
+                                navigate(`/editor/${data.id}?ai=${action.aiTab}`);
+                              } catch {
+                                toast.error('Failed to create design');
+                              }
+                            }}
+                            className="flex items-center gap-3 p-4 rounded-xl bg-white dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700 hover:border-[#7B2FBE] hover:shadow-md transition-all text-left"
+                          >
+                            <div className="w-9 h-9 rounded-lg bg-[#F3E8FF] dark:bg-[#7B2FBE]/20 flex items-center justify-center flex-shrink-0">
+                              <Icon size={18} className="text-[#7B2FBE]" />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold text-gray-900 dark:text-white">{action.label}</p>
+                              <p className="text-[11px] text-gray-400 truncate">{action.desc}</p>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <button
                       onClick={async () => {
-                        const tmplPage = template.data?.pages?.[0];
-                        if (tmplPage) {
-                          const pages = [{
-                            id: `page-${Date.now()}`,
-                            name: 'Page 1',
-                            elements: tmplPage.elements || [],
-                            backgroundColor: tmplPage.backgroundColor || '#FFFFFF',
-                            width: tmplPage.width || 1920,
-                            height: tmplPage.height || 1080,
-                          }];
-                          try {
-                            const { data } = await projectAPI.create({ name: template.name, canvasData: pages });
-                            navigate(`/editor/${data.id}`);
-                          } catch {
-                            toast.error('Failed to create design');
-                          }
+                        try {
+                          const pages = [{ id: `page-${Date.now()}`, name: 'Page 1', elements: [], backgroundColor: '#FFFFFF', width: 1920, height: 1080 }];
+                          const { data } = await projectAPI.create({ name: 'AI Design', canvasData: pages });
+                          navigate(`/editor/${data.id}?ai=suggest`);
+                        } catch {
+                          toast.error('Failed to create design');
                         }
                       }}
-                      onMouseMove={handleTiltMove}
-                      onMouseLeave={handleTiltLeave}
-                      className="group cursor-pointer text-left animate-slide-up [perspective:800px]"
+                      className="text-sm font-semibold text-[#7B2FBE] hover:underline"
                     >
-                      <div className="tilt-target aspect-[4/3] rounded-xl overflow-hidden relative group-hover:ring-2 ring-[#7B2FBE] transition-transform duration-150 ease-out shadow-sm group-hover:shadow-2xl will-change-transform" style={{ backgroundColor: bgColor }}>
-                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100">
-                          <span className="px-3 py-1.5 bg-white dark:bg-gray-900 rounded-lg text-xs font-medium shadow-lg">Use template</span>
-                        </div>
-                        {template.isPro && (
-                          <span className="absolute top-2 left-2 px-1.5 py-0.5 text-[9px] font-bold bg-amber-500 text-white rounded-full">PRO</span>
-                        )}
-                        <button
-                          onClick={(e) => (template.ownerId && template.ownerId === user?.id)
-                            ? handleDeleteTemplate(e, template.id)
-                            : handleHideTemplate(e, template.id)}
-                          title={(template.ownerId && template.ownerId === user?.id) ? 'Delete template' : 'Remove from your Trending Templates'}
-                          className="absolute top-2 right-2 p-1.5 rounded-lg bg-white/90 dark:bg-gray-900/90 text-gray-500 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity z-10"
-                        >
-                          <HiOutlineTrash size={14} />
-                        </button>
-                        {page?.elements?.slice(0, 3).map((el: any, i: number) => {
-                          if (el.type === 'image') {
-                            return (
-                              <img
-                                key={i}
-                                src={el.data?.src}
-                                alt=""
-                                className="absolute object-cover"
-                                style={{
-                                  left: `${(el.x / (page.width || 1920)) * 100}%`,
-                                  top: `${(el.y / (page.height || 1080)) * 100}%`,
-                                  width: `${(el.width / (page.width || 1920)) * 100}%`,
-                                  height: `${(el.height / (page.height || 1080)) * 100}%`,
-                                }}
-                              />
-                            );
-                          }
-                          if (el.type === 'text') {
-                            return (
-                              <div key={i} className="absolute overflow-hidden" style={{
-                                left: `${(el.x / (page.width || 1920)) * 100}%`,
-                                top: `${(el.y / (page.height || 1080)) * 100}%`,
-                                width: `${(el.width / (page.width || 1920)) * 100}%`,
-                                fontSize: '5px', fontWeight: el.data?.fontWeight || 400,
-                                color: el.data?.color || '#000', lineHeight: 1.2,
-                              }}>
-                                {el.data?.content}
-                              </div>
-                            );
-                          }
-                          if (el.type === 'shape') {
-                            return (
-                              <div key={i} className="absolute" style={{
-                                left: `${(el.x / (page.width || 1920)) * 100}%`,
-                                top: `${(el.y / (page.height || 1080)) * 100}%`,
-                                width: `${(el.width / (page.width || 1920)) * 100}%`,
-                                height: `${(el.height / (page.height || 1080)) * 100}%`,
-                                backgroundColor: el.data?.fill || '#7B2FBE',
-                                borderRadius: el.data?.shapeType === 'circle' ? '50%' : '2px',
-                              }} />
-                            );
-                          }
-                          return null;
-                        })}
-                      </div>
-                      <p className="mt-2 text-xs font-medium text-gray-700 dark:text-gray-300 truncate">{template.name}</p>
-                      <p className="text-[10px] text-gray-400">{template.category}</p>
-                    </div>
-                  );
-                })}
+                      Try Magic AI →
+                    </button>
+                  </div>
+                </section>
               </div>
-            </section>
-          )}
 
-          {/* Recent Projects Section — home only */}
-          {activeSection === 'home' && (
-            <section className="mb-10">
-              <RecommendedDesigns />
-            </section>
-          )}
-
-          {/* Two-column layout for side sections — home only */}
-          {activeSection === 'home' && (
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-10">
-              {/* Team Requests — approver/admin only; a maker has no invite/team-
-                  management access, so there's nothing here for them to see. */}
-              {canManageTeam && (
-                <div className="lg:col-span-1">
-                  <TeamRequests />
+              {/* Right utility rail */}
+              <div className="lg:col-span-1 space-y-6">
+                {/* Magic AI Studio — compact teaser pointing at the same flow
+                    as the full section to the left, not a duplicate of it. */}
+                <div
+                  className="bg-white dark:bg-[#1e1e30] rounded-2xl border border-gray-200 dark:border-gray-700 p-5 animate-slide-up"
+                  style={{ animationDelay: '80ms', animationFillMode: 'backwards' }}
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <span aria-hidden="true" className="inline-block animate-gentle-bounce">✨</span>
+                    <h3 className="text-sm font-bold text-gray-900 dark:text-white">Magic AI Studio</h3>
+                  </div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                    Turn your ideas into stunning designs with AI.
+                  </p>
+                  <button
+                    onClick={async () => {
+                      try {
+                        const pages = [{ id: `page-${Date.now()}`, name: 'Page 1', elements: [], backgroundColor: '#FFFFFF', width: 1920, height: 1080 }];
+                        const { data } = await projectAPI.create({ name: 'AI Design', canvasData: pages });
+                        navigate(`/editor/${data.id}?ai=suggest`);
+                      } catch {
+                        toast.error('Failed to create design');
+                      }
+                    }}
+                    className="w-full py-2 rounded-lg bg-[#7B2FBE] hover:bg-[#6025A0] text-white text-xs font-semibold hover:shadow-md transition-all"
+                  >
+                    Try Magic AI →
+                  </button>
                 </div>
-              )}
 
-              {/* What's New */}
-              <div className={canManageTeam ? 'lg:col-span-2' : 'lg:col-span-3'}>
-                <WhatsNew />
+                {/* Design better together — approver/admin only; a maker has
+                    no invite/team-management access, so there's nothing here
+                    for them to see. */}
+                {canManageTeam && (
+                  <div className="animate-slide-up" style={{ animationDelay: '140ms', animationFillMode: 'backwards' }}>
+                    <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-3 px-1">Design better together</h3>
+                    <TeamRequests />
+                  </div>
+                )}
+
+                {/* What's new */}
+                <div className="animate-slide-up" style={{ animationDelay: '200ms', animationFillMode: 'backwards' }}>
+                  <WhatsNew />
+                </div>
               </div>
             </div>
           )}

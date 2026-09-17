@@ -1,0 +1,207 @@
+/* Dark Mode Token Refinements */
+
+/* Color Token Definitions */
+:root {
+  /* Light Mode - Primary Palette */
+  --color-primary: #7b2fbe;
+  --color-primary-light: #f3e8ff;
+  --color-primary-lighter: #faf5ff;
+  --color-primary-dark: #6d28d9;
+
+  /* Light Mode - Neutral Palette */
+  --color-bg-primary: #ffffff;
+  --color-bg-secondary: #f9fafb;
+  --color-bg-tertiary: #f3f4f6;
+  --color-text-primary: #111827;
+  --color-text-secondary: #6b7280;
+  --color-text-tertiary: #9ca3af;
+  --color-border: #e5e7eb;
+
+  /* Light Mode - Semantic Colors */
+  --color-success: #10b981;
+  --color-warning: #f59e0b;
+  --color-error: #ef4444;
+  --color-info: #3b82f6;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* Dark Mode - Primary Palette */
+    --color-primary: #a78bfa;
+    --color-primary-light: #3730a3;
+    --color-primary-lighter: #1e1b4b;
+    --color-primary-dark: #7c3aed;
+
+    /* Dark Mode - Neutral Palette */
+    --color-bg-primary: #1f2937;
+    --color-bg-secondary: #111827;
+    --color-bg-tertiary: #0f172a;
+    --color-text-primary: #f3f4f6;
+    --color-text-secondary: #d1d5db;
+    --color-text-tertiary: #9ca3af;
+    --color-border: #374151;
+
+    /* Dark Mode - Semantic Colors */
+    --color-success: #34d399;
+    --color-warning: #fbbf24;
+    --color-error: #f87171;
+    --color-info: #60a5fa;
+  }
+}
+
+/* Dark Mode Specific Styles */
+@media (prefers-color-scheme: dark) {
+  /* Panel backgrounds with better depth */
+  .dark\:bg-canva-dark-surface {
+    background-color: #1f2937;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.05);
+  }
+
+  .dark\:bg-canva-dark-bg {
+    background-color: #111827;
+  }
+
+  /* Better text contrast */
+  .dark\:text-white {
+    color: #f9fafb;
+  }
+
+  .dark\:text-gray-100 {
+    color: #f3f4f6;
+  }
+
+  /* Border refinements */
+  .dark\:border-canva-dark-border {
+    border-color: #374151;
+  }
+
+  .dark\:border-gray-800 {
+    border-color: #1f2937;
+  }
+
+  .dark\:border-gray-700 {
+    border-color: #374151;
+  }
+
+  /* Hover states in dark mode */
+  .dark\:hover\:bg-gray-800:hover {
+    background-color: #1f2937;
+  }
+
+  .dark\:hover\:bg-gray-700:hover {
+    background-color: #374151;
+  }
+
+  /* Focus states */
+  input:focus,
+  textarea:focus,
+  select:focus {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.1), 0 0 0 1px rgba(167, 139, 250, 0.3);
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.3);
+  }
+
+  /* Selection highlighting */
+  ::selection {
+    background-color: rgba(167, 139, 250, 0.3);
+    color: #f9fafb;
+  }
+
+  /* Shadow refinements for dark mode */
+  .shadow-sm {
+    box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
+  }
+
+  .shadow {
+    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.3), 0 1px 2px 0 rgba(0, 0, 0, 0.2);
+  }
+
+  .shadow-md {
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.2);
+  }
+
+  .shadow-lg {
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -2px rgba(0, 0, 0, 0.3);
+  }
+
+  /* Placeholder text */
+  ::placeholder {
+    color: #9ca3af;
+  }
+
+  input::placeholder {
+    color: #9ca3af;
+  }
+
+  textarea::placeholder {
+    color: #9ca3af;
+  }
+}
+
+/* Light Mode Specific Overrides */
+@media (prefers-color-scheme: light) {
+  .bg-canva-dark-surface {
+    background-color: #f9fafb;
+  }
+
+  .bg-canva-dark-bg {
+    background-color: #fafbfc;
+  }
+
+  .border-canva-dark-border {
+    border-color: #e5e7eb;
+  }
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: more) {
+  .text-gray-600 {
+    color: #374151;
+  }
+
+  .text-gray-700 {
+    color: #1f2937;
+  }
+
+  /* Increase border prominence */
+  [class*="border-"] {
+    border-width: 1.5px;
+  }
+
+  /* Stronger focus states */
+  input:focus,
+  textarea:focus,
+  select:focus {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

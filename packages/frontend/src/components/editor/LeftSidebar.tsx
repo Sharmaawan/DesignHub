@@ -2,12 +2,13 @@ import { useState, useRef, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { uploadAPI, aiAPI, aiSettingsAPI, BACKEND_ORIGIN as BACKEND, resolveAssetUrl } from '../../utils/api';
 import { importPDF, importSVG, importCSV, importXLSX, importDOCX, importPPTX, paginateParagraphs } from '../../utils/documentImport';
+import { decomposeTemplateImage } from '../../utils/templateDecomposition';
 import { useEditorStore } from '../../stores/editorStore';
 import { COLORS_PALETTE } from '../../utils/cn';
 import {
   HiOutlineTemplate, HiOutlineViewGrid, HiOutlinePencil,
   HiOutlineColorSwatch, HiOutlineUpload,
-  HiOutlineSearch, HiOutlinePlus, HiOutlineChevronLeft,
+  HiOutlineSearch, HiOutlinePlus,
   HiOutlineSparkles, HiOutlineChevronDown, HiOutlineChevronUp,
   HiOutlinePencilAlt, HiCursorClick, HiOutlineTrash,
 } from 'react-icons/hi';
@@ -300,23 +301,9 @@ function ShapePreview({ shape, color }: { shape: string; color: string }) {
   }
 }
 
-// Persisted across refreshes and independent of any selection/edit/zoom/tool-switch
-// state elsewhere in the editor — this is the only thing allowed to open or close
-// the panel, so "closed" only ever changes because the user clicked something here.
-const PANEL_OPEN_KEY = 'designhub-leftpanel-open';
-const readStoredPanelOpen = () => {
-  const stored = localStorage.getItem(PANEL_OPEN_KEY);
-  return stored === null ? true : stored === 'true';
-};
-
 export default function LeftSidebar() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState<TabKey>('templates');
-  const [panelOpen, setPanelOpenState] = useState(readStoredPanelOpen);
-  const setPanelOpen = (open: boolean) => {
-    setPanelOpenState(open);
-    localStorage.setItem(PANEL_OPEN_KEY, String(open));
-  };
   const [search, setSearch] = useState('');
   const [iconCat, setIconCat] = useState('All');
   const [iconColor, setIconColor] = useState('#6366F1');
@@ -342,12 +329,15 @@ export default function LeftSidebar() {
 
   // Landed here from a Dashboard "Magic AI Studio" quick-action card (?ai=write/image/
   // suggest) — those used to just create a blank design and tell the user to go find
-  // the AI tab themselves via a toast; this opens it directly instead.
+  // the AI tab themselves via a toast; this opens it directly instead. setSidePanelTab
+  // keeps SidePanel.tsx's own header (which reads sidePanelTab, not this component's
+  // local activeTab) in sync — without it the header still said "Templates" while this
+  // panel had already switched to showing the AI tab underneath.
   useEffect(() => {
     const ai = searchParams.get('ai');
     if (ai === 'write' || ai === 'image' || ai === 'suggest') {
       setActiveTab('ai');
-      setPanelOpen(true);
+      setSidePanelTab('ai');
       setAiTab(ai);
       setSearchParams({}, { replace: true });
     }
@@ -398,8 +388,23 @@ export default function LeftSidebar() {
   const {
     addElement, removeElements, pushHistory, pages, currentPageIndex, setPageBackgroundColor, updatePage, importDocumentPages,
     activeTool, setActiveTool, drawColor, setDrawColor, drawWidth, setDrawWidth,
-    addTrack, setPageDuration, setSidePanelTab,
+    addTrack, setPageDuration, setSidePanelTab, sidePanelTab,
   } = useEditorStore();
+
+  // sidePanelTab (IconNavigation's own click target) is the single source of
+  // truth for which panel is open at all — see SidePanel.tsx, which only
+  // mounts this component when sidePanelTab is one of the tab keys below.
+  // But which TAB'S CONTENT this component itself then shows was tracked by
+  // activeTab, a separate local default ('templates') with nothing keeping
+  // it in step — clicking any icon other than Templates in the real nav
+  // correctly swapped SidePanel's own header to e.g. "Text", but this panel
+  // kept right on rendering the Templates grid underneath, since nothing
+  // ever told its own activeTab to change. This mirrors it.
+  useEffect(() => {
+    if (['templates', 'elements', 'text', 'uploads', 'background', 'ai', 'tools'].includes(sidePanelTab)) {
+      setActiveTab(sidePanelTab as TabKey);
+    }
+  }, [sidePanelTab]);
   const currentPage = pages[currentPageIndex];
   const cw = currentPage?.width ?? 1920;
   const ch = currentPage?.height ?? 1080;
@@ -1043,8 +1048,10 @@ export default function LeftSidebar() {
       if (cat === 'image') {
         const img = new window.Image();
         img.onload = () => {
-          const w = Math.min(img.naturalWidth || 500, Math.round(cw * 0.7));
-          const h = img.naturalWidth ? Math.round((img.naturalHeight / img.naturalWidth) * w) : 375;
+          const naturalW = img.naturalWidth || 500;
+          const naturalH = img.naturalHeight || 375;
+          const w = Math.min(naturalW, Math.round(cw * 0.7));
+          const h = naturalW ? Math.round((naturalH / naturalW) * w) : 375;
           addElement({
             type: 'image', x: cx, y: cy, width: w, height: h,
             rotation: 0, opacity: 1, visible: true, locked: false, name: file.name, zIndex: 0,
@@ -1053,6 +1060,44 @@ export default function LeftSidebar() {
           pushHistory();
           setUploadedFiles((prev) => prev.map((f) => f.id === matchId ? { ...f, progress: 100, canvasable: true, thumbnail: serverUrl } : f));
           toast.success(`${file.name} added to canvas`);
+
+          // Posters/flyers/screenshots usually carry their text baked into the
+          // pixels — decompose it into real, individually-editable text elements
+          // laid over the same image (same OCR pipeline the dashboard's "Upload &
+          // Edit" flow uses), so clicking text works here too instead of only
+          // through that separate upload path. object-fit:cover with h computed
+          // to preserve the source aspect ratio means no cropping happens, so a
+          // single uniform scale (w / naturalW) maps every OCR'd box from image
+          // pixels onto this element's on-canvas position and size correctly.
+          (async () => {
+            try {
+              const scanToast = toast.loading('Scanning image for editable text…');
+              const decomposed = await decomposeTemplateImage(serverUrl, naturalW, naturalH);
+              toast.dismiss(scanToast);
+              const textEls = decomposed.filter((el) => el.type === 'text');
+              if (textEls.length > 0) {
+                const scale = w / naturalW;
+                for (const el of textEls) {
+                  const d = el.data as any;
+                  addElement({
+                    type: 'text',
+                    x: cx + el.x * scale,
+                    y: cy + el.y * scale,
+                    width: el.width * scale,
+                    height: el.height * scale,
+                    rotation: 0, opacity: 1, visible: true, locked: false,
+                    name: el.name,
+                    data: { ...d, fontSize: Math.max(8, Math.round(d.fontSize * scale)) },
+                  });
+                }
+                pushHistory();
+                toast.success(`Found ${textEls.length} editable text element${textEls.length > 1 ? 's' : ''} — click any text to edit it`);
+              }
+            } catch (ocrErr) {
+              console.error('[Upload OCR]', ocrErr);
+              // Non-fatal — the image itself is already on the canvas either way
+            }
+          })();
         };
         img.onerror = () => {
           addElement({
@@ -1386,51 +1431,16 @@ export default function LeftSidebar() {
     return matchCat && matchSearch;
   });
 
-  const handleTabClick = (key: TabKey) => {
-    // Leaving the Tools tab (switching elsewhere, or collapsing it) should drop back
-    // to Select — otherwise the canvas stays in draw/erase mode with no visible sign
-    // of it once the Tools panel itself is no longer even showing.
-    if (activeTab === 'tools' && (key !== 'tools' || panelOpen) && activeTool !== 'select') {
-      setActiveTool('select');
-    }
-    if (activeTab === key && panelOpen) { setPanelOpen(false); return; }
-    setActiveTab(key);
-    setPanelOpen(true);
-    setSearch('');
-  };
-
+  // This component's own icon strip + collapse/expand header used to live
+  // here, duplicating IconNavigation.tsx (the real nav that sets
+  // sidePanelTab) one level out — not just visually redundant (two
+  // "Templates" labels stacked, confirmed live) but the actual source of the
+  // bug the sync effect above fixes: this panel had its own disconnected
+  // notion of which tab was active. SidePanel.tsx already provides the
+  // header (reading sidePanelTab) and the close button; this now renders
+  // just the active tab's content.
   return (
-    <div className="flex h-full flex-shrink-0">
-      {/* Icon strip */}
-      <div className="w-14 flex flex-col items-center gap-1 py-2 bg-white dark:bg-canva-dark-surface border-r border-gray-200 dark:border-canva-dark-border overflow-y-auto">
-        {TABS.map(({ key, icon: Icon, label }) => (
-          <button key={key} onClick={() => handleTabClick(key)} title={label}
-            className={`flex flex-col items-center gap-0.5 w-12 py-2 rounded-lg text-[9px] font-medium transition-colors ${
-              activeTab === key && panelOpen
-                ? 'bg-canva-purple/10 text-canva-purple'
-                : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 hover:text-gray-700 dark:hover:text-gray-200'
-            }`}>
-            <Icon size={20} /><span>{label}</span>
-          </button>
-        ))}
-      </div>
-
-      {/* Panel */}
-      {panelOpen && (
-        <div className="w-64 bg-white dark:bg-canva-dark-surface border-r border-gray-200 dark:border-canva-dark-border flex flex-col overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-gray-800 flex-shrink-0">
-            <span className="text-sm font-semibold text-gray-900 dark:text-white capitalize">{activeTab}</span>
-            <button
-              onClick={() => {
-                if (activeTab === 'tools' && activeTool !== 'select') setActiveTool('select');
-                setPanelOpen(false);
-              }}
-              className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400"
-            >
-              <HiOutlineChevronLeft size={14} />
-            </button>
-          </div>
-
+    <div className="w-full h-full flex flex-col overflow-hidden bg-white dark:bg-canva-dark-surface">
           {(activeTab === 'templates' || activeTab === 'elements') && (
             <div className="px-4 py-2.5 border-b border-gray-100 dark:border-gray-800 flex-shrink-0">
               <div className="flex items-center gap-2 bg-gray-100 dark:bg-gray-800 rounded-lg px-3 py-2">
@@ -2158,8 +2168,6 @@ export default function LeftSidebar() {
             )}
 
           </div>
-        </div>
-      )}
     </div>
   );
 }

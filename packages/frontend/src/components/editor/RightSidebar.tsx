@@ -5,18 +5,18 @@ import { COLORS_PALETTE, FONT_FAMILIES, FONT_WEIGHT_MAP, FONT_WEIGHT_LABELS, GRA
 import { hsvToHex, hexToHsv, isPlainHexColor, getDocumentColors, getPagePhotoSources, extractPhotoColors } from '../../utils/colorTools';
 import { uploadAPI, backgroundRemovalAPI, BACKEND_ORIGIN as BACKEND } from '../../utils/api';
 import {
-  HiOutlineX, HiOutlineTrash, HiOutlineDuplicate, HiOutlineLockClosed,
+  HiOutlineTrash, HiOutlineDuplicate, HiOutlineLockClosed,
   HiOutlineLockOpen, HiOutlineEye, HiOutlineEyeOff,
   HiOutlineArrowUp, HiOutlineArrowDown, HiOutlinePlus, HiOutlineMinus,
   HiOutlinePhotograph, HiOutlineAdjustments, HiOutlineSparkles,
-  HiOutlineArrowLeft, HiOutlineArrowRight,
+  HiOutlineArrowRight,
   HiOutlineTemplate, HiOutlineCog, HiOutlineChevronDown, HiOutlineChevronUp,
 } from 'react-icons/hi';
 import toast from 'react-hot-toast';
 
 export default function RightSidebar() {
   const {
-    pages, currentPageIndex, selectedElementIds, rightPanelOpen, setRightPanelOpen,
+    pages, currentPageIndex, selectedElementIds,
     updateElement, removeElements, duplicateElements, bringForward, sendBackward,
     bringToFront, sendToBack, lockElement, unlockElement, hideElement, showElement,
     pushHistory, setPageBackgroundColor, updatePage, duplicatePage, removePage,
@@ -30,34 +30,23 @@ export default function RightSidebar() {
   const selectedElements = page?.elements.filter((e) => selectedElementIds.includes(e.id)) || [];
   const element = selectedElements.length === 1 ? selectedElements[0] : null;
 
-  // Closing via the X used to unmount this entirely with nothing left anywhere to
-  // bring it back — selecting an existing element doesn't reopen it (only adding a
-  // brand-new one does), so it stayed gone for the rest of the session. This narrow
-  // strip is the one persistent, always-clickable way back in, same idea as the left
-  // sidebar's icon rail staying up when its own panel collapses.
-  if (!rightPanelOpen) {
-    return (
-      <button
-        onClick={() => setRightPanelOpen(true)}
-        title="Show design panel"
-        className="w-6 flex-shrink-0 bg-white dark:bg-canva-dark-surface border-l border-gray-200 dark:border-canva-dark-border hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center justify-center transition-colors"
-      >
-        <HiOutlineArrowLeft size={14} className="text-gray-400" />
-      </button>
-    );
-  }
+  // The collapsed (rightPanelOpen === false) state is now handled one level up,
+  // by RightPropertiesPanel itself — it used to be checked here, but this
+  // component is always wrapped in that fixed-width w-72 parent, so collapsing
+  // just this inner content left the outer panel pinned open at full width,
+  // still blocking the canvas behind it. See RightPropertiesPanel.tsx.
 
   // Nothing selected — the page's own background isn't a clickable canvas element (it's
   // a page property, not a shape), so clicking empty canvas can never "select" it. Show
   // its controls here instead, the same way Canva surfaces page-level properties when
   // nothing else is selected — otherwise there's no way to discover how to change it.
   if (!element) {
+    // No w-72/header/close-button wrapper here — RightPropertiesPanel.tsx
+    // (the actual parent whenever this renders) already supplies all three;
+    // this component used to duplicate them, producing two stacked "Design"
+    // headers and two close buttons (confirmed live).
     return (
-      <div className="w-72 bg-white dark:bg-canva-dark-surface border-l border-gray-200 dark:border-canva-dark-border overflow-y-auto">
-        <div className="sticky top-0 z-10 bg-white dark:bg-canva-dark-surface border-b border-gray-100 dark:border-gray-800 px-5 py-3.5 flex items-center justify-between">
-          <span className="text-sm font-semibold text-gray-900 dark:text-white">Design</span>
-          <button onClick={() => setRightPanelOpen(false)} className="toolbar-btn"><HiOutlineX size={16} /></button>
-        </div>
+      <div className="w-full overflow-y-auto">
         <div className="p-5 space-y-6">
           <p className="text-xs text-gray-400 dark:text-gray-500 leading-relaxed">
             Click any text, shape, or image on the canvas to edit it. Nothing selected right now, so here's the page itself:
@@ -191,16 +180,12 @@ export default function RightSidebar() {
     pushHistory();
   };
 
+  // No w-72/header/close-button wrapper here either — same duplication as
+  // the !element branch above, just for whichever element type is selected
+  // (RightPropertiesPanel.tsx's header already shows the type name, via
+  // getPropertyTitle()).
   return (
-    <div className="w-72 bg-white dark:bg-canva-dark-surface border-l border-gray-200 dark:border-canva-dark-border overflow-y-auto">
-      <div className="sticky top-0 z-10 bg-white dark:bg-canva-dark-surface border-b border-gray-100 dark:border-gray-800 px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold text-gray-900 dark:text-white capitalize">{element.type}</span>
-          <span className="text-xs text-gray-400">Properties</span>
-        </div>
-        <button onClick={() => setRightPanelOpen(false)} className="toolbar-btn"><HiOutlineX size={16} /></button>
-      </div>
-
+    <div className="w-full overflow-y-auto">
       {/* Quick Actions */}
       <div className="p-3 border-b border-gray-100 dark:border-gray-800">
         <div className="flex items-center gap-1">

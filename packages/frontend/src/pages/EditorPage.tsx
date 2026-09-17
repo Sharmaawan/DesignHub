@@ -3,16 +3,14 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useEditorStore } from '../stores/editorStore';
 import { useProjectStore, mapApiProjectToProject } from '../stores/projectStore';
 import { useThemeStore } from '../stores/themeStore';
-import LeftSidebar from '../components/editor/LeftSidebar';
-import TopToolbar from '../components/editor/TopToolbar';
-import RightSidebar from '../components/editor/RightSidebar';
+import TopToolbarNew from '../components/editor/TopToolbarNew';
+import EditorLayout from '../components/editor/EditorLayout';
+import CanvasWorkspace from '../components/editor/CanvasWorkspace';
 import EditorCanvas from '../components/editor/EditorCanvas';
-import PageNavigation from '../components/editor/PageNavigation';
+import PagesPanel from '../components/editor/PagesPanel';
+import TimelinePanel from '../components/editor/timeline/TimelinePanel';
 import CommentsPanel from '../components/editor/CommentsPanel';
 import VersionHistory from '../components/editor/VersionHistory';
-import FloatingToolbar from '../components/editor/FloatingToolbar';
-import LayersPanel from '../components/editor/LayersPanel';
-import TimelinePanel from '../components/editor/timeline/TimelinePanel';
 import ElementAnimations from '../components/editor/ElementAnimations';
 import PageTransitions from '../components/editor/PageTransitions';
 import SettingsModal from '../components/editor/SettingsModal';
@@ -165,99 +163,45 @@ export default function EditorPage() {
   const { collaborators, emitCursorMove } = useCollaboration(projectId);
 
   return (
-    <div className="h-screen flex flex-col bg-gray-100 dark:bg-canva-dark-bg overflow-hidden">
-      <TopToolbar
+    <div className="h-screen flex flex-col bg-gray-50 dark:bg-canva-dark-bg overflow-hidden">
+      {/* New Modern Top Toolbar */}
+      <TopToolbarNew
         onThemeToggle={toggleTheme}
         isDark={isDark}
-        onShowShortcuts={() => setShowShortcuts(true)}
         onOpenShare={() => setShowShare(true)}
         onOpenExport={() => setShowExport(true)}
         onOpenPublish={() => setShowPublish(true)}
         onOpenSettings={() => setShowSettings(true)}
         onOpenPreview={() => setShowPreview(true)}
-        collaborators={collaborators}
-        isReadOnlyView={isReadOnlyView}
       />
 
-      <div className="flex-1 flex overflow-hidden relative">
-        <LeftSidebar />
-
+      {/* New Modern Editor Layout */}
+      <EditorLayout>
         <div className="flex-1 flex flex-col overflow-hidden">
-          {/* Canvas Area */}
-          <div className="flex-1 relative overflow-hidden bg-gray-200/50 dark:bg-gray-900/50">
+          {/* Canvas Workspace with Selection Overlay & Hover Indicators */}
+          <CanvasWorkspace>
             {currentPage && <EditorCanvas page={currentPage} collaborators={collaborators} onCursorMove={emitCursorMove} />}
-            <FloatingToolbar />
-          </div>
+          </CanvasWorkspace>
 
-          {/* Video timeline — full-width, replaces the page strip while active */}
-          {sidePanelTab === 'timeline' ? <TimelinePanel /> : <PageNavigation />}
+          {/* Video timeline or Modern Pages Panel */}
+          {sidePanelTab === 'timeline' ? <TimelinePanel /> : <PagesPanel />}
         </div>
+      </EditorLayout>
 
-        <RightSidebar />
+      {/* Comments & Version History (Floating) */}
+      {commentsOpen && <CommentsPanel />}
+      {versionsOpen && <VersionHistory />}
 
-        {/* Layers panel — shown via toolbar button or store flag */}
-        {(layersOpen || sidePanelTab === 'layers') && (
-          <div className="w-60 bg-white dark:bg-canva-dark-surface border-l border-gray-200 dark:border-canva-dark-border flex flex-col overflow-hidden flex-shrink-0">
-            <div className="flex items-center justify-between px-3 py-2.5 border-b border-gray-100 dark:border-gray-800">
-              <span className="text-sm font-semibold text-gray-900 dark:text-white">Layers</span>
-              <button
-                onClick={() => { useEditorStore.getState().setLayersOpen(false); useEditorStore.getState().setSidePanelTab(''); }}
-                className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 text-lg leading-none"
-              >×</button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-2">
-              <LayersPanel />
-            </div>
-          </div>
-        )}
-
-        {/* Animations panel */}
-        {sidePanelTab === 'animations' && (
-          <div className="w-60 bg-white dark:bg-canva-dark-surface border-l border-gray-200 dark:border-canva-dark-border flex flex-col overflow-hidden flex-shrink-0">
-            <div className="flex items-center justify-between px-3 py-2.5 border-b border-gray-100 dark:border-gray-800">
-              <span className="text-sm font-semibold text-gray-900 dark:text-white">Animations</span>
-              <button
-                onClick={() => useEditorStore.getState().setSidePanelTab('')}
-                className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 text-lg leading-none"
-              >×</button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-3">
-              <ElementAnimations />
-            </div>
-          </div>
-        )}
-
-        {/* Page transitions panel */}
-        {sidePanelTab === 'transitions' && (
-          <div className="w-60 bg-white dark:bg-canva-dark-surface border-l border-gray-200 dark:border-canva-dark-border flex flex-col overflow-hidden flex-shrink-0">
-            <div className="flex items-center justify-between px-3 py-2.5 border-b border-gray-100 dark:border-gray-800">
-              <span className="text-sm font-semibold text-gray-900 dark:text-white">Page Transition</span>
-              <button
-                onClick={() => useEditorStore.getState().setSidePanelTab('')}
-                className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 text-lg leading-none"
-              >×</button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-3">
-              <PageTransitions />
-            </div>
-          </div>
-        )}
-
-        {commentsOpen && <CommentsPanel />}
-        {versionsOpen && <VersionHistory />}
-      </div>
-
-      {/* Status Bar */}
-      <div className="h-7 bg-white dark:bg-canva-dark-surface border-t border-gray-200 dark:border-canva-dark-border flex items-center justify-between px-4 text-[11px] text-gray-500 dark:text-gray-400 flex-shrink-0">
-        <div className="flex items-center gap-4">
-          <span>{pages.length} page{pages.length !== 1 ? 's' : ''}</span>
-          <span>{currentPage?.elements.length || 0} element{(currentPage?.elements.length || 0) !== 1 ? 's' : ''}</span>
-          {selectedElementIds.length > 0 && <span className="text-canva-purple font-medium">{selectedElementIds.length} selected</span>}
+      {/* Status Bar - Compact */}
+      <div className="h-8 bg-white dark:bg-canva-dark-surface border-t border-gray-200 dark:border-canva-dark-border flex items-center justify-between px-4 text-[11px] text-gray-600 dark:text-gray-400 flex-shrink-0 gap-4">
+        <div className="flex items-center gap-6">
+          <span className="text-gray-500">{pages.length} page{pages.length !== 1 ? 's' : ''}</span>
+          <span className="text-gray-500">{currentPage?.elements.length || 0} element{(currentPage?.elements.length || 0) !== 1 ? 's' : ''}</span>
+          {selectedElementIds.length > 0 && <span className="text-canva-purple font-semibold">{selectedElementIds.length} selected</span>}
         </div>
-        <div className="flex items-center gap-4">
-          {isSaving && <span className="text-canva-purple flex items-center gap-1"><span className="w-1.5 h-1.5 bg-canva-purple rounded-full animate-pulse" /> Saving...</span>}
-          {!isSaving && lastSaved && <span>Saved {new Date(lastSaved).toLocaleTimeString()}</span>}
-          <span>{Math.round(zoom * 100)}%</span>
+        <div className="flex items-center gap-6">
+          {isSaving && <span className="text-canva-purple flex items-center gap-1.5"><span className="w-1.5 h-1.5 bg-canva-purple rounded-full animate-pulse" /> Saving</span>}
+          {!isSaving && lastSaved && <span className="text-gray-500">Saved {new Date(lastSaved).toLocaleTimeString()}</span>}
         </div>
       </div>
 

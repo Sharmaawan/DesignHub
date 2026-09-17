@@ -1,0 +1,272 @@
+/* Smooth Transitions & Animations for Phase 5 Polish */
+
+/* Panel slide animations */
+@keyframes slideInFromLeft {
+  from {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideOutToLeft {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+}
+
+@keyframes slideInFromRight {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideOutToRight {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+}
+
+@keyframes slideUpFromBottom {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideDownToBottom {
+  from {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+}
+
+/* Selection & hover animations */
+@keyframes pulseRing {
+  0% {
+    box-shadow: 0 0 0 0 rgba(123, 47, 190, 0.4);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(123, 47, 190, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(123, 47, 190, 0);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes fadeOut {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    transform: scale(0.95);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes scaleOut {
+  from {
+    transform: scale(1);
+    opacity: 1;
+  }
+  to {
+    transform: scale(0.95);
+    opacity: 0;
+  }
+}
+
+/* Loading spinner */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -1000px 0;
+  }
+  100% {
+    background-position: 1000px 0;
+  }
+}
+
+/* Dashboard hero's floating decorative cards each carry their own fixed
+   tilt via the --card-rotate custom property (set inline per card) — baking
+   rotate(var(--card-rotate)) into every keyframe step keeps that tilt
+   throughout both the entrance and the idle animation instead of the
+   animation's own transform silently overwriting it. */
+@keyframes cardIn {
+  from {
+    opacity: 0;
+    transform: translateY(16px) rotate(var(--card-rotate, 0deg));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) rotate(var(--card-rotate, 0deg));
+  }
+}
+
+@keyframes cardFloat {
+  0%, 100% {
+    transform: translateY(0) rotate(var(--card-rotate, 0deg));
+  }
+  50% {
+    transform: translateY(-6px) rotate(var(--card-rotate, 0deg));
+  }
+}
+
+.hero-float-card {
+  animation: cardIn 0.5s ease-out backwards, cardFloat 3.5s ease-in-out 0.5s infinite;
+}
+
+/* Pausing on hover (rather than layering a hover:scale on top) avoids
+   fighting the continuously-running float animation for the same
+   `transform` property — every animation frame would just stomp over a
+   separate hover scale — and stopping the drift on hover already reads as
+   the card responding to you. */
+.hero-float-card:hover {
+  animation-play-state: paused;
+}
+
+/* Utility classes for animations */
+.animate-slide-in-left {
+  animation: slideInFromLeft 0.3s ease-out;
+}
+
+.animate-slide-out-left {
+  animation: slideOutToLeft 0.3s ease-in;
+}
+
+.animate-slide-in-right {
+  animation: slideInFromRight 0.3s ease-out;
+}
+
+.animate-slide-out-right {
+  animation: slideOutToRight 0.3s ease-in;
+}
+
+.animate-slide-up {
+  animation: slideUpFromBottom 0.3s ease-out;
+}
+
+.animate-slide-down {
+  animation: slideDownToBottom 0.3s ease-in;
+}
+
+.animate-pulse-ring {
+  animation: pulseRing 2s infinite;
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.2s ease-out;
+}
+
+.animate-fade-out {
+  animation: fadeOut 0.2s ease-in;
+}
+
+.animate-scale-in {
+  animation: scaleIn 0.2s ease-out;
+}
+
+.animate-scale-out {
+  animation: scaleOut 0.2s ease-in;
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+.animate-shimmer {
+  background: linear-gradient(
+    90deg,
+    #f3f3f3 25%,
+    #e5e5e5 50%,
+    #f3f3f3 75%
+  );
+  background-size: 1000px 100%;
+  animation: shimmer 2s infinite;
+}
+
+/* Smooth transitions for all interactive elements */
+button, [role="button"], input, select, textarea {
+  transition: all 0.2s ease-out;
+}
+
+/* Smooth color transitions */
+.transition-colors {
+  transition: background-color 0.2s ease-out, color 0.2s ease-out, border-color 0.2s ease-out;
+}
+
+/* Smooth shadow transitions */
+.transition-shadow {
+  transition: box-shadow 0.2s ease-out;
+}
+
+/* Smooth transform transitions */
+.transition-transform {
+  transition: transform 0.2s ease-out;
+}
+
+/* Combined smooth transitions */
+.transition-smooth {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Disable animations on reduced motion preference */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

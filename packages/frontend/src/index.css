@@ -1,3 +1,8 @@
+/* Phase 5: Animations, Responsive, and Dark Mode Polish */
+@import './styles/animations.css';
+@import './styles/responsive.css';
+@import './styles/darkmode.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

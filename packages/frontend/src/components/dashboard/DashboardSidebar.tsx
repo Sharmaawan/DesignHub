@@ -6,9 +6,10 @@ import { useNotificationStore } from '../../stores/notificationStore';
 import {
   HiOutlineHome, HiOutlineFolder, HiOutlineTemplate, HiOutlineCollection,
   HiOutlineBell, HiOutlineDotsHorizontal, HiOutlineChevronLeft, HiOutlineChevronRight,
-  HiOutlineSearch, HiOutlineSun, HiOutlineMoon,
+  HiOutlineSun, HiOutlineMoon, HiOutlineCog, HiOutlineQuestionMarkCircle,
   HiOutlineLogout, HiOutlineUser, HiOutlineGlobe, HiOutlineShare,
 } from 'react-icons/hi';
+import toast from 'react-hot-toast';
 
 interface NavItem {
   id: string;
@@ -84,20 +85,6 @@ export default function DashboardSidebar({ collapsed, onToggle, activeSection, o
         )}
       </div>
 
-      {/* Search (expanded mode) */}
-      {!collapsed && (
-        <div className="px-3 py-3">
-          <div className="relative">
-            <HiOutlineSearch size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Search..."
-              className="w-full pl-9 pr-3 py-2 text-sm bg-gray-100 dark:bg-gray-800 rounded-xl border-0 focus:outline-none focus:ring-2 focus:ring-[#7B2FBE]/30 text-gray-900 dark:text-white placeholder-gray-400"
-            />
-          </div>
-        </div>
-      )}
-
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto px-2 py-2 space-y-0.5">
         {navItems.map((item) => {
@@ -160,6 +147,28 @@ export default function DashboardSidebar({ collapsed, onToggle, activeSection, o
 
       {/* Bottom section */}
       <div className="border-t border-gray-100 dark:border-gray-800 p-2 space-y-1 flex-shrink-0">
+        {/* Settings — reuses the existing Profile Settings route, same
+            destination the profile menu's "Profile Settings" entry already
+            goes to, just also reachable directly from the nav. */}
+        <button
+          onClick={() => navigate('/settings/profile')}
+          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white transition-all"
+        >
+          <HiOutlineCog size={20} className="flex-shrink-0" />
+          {!collapsed && <span>Settings</span>}
+        </button>
+
+        {/* Help & Support — no dedicated help page exists yet, so this
+            surfaces a contact point rather than linking to a page that
+            isn't there. */}
+        <button
+          onClick={() => toast('Need help? Reach us at support@designhub.app', { icon: '💬', duration: 5000 })}
+          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white transition-all"
+        >
+          <HiOutlineQuestionMarkCircle size={20} className="flex-shrink-0" />
+          {!collapsed && <span>Help & Support</span>}
+        </button>
+
         {/* Theme toggle */}
         <button
           onClick={toggleTheme}

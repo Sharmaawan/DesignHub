@@ -161,10 +161,15 @@ export default function CreateButton() {
       <VideoSuggestionsModal open={showVideoFormats} onClose={() => setShowVideoFormats(false)} />
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-[#7B2FBE] to-[#9B4DCA] bg-[length:200%_200%] animate-gradient-shift text-white rounded-full font-semibold shadow-lg shadow-[#7B2FBE]/30 hover:shadow-xl hover:shadow-[#7B2FBE]/40 hover:scale-105 active:scale-95 transition-all duration-200"
+        title="Create a design"
+        // Icon-only below `sm` — at narrow widths the full label left no room
+        // for the header search field next to it (verified at 420px: the
+        // search input was being squeezed to 0 width and hidden entirely
+        // behind this button). The label reappears once there's room.
+        className="flex items-center gap-2 px-3 sm:px-5 py-3 bg-gradient-to-r from-[#7B2FBE] to-[#9B4DCA] bg-[length:200%_200%] animate-gradient-shift text-white rounded-full font-semibold shadow-lg shadow-[#7B2FBE]/30 hover:shadow-xl hover:shadow-[#7B2FBE]/40 hover:scale-105 active:scale-95 transition-all duration-200"
       >
         <HiOutlinePlus size={20} strokeWidth={2.5} />
-        <span>Create a design</span>
+        <span className="hidden sm:inline">Create a design</span>
       </button>
 
       {isOpen && (
