@@ -33,6 +33,7 @@ import aiRoutes from './routes/ai';
 import productUpdateRoutes from './routes/productUpdates';
 import backgroundRemovalRoutes from './routes/backgroundRemoval';
 import emailSettingsRoutes from './routes/emailSettings';
+import zandoviRoutes from './routes/zandovi';
 import socialRoutes from './routes/social';
 import { startScheduler } from './lib/scheduler';
 
@@ -122,6 +123,7 @@ app.use('/api/ai-settings', aiSettingsRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/product-updates', productUpdateRoutes);
 app.use('/api/background-removal', backgroundRemovalRoutes);
+app.use('/api/zandovi', zandoviRoutes);
 app.use('/api/email-settings', emailSettingsRoutes);
 app.use('/api/social', socialRoutes);
 

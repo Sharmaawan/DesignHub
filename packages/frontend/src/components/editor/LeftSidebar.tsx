@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { uploadAPI, aiAPI, aiSettingsAPI, BACKEND_ORIGIN as BACKEND, resolveAssetUrl } from '../../utils/api';
+import { uploadAPI, aiAPI, aiSettingsAPI, zandoviAPI, BACKEND_ORIGIN as BACKEND, resolveAssetUrl } from '../../utils/api';
 import { importPDF, importSVG, importCSV, importXLSX, importDOCX, importPPTX, paginateParagraphs } from '../../utils/documentImport';
 import { decomposeTemplateImage } from '../../utils/templateDecomposition';
 import { useEditorStore } from '../../stores/editorStore';
@@ -148,7 +148,7 @@ const STICKER_CATEGORIES = ['Trending', 'Arrow', 'Word', 'Food', 'Love', 'Shape'
 
 // Canonical canvas sizes per template category — matches Canva's real presets.
 const CATEGORY_SIZE: Record<string, { width: number; height: number }> = {
-  Birthday:       { width: 1080, height: 1350 }, // Invitation-card style
+  Birthday:       { width: 1080, height: 1080 }, // Square, matches the Templates library's square preview cards
   Instagram:      { width: 1080, height: 1080 }, // Instagram Post (story variants override below)
   Facebook:       { width: 1200, height: 630 },  // Facebook Post
   Logo:           { width: 500,  height: 500 },
@@ -222,13 +222,26 @@ const BUILT_IN_TEMPLATES = [
   { id: 'marble-luxe',     cat: 'General',    name: 'Marble Luxe',       bg: '#F5F5F4', accent: '#B8860B', text: '#1C1917', photoId: '129', overlay: 'light' },
   { id: 'forest-path',     cat: 'General',    name: 'Forest Path',       bg: '#052E16', accent: '#4ADE80', text: '#FFFFFF', photoId: '1018' },
   { id: 'desert-dunes',    cat: 'General',    name: 'Desert Dunes',      bg: '#78350F', accent: '#FB923C', text: '#FFFFFF', photoId: '145' },
-  // Birthday → 1080×1350
-  { id: 'bday-fun',        cat: 'Birthday',   name: 'Fun Birthday',      bg: '#FFF9C4', accent: '#FF6F00', text: '#4A148C' },
-  { id: 'bday-elegant',    cat: 'Birthday',   name: 'Elegant Birthday',  bg: '#1A1A2E', accent: '#FFD700', text: '#FFFFFF' },
-  { id: 'bday-pastel',     cat: 'Birthday',   name: 'Pastel Party',      bg: '#FCE4EC', accent: '#E91E63', text: '#880E4F' },
-  { id: 'bday-kids',       cat: 'Birthday',   name: 'Kids Birthday',     bg: '#E3F2FD', accent: '#FF5722', text: '#0D47A1' },
-  { id: 'bday-confetti',   cat: 'Birthday',   name: 'Confetti Bash',     bg: '#FFF1F2', accent: '#FB7185', text: '#881337' },
-  { id: 'bday-galaxy',     cat: 'Birthday',   name: 'Galaxy Party',      bg: '#1E1B4B', accent: '#A78BFA', text: '#EDE9FE' },
+  // Birthday → 1080×1350. Each carries a `party` style config (frame shape,
+  // balloon/confetti palette) so handleApplyTemplate can build a real
+  // photo-frame + balloons + script-heading composition instead of the
+  // generic accent-bar+title+subtitle every other category gets — these are
+  // original compositions built from this editor's own shapes/text (not a
+  // copy of any third-party template), just matching the same genre: a
+  // celebratory card with a photo, decorative balloons/confetti, and a
+  // name/date placeholder.
+  { id: 'bday-fun',        cat: 'Birthday',   name: 'Fun Birthday',      bg: '#FFF9C4', accent: '#FF6F00', text: '#4A148C',
+    party: { frame: 'circle', frameRing: '#FF6F00', balloons: ['#FF6F00', '#4A148C', '#FFC107'], confetti: false } },
+  { id: 'bday-elegant',    cat: 'Birthday',   name: 'Elegant Birthday',  bg: '#1A1A2E', accent: '#FFD700', text: '#FFFFFF',
+    party: { frame: 'circle', frameRing: '#FFD700', balloons: ['#FFD700'], confetti: false, bunting: true } },
+  { id: 'bday-pastel',     cat: 'Birthday',   name: 'Pastel Party',      bg: '#FCE4EC', accent: '#E91E63', text: '#880E4F',
+    party: { frame: 'rounded', frameRing: '#FFFFFF', balloons: ['#F8BBD0', '#E91E63', '#F48FB1'], confetti: true } },
+  { id: 'bday-kids',       cat: 'Birthday',   name: 'Kids Birthday',     bg: '#E3F2FD', accent: '#FF5722', text: '#0D47A1',
+    party: { frame: 'rounded', frameRing: '#FFFFFF', balloons: ['#FF5722', '#FFC107', '#4CAF50', '#0D47A1'], confetti: true } },
+  { id: 'bday-confetti',   cat: 'Birthday',   name: 'Confetti Bash',     bg: '#FFF1F2', accent: '#FB7185', text: '#881337',
+    party: { frame: 'circle', frameRing: '#FB7185', balloons: ['#FB7185', '#FDA4AF'], confetti: true } },
+  { id: 'bday-galaxy',     cat: 'Birthday',   name: 'Galaxy Party',      bg: '#1E1B4B', accent: '#A78BFA', text: '#EDE9FE',
+    party: { frame: 'circle', frameRing: '#A78BFA', balloons: ['#A78BFA', '#818CF8'], confetti: true } },
   // Instagram → 1080×1080 (Post) / 1080×1920 (Story)
   { id: 'ig-minimal',      cat: 'Instagram',  name: 'IG Minimal',        bg: '#FAFAFA', accent: '#C13584', text: '#262626' },
   { id: 'ig-bold',         cat: 'Instagram',  name: 'IG Bold',           bg: '#833AB4', accent: '#FCAF45', text: '#FFFFFF' },
@@ -318,6 +331,23 @@ export default function LeftSidebar() {
   const [bgPhotoCategory, setBgPhotoCategory] = useState<string | null>(null);
   const [bgPhotoResults, setBgPhotoResults] = useState<{ url: string; title: string }[]>([]);
   const [bgPhotoLoading, setBgPhotoLoading] = useState(false);
+  // Zandovi (app.zandovi.com) — a template-rendering API the user connected
+  // their own account to (server-side key, see routes/zandovi.ts). Lists
+  // whatever templates exist in their account's first project; generating
+  // one downloads the rendered PNG and drops it on the canvas the same way
+  // an uploaded image does, including the OCR text-decompose pass so the
+  // result stays editable rather than a flat picture.
+  const [zandoviConfigured, setZandoviConfigured] = useState<boolean | null>(null);
+  const [zandoviTemplates, setZandoviTemplates] = useState<{ id: string; name: string; description: string | null }[]>([]);
+  const [zandoviPreviews, setZandoviPreviews] = useState<Record<string, string>>({});
+  const [zandoviLoading, setZandoviLoading] = useState(false);
+  const [zandoviActiveTemplate, setZandoviActiveTemplate] = useState<{
+    id: string; name: string; viewport: { width: number; height: number };
+    variables: { name: string; label: string; defaultValue?: string }[];
+  } | null>(null);
+  const [zandoviFormValues, setZandoviFormValues] = useState<Record<string, string>>({});
+  const [zandoviGenerating, setZandoviGenerating] = useState(false);
+
   const [aiTemplatePrompt, setAiTemplatePrompt] = useState('');
   const [aiTemplateGenerating, setAiTemplateGenerating] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
@@ -364,6 +394,106 @@ export default function LeftSidebar() {
       handleStickerSearch('Trending');
     }
   }, [activeTab]);
+
+  // Same once-per-tab-open pattern as Trending stickers above — checks
+  // whether the server has a Zandovi key configured at all (silently shows
+  // nothing if not, rather than an error), then loads the first project's
+  // templates. Real accounts only have one project by default; if this ever
+  // needs multi-project support, this is the spot to add a project switcher.
+  useEffect(() => {
+    if (activeTab !== 'templates' || zandoviConfigured !== null) return;
+    setZandoviLoading(true);
+    zandoviAPI.status()
+      .then(({ data }) => {
+        setZandoviConfigured(!!data.configured);
+        if (!data.configured) return null;
+        return zandoviAPI.projects();
+      })
+      .then((projRes) => {
+        const firstProject = projRes?.data?.data?.[0];
+        if (!firstProject) return null;
+        return zandoviAPI.templates(firstProject.id);
+      })
+      .then((tplRes) => {
+        const list = tplRes?.data?.data || [];
+        setZandoviTemplates(list);
+        // Fire off in parallel, each independently — one slow/failed preview
+        // (e.g. a template whose required variables have no default) should
+        // never hold up or blank out the others.
+        list.forEach((tpl: { id: string }) => {
+          zandoviAPI.preview(tpl.id)
+            .then(({ data }) => setZandoviPreviews((prev) => ({ ...prev, [tpl.id]: data.url })))
+            .catch((err) => console.error('[Zandovi] preview failed for', tpl.id, err));
+        });
+      })
+      .catch((err) => console.error('[Zandovi] failed to load templates', err))
+      .finally(() => setZandoviLoading(false));
+  }, [activeTab, zandoviConfigured]);
+
+  const handleZandoviTemplateClick = async (tpl: { id: string; name: string }) => {
+    try {
+      const { data } = await zandoviAPI.template(tpl.id);
+      const values: Record<string, string> = {};
+      (data.variables || []).forEach((v: any) => { values[v.name] = v.defaultValue || ''; });
+      setZandoviFormValues(values);
+      setZandoviActiveTemplate({ id: data.id, name: data.name, viewport: data.viewport, variables: data.variables || [] });
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to load template');
+    }
+  };
+
+  const handleZandoviGenerate = async () => {
+    if (!zandoviActiveTemplate) return;
+    setZandoviGenerating(true);
+    try {
+      const { data } = await zandoviAPI.generate(zandoviActiveTemplate.id, zandoviFormValues);
+      const src = resolveAssetUrl(data.url);
+      const naturalW = zandoviActiveTemplate.viewport?.width || 1200;
+      const naturalH = zandoviActiveTemplate.viewport?.height || 630;
+      const w = Math.min(naturalW, Math.round(cw * 0.7));
+      const h = naturalW ? Math.round((naturalH / naturalW) * w) : 630;
+      addElement({
+        type: 'image', x: cx, y: cy, width: w, height: h,
+        rotation: 0, opacity: 1, visible: true, locked: false, name: zandoviActiveTemplate.name, zIndex: 0,
+        data: { type: 'image', src, objectFit: 'cover', borderRadius: 0, brightness: 100, contrast: 100, saturation: 100, hue: 0, blur: 0, filters: [], cropX: 0, cropY: 0, cropWidth: 100, cropHeight: 100 },
+      });
+      pushHistory();
+      toast.success(`${zandoviActiveTemplate.name} added to canvas`);
+      setZandoviActiveTemplate(null);
+
+      // Same on-demand OCR pass the regular upload flow uses — the rendered
+      // card's text is baked into the PNG's pixels like any other image, so
+      // without this it would just be a flat picture, not an editable design.
+      (async () => {
+        try {
+          const decomposed = await decomposeTemplateImage(src, naturalW, naturalH);
+          const textEls = decomposed.filter((el) => el.type === 'text');
+          if (textEls.length > 0) {
+            const scale = w / naturalW;
+            for (const el of textEls) {
+              const d = el.data as any;
+              addElement({
+                type: 'text',
+                x: cx + el.x * scale, y: cy + el.y * scale,
+                width: el.width * scale, height: el.height * scale,
+                rotation: 0, opacity: 1, visible: true, locked: false,
+                name: el.name,
+                data: { ...d, fontSize: Math.max(8, Math.round(d.fontSize * scale)) },
+              });
+            }
+            pushHistory();
+          }
+        } catch (ocrErr) {
+          console.error('[Zandovi] OCR pass failed', ocrErr);
+        }
+      })();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || err.response?.data?.detail || 'Failed to generate');
+    } finally {
+      setZandoviGenerating(false);
+    }
+  };
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const aiRefFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -482,12 +612,120 @@ export default function LeftSidebar() {
     pushHistory();
   };
 
+  // Birthday templates get a real composed card (photo frame, balloons,
+  // confetti/bunting, script-style heading, name + date placeholders)
+  // instead of the generic accent-bar layout every other category uses —
+  // an original composition built from this editor's own shape/text
+  // elements, styled to match the "photo + balloons + Happy Birthday
+  // script" genre without copying any specific third-party template.
+  const applyBirthdayComposition = (tpl: typeof BUILT_IN_TEMPLATES[number], tw: number, th: number) => {
+    const party = (tpl as any).party as {
+      frame: 'circle' | 'rounded'; frameRing: string; balloons: string[]; confetti?: boolean; bunting?: boolean;
+    };
+    const cx = tw / 2;
+    const frameSize = Math.round(tw * 0.38);
+    const frameTop = Math.round(th * 0.08);
+    const ringInset = 14;
+    const frameRadius = party.frame === 'circle' ? frameSize / 2 : 36;
+
+    // Frame + heading go first — both so they end up BEHIND the balloons/
+    // confetti added after (those should float in front, not be hidden
+    // behind the frame's edge), and because the Templates library's card
+    // preview only renders an item's first few elements: leading with the
+    // frame and "Happy Birthday" heading instead of a couple of tiny
+    // balloon strings is what actually makes the card look like the design.
+    addElement({
+      type: 'shape', x: cx - frameSize / 2, y: frameTop, width: frameSize, height: frameSize,
+      rotation: 0, opacity: 1, visible: true, locked: false, name: 'Photo Frame Ring', zIndex: 0,
+      data: { type: 'shape', shapeType: party.frame === 'circle' ? 'circle' : 'rectangle', fill: party.frameRing, stroke: 'transparent', strokeWidth: 0, cornerRadius: frameRadius },
+    });
+    addElement({
+      type: 'shape', x: cx - frameSize / 2 + ringInset, y: frameTop + ringInset, width: frameSize - ringInset * 2, height: frameSize - ringInset * 2,
+      rotation: 0, opacity: 1, visible: true, locked: false, name: 'Photo Placeholder', zIndex: 0,
+      data: { type: 'shape', shapeType: party.frame === 'circle' ? 'circle' : 'rectangle', fill: 'rgba(255,255,255,0.85)', stroke: 'transparent', strokeWidth: 0, cornerRadius: Math.max(0, frameRadius - ringInset) },
+    });
+    addElement({
+      type: 'text', x: cx - frameSize / 2, y: frameTop + frameSize / 2 - 16, width: frameSize, height: 32,
+      rotation: 0, opacity: 1, visible: true, locked: false, name: 'Photo Hint', zIndex: 0,
+      data: { type: 'text', content: 'Add your photo', fontFamily: 'Inter', fontSize: 18, fontWeight: 500, fontStyle: 'normal', textDecoration: 'none', textAlign: 'center', color: party.frameRing, lineHeight: 1.2, letterSpacing: 0, textTransform: 'none' },
+    });
+
+    const headingY = frameTop + frameSize + 48;
+    addElement({
+      type: 'text', x: 60, y: headingY, width: tw - 120, height: 110,
+      rotation: 0, opacity: 1, visible: true, locked: false, name: 'Title', zIndex: 0,
+      data: { type: 'text', content: 'Happy Birthday', fontFamily: 'Playfair Display', fontSize: 76, fontWeight: 700, fontStyle: 'italic', textDecoration: 'none', textAlign: 'center', color: tpl.text, lineHeight: 1.1, letterSpacing: 0, textTransform: 'none' },
+    });
+    addElement({
+      type: 'text', x: 60, y: headingY + 118, width: tw - 120, height: 50,
+      rotation: 0, opacity: 1, visible: true, locked: false, name: 'Subtitle', zIndex: 0,
+      data: { type: 'text', content: 'Your Name Here', fontFamily: 'Montserrat', fontSize: 34, fontWeight: 600, fontStyle: 'normal', textDecoration: 'none', textAlign: 'center', color: tpl.accent, lineHeight: 1.3, letterSpacing: 2, textTransform: 'uppercase' },
+    });
+    addElement({
+      type: 'text', x: 60, y: headingY + 180, width: tw - 120, height: 40,
+      rotation: 0, opacity: 0.85, visible: true, locked: false, name: 'Caption', zIndex: 0,
+      data: { type: 'text', content: 'Wishing you endless happiness', fontFamily: 'Inter', fontSize: 22, fontWeight: 400, fontStyle: 'normal', textDecoration: 'none', textAlign: 'center', color: tpl.text, lineHeight: 1.4, letterSpacing: 0, textTransform: 'none' },
+    });
+
+    if (party.bunting) {
+      const buntingCount = 9;
+      const spacing = tw / (buntingCount + 1);
+      for (let i = 0; i < buntingCount; i++) {
+        addElement({
+          type: 'shape', x: spacing * (i + 1) - 22, y: -6, width: 44, height: 54,
+          rotation: 0, opacity: 1, visible: true, locked: false, name: 'Bunting', zIndex: 0,
+          data: { type: 'shape', shapeType: 'triangle', fill: i % 2 === 0 ? party.frameRing : tpl.accent, stroke: 'transparent', strokeWidth: 0, cornerRadius: 0 },
+        });
+      }
+    }
+
+    // Balloons with thin string "ties" — scattered near the top corners so
+    // they frame the photo without covering it.
+    const balloonSpots = [
+      { x: tw * 0.12, y: th * 0.03, size: 100 },
+      { x: tw * 0.82, y: th * 0.06, size: 130 },
+      { x: tw * 0.22, y: th * 0.14, size: 70 },
+      { x: tw * 0.72, y: th * 0.17, size: 80 },
+    ];
+    balloonSpots.forEach((spot, i) => {
+      const color = party.balloons[i % party.balloons.length];
+      addElement({
+        type: 'shape', x: spot.x, y: spot.y + spot.size * 0.85, width: 3, height: 70,
+        rotation: 0, opacity: 0.5, visible: true, locked: false, name: 'Balloon String', zIndex: 0,
+        data: { type: 'shape', shapeType: 'rectangle', fill: tpl.text, stroke: 'transparent', strokeWidth: 0, cornerRadius: 0 },
+      });
+      addElement({
+        type: 'shape', x: spot.x - spot.size / 2, y: spot.y, width: spot.size, height: spot.size * 1.15,
+        rotation: 0, opacity: 1, visible: true, locked: false, name: 'Balloon', zIndex: 0,
+        data: { type: 'shape', shapeType: 'circle', fill: color, stroke: 'transparent', strokeWidth: 0, cornerRadius: 0 },
+      });
+    });
+
+    if (party.confetti) {
+      const confettiColors = [...party.balloons, tpl.accent, '#FFFFFF'];
+      for (let i = 0; i < 16; i++) {
+        const size = 6 + (i % 4) * 3;
+        addElement({
+          type: 'shape',
+          x: Math.round((0.06 + ((i * 0.6113) % 0.88)) * tw),
+          y: Math.round((0.02 + ((i * 0.371) % 0.24)) * th),
+          width: size, height: size,
+          rotation: (i * 47) % 360, opacity: 0.85, visible: true, locked: false, name: 'Confetti', zIndex: 0,
+          data: { type: 'shape', shapeType: i % 2 === 0 ? 'circle' : 'rectangle', fill: confettiColors[i % confettiColors.length], stroke: 'transparent', strokeWidth: 0, cornerRadius: 0 },
+        });
+      }
+    }
+  };
+
   const handleApplyTemplate = (tpl: typeof BUILT_IN_TEMPLATES[number]) => {
     // Picking a different template should REPLACE the design, not stack a new accent
     // bar/title/subtitle on top of whatever a previous template click already added —
     // otherwise every click layers more overlapping duplicates on the same page.
     const existingTemplateElementIds = pages[currentPageIndex].elements
-      .filter((e) => ['Accent Bar', 'Title', 'Subtitle', 'Background Photo', 'Photo Overlay'].includes(e.name))
+      .filter((e) => [
+        'Accent Bar', 'Title', 'Subtitle', 'Background Photo', 'Photo Overlay',
+        'Bunting', 'Balloon', 'Balloon String', 'Confetti', 'Photo Frame Ring', 'Photo Placeholder', 'Photo Hint', 'Caption',
+      ].includes(e.name))
       .map((e) => e.id);
     if (existingTemplateElementIds.length > 0) removeElements(existingTemplateElementIds);
 
@@ -497,6 +735,13 @@ export default function LeftSidebar() {
     const th = tpl.height ?? ch;
     if (tpl.width && tpl.height) {
       updatePage(currentPageIndex, { width: tpl.width, height: tpl.height });
+    }
+
+    if ((tpl as any).party) {
+      setPageBackgroundColor(currentPageIndex, tpl.bg);
+      applyBirthdayComposition(tpl, tw, th);
+      pushHistory();
+      return;
     }
 
     const photoId = (tpl as any).photoId as string | undefined;
@@ -1476,6 +1721,87 @@ export default function LeftSidebar() {
                       : <><HiOutlineSparkles size={13} />Generate design</>}
                   </button>
                 </div>
+
+                {/* Zandovi — only shown once we know the server actually has
+                    a key configured (see the effect above); silent no-op
+                    otherwise rather than an error state for every user who
+                    hasn't connected one. */}
+                {zandoviConfigured && (
+                  <div className="mb-4">
+                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-2">Your Zandovi Templates</p>
+                    {zandoviLoading && zandoviTemplates.length === 0 ? (
+                      <div className="flex items-center justify-center py-4 text-[11px] text-gray-400">
+                        <svg className="animate-spin h-4 w-4 mr-1.5" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                        Loading…
+                      </div>
+                    ) : zandoviTemplates.length === 0 ? (
+                      <p className="text-[11px] text-gray-400 px-1">No templates in your Zandovi account yet — add some at app.zandovi.com.</p>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-2.5">
+                        {zandoviTemplates.map((tpl) => (
+                          <button
+                            key={tpl.id}
+                            onClick={() => handleZandoviTemplateClick(tpl)}
+                            className="group relative self-start rounded-lg overflow-hidden border-2 border-transparent hover:border-canva-purple transition-all shadow-sm bg-gray-100 dark:bg-gray-800"
+                            style={{ aspectRatio: '16 / 9' }}
+                          >
+                            {zandoviPreviews[tpl.id] ? (
+                              <img src={resolveAssetUrl(zandoviPreviews[tpl.id])} alt="" loading="lazy" className="absolute inset-0 w-full h-full object-cover" />
+                            ) : (
+                              <div className="absolute inset-0 flex items-center justify-center">
+                                <svg className="animate-spin h-4 w-4 text-gray-300" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                              </div>
+                            )}
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/0 to-black/0" />
+                            <div className="absolute bottom-0 left-0 right-0 px-2 py-1.5">
+                              <div className="text-[10px] font-bold text-white truncate leading-tight">{tpl.name}</div>
+                            </div>
+                            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Fill-in-variables modal for the selected Zandovi template */}
+                {zandoviActiveTemplate && (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => !zandoviGenerating && setZandoviActiveTemplate(null)}>
+                    <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+                    <div className="relative bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-sm p-5 z-10 max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                      <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-1">{zandoviActiveTemplate.name}</h3>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">Fill in the template's variables, then generate.</p>
+                      <div className="space-y-3 mb-5">
+                        {zandoviActiveTemplate.variables.map((v) => (
+                          <div key={v.name}>
+                            <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1 block">{v.label || v.name}</label>
+                            <input
+                              type="text"
+                              value={zandoviFormValues[v.name] ?? ''}
+                              onChange={(e) => setZandoviFormValues((prev) => ({ ...prev, [v.name]: e.target.value }))}
+                              className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-canva-purple/30 focus:border-canva-purple"
+                            />
+                          </div>
+                        ))}
+                        {zandoviActiveTemplate.variables.length === 0 && (
+                          <p className="text-xs text-gray-400">This template has no variables — it'll generate as-is.</p>
+                        )}
+                      </div>
+                      <div className="flex gap-3">
+                        <button onClick={() => setZandoviActiveTemplate(null)} disabled={zandoviGenerating}
+                          className="flex-1 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 text-sm font-semibold text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-40">
+                          Cancel
+                        </button>
+                        <button onClick={handleZandoviGenerate} disabled={zandoviGenerating}
+                          className="flex-1 py-2.5 rounded-xl bg-canva-purple hover:bg-canva-purple/90 disabled:opacity-50 text-white text-sm font-semibold transition-colors flex items-center justify-center gap-1.5">
+                          {zandoviGenerating
+                            ? <><svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Generating…</>
+                            : 'Generate'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 <div className="grid grid-cols-2 gap-2.5">
                   {BUILT_IN_TEMPLATES

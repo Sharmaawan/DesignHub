@@ -204,6 +204,16 @@ export const backgroundRemovalAPI = {
   delete: (id: string) => api.delete(`/background-removal/${id}`),
 };
 
+export const zandoviAPI = {
+  status: () => api.get('/zandovi/status'),
+  projects: () => api.get('/zandovi/projects'),
+  templates: (projectId: string) => api.get(`/zandovi/projects/${projectId}/templates`),
+  template: (templateId: string) => api.get(`/zandovi/templates/${templateId}`),
+  preview: (templateId: string) => api.get(`/zandovi/templates/${templateId}/preview`),
+  generate: (templateId: string, variables?: Record<string, string>) =>
+    api.post(`/zandovi/templates/${templateId}/generate`, { variables }),
+};
+
 export const emailSettingsAPI = {
   get: () => api.get('/email-settings'),
   connect: (data: { email: string; appPassword: string; host?: string; port?: number }) =>
