@@ -8,13 +8,19 @@ import { CanvasElement } from '../types';
  *
  * Returns array: [background_image, text_element_1, text_element_2, ...]
  */
-export async function decomposeTemplateImage(
-  imageUrl: string,
-  imageWidth: number,
-  imageHeight: number
-): Promise<CanvasElement[]> {
-  // Always start with background image
-  const background: CanvasElement = {
+export interface DetectedTextLine {
+  text: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  avgWordHeight: number;
+  /** Width-weighted mean Tesseract word confidence, 0-100. */
+  conf: number;
+}
+
+export function buildBackgroundElement(imageUrl: string, imageWidth: number, imageHeight: number): CanvasElement {
+  return {
     id: generateId(),
     type: 'image',
     x: 0,
@@ -44,8 +50,95 @@ export async function decomposeTemplateImage(
       cropHeight: 100,
     } as any,
   };
+}
 
-  const elements: CanvasElement[] = [background];
+export async function decomposeTemplateImage(
+  imageUrl: string,
+  imageWidth: number,
+  imageHeight: number
+): Promise<CanvasElement[]> {
+  // Always start with background image
+  const elements: CanvasElement[] = [buildBackgroundElement(imageUrl, imageWidth, imageHeight)];
+
+  try {
+    const lines = await detectTextLines(imageUrl, imageWidth, imageHeight);
+    // The uploaded image is the source of truth and is never modified —
+    // painting over detected regions (an earlier version of this function
+    // erased them and re-uploaded a "cleaned" background) counts as exactly
+    // the kind of automatic change a locked template must never undergo.
+    //
+    // A generic black is used as the placeholder color here; it's invisible
+    // either way (opacity 0, see below) until the caller decides to reveal it.
+    // (The main "Make Editable"/"Upload Template" flow no longer uses this
+    // function at all — see designDecomposition/DesignDecomposer.ts, which
+    // reconstructs each element's real region server-side on demand instead
+    // of leaving a same-size texture patch guess to a client-side crop.)
+    //
+    // Every extracted line still sits exactly on top of the same text already
+    // baked into the background image — so until the user actually edits it,
+    // the two would double-expose. Creating it at opacity 0 keeps it a real,
+    // clickable, selectable element (positioned to match what's underneath)
+    // without drawing anything — the original pixels remain the only visible
+    // copy until an intentional edit changes the content.
+    lines.forEach((line) => {
+      const txt = line.text.trim();
+      if (!txt) return;
+
+      elements.push({
+        id: generateId(),
+        type: 'text',
+        x: Math.max(0, line.x - 4),
+        y: Math.max(0, line.y - 4),
+        width: Math.min(imageWidth - Math.max(0, line.x - 4), line.width + 8),
+        height: Math.min(imageHeight - Math.max(0, line.y - 4), line.height + 8),
+        rotation: 0,
+        opacity: 0,
+        visible: true,
+        locked: false,
+        name: txt.substring(0, 30),
+        zIndex: 10,
+        data: {
+          type: 'text' as const,
+          content: txt,
+          // OCR can only read pixels, never the actual font a template's baked-in
+          // text used — there's no way to recover that. Rather than default to a
+          // plain system font (Arial) that reads as visibly "wrong" the moment
+          // this text is edited, guess a closer-looking stand-in: large text is
+          // usually a heading, styled bold in most templates; smaller text is
+          // usually a caption, closer to a plain body font. Either way, the Font
+          // Family picker in the text panel is the real fix once edited.
+          fontFamily: line.avgWordHeight >= 28 ? 'Poppins' : 'Inter',
+          fontSize: Math.max(10, Math.min(80, Math.round(line.avgWordHeight * 0.9))),
+          fontWeight: line.avgWordHeight >= 28 ? 800 : 400,
+          fontStyle: 'normal',
+          textDecoration: 'none',
+          textAlign: 'left',
+          color: '#000000',
+          lineHeight: 1.2,
+          letterSpacing: 0,
+          textTransform: 'none',
+        } as any,
+      });
+    });
+
+    return elements;
+  } catch (err) {
+    // OCR failed - return just background
+    console.error('[OCR]', err);
+    return elements;
+  }
+}
+
+/**
+ * Runs OCR and returns grouped, noise-filtered text lines. Throws if OCR
+ * itself fails (callers decide how to degrade) — returns [] when it ran fine
+ * but found no text.
+ */
+export async function detectTextLines(
+  imageUrl: string,
+  imageWidth: number,
+  imageHeight: number
+): Promise<DetectedTextLine[]> {
   let worker: Tesseract.Worker | null = null;
 
   try {
@@ -95,7 +188,7 @@ export async function decomposeTemplateImage(
 
     if (!data?.words || data.words.length === 0) {
       console.warn('[OCR] No words detected in image');
-      return elements; // Only background
+      return [];
     }
 
     console.log('[OCR] Detected words:', data.words.length);
@@ -130,7 +223,7 @@ export async function decomposeTemplateImage(
       // Clean approach: return only the background image
       // User can add text manually using the Text Tool
       // This prevents overlapping placeholder boxes and matches Canva's UX
-      return elements;
+      return [];
     }
 
     // Group into lines — height-aware so a big stylized heading and small
@@ -155,72 +248,22 @@ export async function decomposeTemplateImage(
       // Title Case, ALL CAPS, or all lowercase, not OCR's telltale chaotic
       // JIroRG-style case-flipping — blocks both failure modes at once,
       // since a rejected line here never reaches the erase step either.
-      .filter((line: any) => line.text.split(/\s+/).some((w: string) => {
+      // Splitting only on whitespace lets a real hyphenated compound slip
+      // through as a false positive: "by Outlook-ICARE" strips down to the
+      // single token "OutlookICARE" (the hyphen removed along with every
+      // other non-letter), which has capitals in the *middle* — the same
+      // case-flipping shape as actual OCR garbage — and fails all three
+      // patterns even though "Outlook" and "ICARE" are each individually
+      // legitimate. Splitting on hyphens too checks each half on its own.
+      .filter((line: any) => line.text.split(/[\s-]+/).some((w: string) => {
         const core = w.replace(/[^A-Za-z]/g, '');
         return core.length >= 3 && /^([A-Z][a-z]*|[A-Z]+|[a-z]+)$/.test(core);
       }));
 
-    // The uploaded image is the source of truth and is never modified —
-    // painting over detected regions (an earlier version of this function
-    // erased them and re-uploaded a "cleaned" background) counts as exactly
-    // the kind of automatic change a locked template must never undergo.
-    //
-    // Sampling each line's ink/background color and cropping a texture patch
-    // used to happen right here, eagerly, for every detected line — often 70+
-    // on a dense poster. That was hundreds of canvas reads and image crops,
-    // every one of them paid for up front during the upload's "Creating…"
-    // step, even though the overwhelming majority of those lines are never
-    // touched again by anyone. That work is deferred now — see
-    // sampleColorsForRegion below and finishEdit in EditorCanvas.tsx — and
-    // only actually runs for a specific element the moment (if ever) the
-    // user edits it. A generic black is used as the placeholder color here;
-    // it's invisible either way (opacity 0, see below) until that happens.
-    //
-    // Every extracted line still sits exactly on top of the same text already
-    // baked into the background image — so until the user actually edits it,
-    // the two would double-expose. Creating it at opacity 0 keeps it a real,
-    // clickable, selectable element (positioned to match what's underneath)
-    // without drawing anything — the original pixels remain the only visible
-    // copy until an intentional edit changes the content.
-    lines.forEach((line: any) => {
-      const txt = line.text.trim();
-      if (!txt) return;
-
-      elements.push({
-        id: generateId(),
-        type: 'text',
-        x: Math.max(0, line.x - 4),
-        y: Math.max(0, line.y - 4),
-        width: Math.min(imageWidth - Math.max(0, line.x - 4), line.width + 8),
-        height: Math.min(imageHeight - Math.max(0, line.y - 4), line.height + 8),
-        rotation: 0,
-        opacity: 0,
-        visible: true,
-        locked: false,
-        name: txt.substring(0, 30),
-        zIndex: 10,
-        data: {
-          type: 'text' as const,
-          content: txt,
-          fontFamily: 'Arial',
-          fontSize: Math.max(10, Math.min(80, Math.round(line.avgWordHeight * 0.9))),
-          fontWeight: 400,
-          fontStyle: 'normal',
-          textDecoration: 'none',
-          textAlign: 'left',
-          color: '#000000',
-          lineHeight: 1.2,
-          letterSpacing: 0,
-          textTransform: 'none',
-        } as any,
-      });
-    });
-
-    return elements;
+    return lines as DetectedTextLine[];
   } catch (err) {
-    // OCR failed - return just background
     console.error('[OCR]', err);
-    return elements;
+    throw err;
   } finally {
     if (worker) await worker.terminate().catch(() => {});
   }
@@ -248,7 +291,27 @@ function groupWords(words: any[]): any[] {
       const ref = row[0];
       const heightRatio = Math.max(w.height, ref.height) / Math.min(w.height, ref.height);
       const yThreshold = Math.min(w.height, ref.height) * 0.6;
-      if (heightRatio <= 1.5 && Math.abs(w.y - ref.y) <= yThreshold) {
+      const sameRowByRatio = heightRatio <= 1.5 && Math.abs(w.y - ref.y) <= yThreshold;
+
+      // Short lowercase connector words ("as", "a", "of", "in"...) have no
+      // ascenders/descenders, so Tesseract measures a noticeably shorter bbox
+      // for them than for a neighboring capitalized/descender word on the
+      // exact same visual line — verified against a real upload: "Recognized"
+      // (with the 'g' descender) measured 43px tall, "as"/"a" right next to
+      // it measured only 27px, a 1.59x ratio that fails the check above and
+      // silently dropped "as a" into its own too-short "row" — which then
+      // never cleared the real-word-length filter downstream, leaving those
+      // words completely unrecovered. A word whose vertical span sits almost
+      // entirely within the other's span is still the same line regardless
+      // of the ratio; two words merely sharing a rough Y band (the UNIVERSITY
+      // logo caption vs. Wellness Centre heading regression this function
+      // documents above) never shares this much of its actual vertical range.
+      const overlapTop = Math.max(w.y, ref.y);
+      const overlapBottom = Math.min(w.y + w.height, ref.y + ref.height);
+      const overlap = overlapBottom - overlapTop;
+      const sameRowByOverlap = overlap > 0 && overlap / Math.min(w.height, ref.height) >= 0.6;
+
+      if (sameRowByRatio || sameRowByOverlap) {
         row.push(w);
         placed = true;
         break;
@@ -300,294 +363,9 @@ function mergeLine(words: any[]): any {
     // the words in it were anywhere near that size) — sizing text off the
     // *words*, not the *box*, avoids inheriting that inflation.
     avgWordHeight: words.reduce((sum, w) => sum + w.height, 0) / words.length,
+    // Width-weighted, so a long confident word outweighs a stray one-character misread.
+    conf: words.reduce((sum, w) => sum + (w.conf ?? 0) * w.width, 0) / Math.max(1, words.reduce((sum, w) => sum + w.width, 0)),
   };
-}
-
-// Reads (never writes) the pixels under and around ONE text region to report
-// its ink color, its surrounding color, and — when a clean donor region
-// exists — a real cropped snippet of the image to use as a texture-matched
-// patch. This used to run eagerly for every detected line during upload
-// (often 70+ on a dense poster: hundreds of canvas reads before the editor
-// ever opened, for lines the overwhelming majority of which nobody ever
-// edits). It's deferred now — called on demand from EditorCanvas.tsx's
-// finishEdit, only for the one element actually being edited, only the
-// first time it's edited. Nothing about the source image is modified.
-//
-// The ink and surrounding colors are sampled from two different places on
-// purpose. Within the tightly-cropped box, the "ink" pixels (the letter
-// strokes) almost always cover less area than the "paper" behind them — so
-// splitting the box's own pixels into two brightness clusters and treating
-// the smaller one as ink reliably finds the text color, dark-on-light or
-// light-on-dark alike. But asking that *same* box for "the background" is
-// less reliable — an anti-aliasing halo or a subtle highlight right around
-// the glyphs can get misread as the background rather than as part of the
-// text (verified on a real poster: a confident solid white for a region
-// that was actually sitting on plain orange). A margin sampled from just
-// outside the box — pixels the text itself never touches — reports what's
-// actually there.
-//
-// The surrounding color is still only a flat approximation, though — it can
-// match a solid or a smooth gradient but not a textured or patterned
-// background (diagonal stripes, dots, a watermark grid), since a flat fill
-// has no texture at all (verified on a real poster: a correctly-averaged
-// gray still left a visible seam against diagonal stripes). A real same-size
-// snippet cropped from directly above or below the box — checked to never
-// overlap a *different* text element — reproduces texture and patterns too,
-// since it's actual adjacent pixels rather than a computed value; the flat
-// color is kept only as the fallback for when no clean donor region exists
-// (text pinned to an edge, or boxed in by other elements on both sides).
-export async function sampleColorsForRegion(
-  imageUrl: string,
-  box: { x: number; y: number; width: number; height: number },
-  otherBoxes: { x0: number; y0: number; x1: number; y1: number }[],
-  imageWidth: number,
-  imageHeight: number
-): Promise<{ color: string; bgColor: string; bgPatchImage: string | null }> {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = imageWidth;
-      canvas.height = imageHeight;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) {
-        resolve({ color: '#000000', bgColor: '#FFFFFF', bgPatchImage: null });
-        return;
-      }
-      ctx.drawImage(img, 0, 0, imageWidth, imageHeight);
-
-      const toRgb = (sum: number[], n: number) => [
-        Math.round(sum[0] / n), Math.round(sum[1] / n), Math.round(sum[2] / n),
-      ] as const;
-      const rgbStr = (c: readonly [number, number, number]) => `rgb(${c[0]}, ${c[1]}, ${c[2]})`;
-      const luminance = (c: readonly [number, number, number]) => (c[0] + c[1] + c[2]) / 3;
-      const overlapsAnyOtherBox = (x0: number, y0: number, x1: number, y1: number) =>
-        otherBoxes.some((b) => x0 < b.x1 && x1 > b.x0 && y0 < b.y1 && y1 > b.y0);
-
-      const x0 = Math.max(0, Math.floor(box.x));
-      const y0 = Math.max(0, Math.floor(box.y));
-      const x1 = Math.min(imageWidth, Math.ceil(box.x + box.width));
-      const y1 = Math.min(imageHeight, Math.ceil(box.y + box.height));
-      const boxW = x1 - x0;
-      const boxH = y1 - y0;
-      if (boxW <= 0 || boxH <= 0) {
-        resolve({ color: '#000000', bgColor: '#FFFFFF', bgPatchImage: null });
-        return;
-      }
-
-      // --- Ink color: cluster the box's own pixels ---
-      const pixels = ctx.getImageData(x0, y0, boxW, boxH).data;
-      let sumBrightness = 0;
-      const count = pixels.length / 4;
-      for (let i = 0; i < pixels.length; i += 4) {
-        sumBrightness += (pixels[i] + pixels[i + 1] + pixels[i + 2]) / 3;
-      }
-      const avgBrightness = sumBrightness / count;
-
-      const dark = [0, 0, 0];
-      const light = [0, 0, 0];
-      let darkCount = 0;
-      let lightCount = 0;
-      for (let i = 0; i < pixels.length; i += 4) {
-        const brightness = (pixels[i] + pixels[i + 1] + pixels[i + 2]) / 3;
-        if (brightness < avgBrightness) {
-          dark[0] += pixels[i]; dark[1] += pixels[i + 1]; dark[2] += pixels[i + 2];
-          darkCount++;
-        } else {
-          light[0] += pixels[i]; light[1] += pixels[i + 1]; light[2] += pixels[i + 2];
-          lightCount++;
-        }
-      }
-      const inkIsDark = darkCount <= lightCount;
-      const inkCount = inkIsDark ? darkCount : lightCount;
-      const inkSum = inkIsDark ? dark : light;
-      const inkRgb = inkCount > 0 ? toRgb(inkSum, inkCount) : ([0, 0, 0] as const);
-
-      // --- Margin sanity-check: sampled from OUTSIDE the box only ---
-      const margin = Math.max(4, Math.round(Math.min(boxW, boxH) * 0.25));
-      const mx0 = Math.max(0, x0 - margin);
-      const my0 = Math.max(0, y0 - margin);
-      const mx1 = Math.min(imageWidth, x1 + margin);
-      const my1 = Math.min(imageHeight, y1 + margin);
-      let bgSumR = 0, bgSumG = 0, bgSumB = 0, bgN = 0;
-      const sampleRow = (yy: number, xFrom: number, xTo: number) => {
-        if (yy < 0 || yy >= imageHeight) return;
-        const row = ctx.getImageData(xFrom, yy, Math.max(1, xTo - xFrom), 1).data;
-        for (let i = 0; i < row.length; i += 4) {
-          bgSumR += row[i]; bgSumG += row[i + 1]; bgSumB += row[i + 2]; bgN++;
-        }
-      };
-      const sampleCol = (xx: number, yFrom: number, yTo: number) => {
-        if (xx < 0 || xx >= imageWidth) return;
-        const col = ctx.getImageData(xx, yFrom, 1, Math.max(1, yTo - yFrom)).data;
-        for (let i = 0; i < col.length; i += 4) {
-          bgSumR += col[i]; bgSumG += col[i + 1]; bgSumB += col[i + 2]; bgN++;
-        }
-      };
-      sampleRow(my0, mx0, mx1); // strip above the box
-      sampleRow(y1, mx0, mx1); // strip below the box
-      sampleCol(mx0, my0, my1); // strip left of the box
-      sampleCol(x1, my0, my1); // strip right of the box
-
-      const bgRgb = bgN > 0
-        ? toRgb([bgSumR, bgSumG, bgSumB], bgN)
-        : ([255, 255, 255] as const);
-      const bgColor = rgbStr(bgRgb);
-
-      const contrast = Math.abs(luminance(inkRgb) - luminance(bgRgb));
-      const color = contrast < 40 ? (avgBrightness > 128 ? '#000000' : '#FFFFFF') : rgbStr(inkRgb);
-
-      let bgPatchImage: string | null = null;
-      const tryDonor = (dy0: number) => {
-        const dy1 = dy0 + boxH;
-        if (dy0 < 0 || dy1 > imageHeight) return false;
-        if (overlapsAnyOtherBox(x0, dy0, x1, dy1)) return false;
-        const donor = document.createElement('canvas');
-        donor.width = boxW;
-        donor.height = boxH;
-        const dctx = donor.getContext('2d');
-        if (!dctx) return false;
-        dctx.putImageData(ctx.getImageData(x0, dy0, boxW, boxH), 0, 0);
-        bgPatchImage = donor.toDataURL('image/png');
-        return true;
-      };
-      // Below first — a heading's own caption/subtext, if any, is usually
-      // further below still, so this is less likely to clip another element
-      // than looking upward toward a logo or a different heading.
-      tryDonor(y1) || tryDonor(y0 - boxH);
-
-      resolve({ color, bgColor, bgPatchImage });
-    };
-    img.onerror = () => resolve({ color: '#000000', bgColor: '#FFFFFF', bgPatchImage: null });
-    img.src = imageUrl;
-  });
-}
-
-// Lazily-created, never-terminated worker shared by detectNearbyTextRegions
-// across every on-demand call in the session — each call already only runs
-// once per element (see revealingOcrTextIdsRef in EditorCanvas.tsx), but
-// Tesseract worker startup itself costs a second or more, and there's no
-// reason to pay it again for the second, third, etc. element a user edits
-// in the same session.
-let sharedDetectWorkerPromise: Promise<Tesseract.Worker> | null = null;
-function getSharedDetectWorker(): Promise<Tesseract.Worker> {
-  if (!sharedDetectWorkerPromise) {
-    sharedDetectWorkerPromise = Tesseract.createWorker('eng', 1);
-  }
-  return sharedDetectWorkerPromise;
-}
-
-// Some templates draw one word directly overlapping another as a deliberate
-// layered design (verified on a real poster: a small "HAPPY" caption and a
-// "DAY" caption both drawn on top of a huge "ENGINEERS'" — all one flat
-// image). The main decomposeTemplateImage pass only detects words readable
-// on their own; the giant word underneath the smaller overlapping text
-// often reads as garbage there and never becomes a text element at all, so
-// sampleColorsForRegion's texture-patch donor search — which only avoids
-// *known* sibling text boxes — has no idea it exists and can crop straight
-// through its letters, producing a patch with ghosted fragments of it.
-//
-// This runs a second, small, on-demand OCR pass — scoped to a padded crop
-// around the one box actually being edited, not the whole image — the
-// moment (if ever) that element is opened for editing. It's deliberately
-// separate from decomposeTemplateImage: it never runs at upload time and
-// never touches every detected line, only the single region a user is
-// about to reveal, so it adds no time to the "Creating…" step and doesn't
-// change what decomposeTemplateImage itself detects or how fast it runs.
-export async function detectNearbyTextRegions(
-  imageUrl: string,
-  box: { x: number; y: number; width: number; height: number },
-  imageWidth: number,
-  imageHeight: number
-): Promise<{ x0: number; y0: number; x1: number; y1: number }[]> {
-  try {
-    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const im = new Image();
-      im.crossOrigin = 'anonymous';
-      im.onload = () => resolve(im);
-      im.onerror = reject;
-      im.src = imageUrl;
-    });
-
-    // Generous padding, especially vertically — a decorative overlapping
-    // word (like the giant "ENGINEERS'" case) is typically much taller than
-    // the smaller text drawn on top of it, so the crop needs enough margin
-    // above/below to actually contain it, not just immediately-adjacent
-    // pixels. Horizontal padding can't just scale off this element's own
-    // width either — verified on the real poster: "HAPPY" is wide enough
-    // that its own box-relative padding happened to catch the full width of
-    // "ENGINEERS'" underneath it, but "DAY", a much narrower box sitting on
-    // that exact same word, only caught a horizontal sliver of it — too
-    // little for Tesseract to read it as a legible word at all, so it went
-    // undetected and the ghosting stayed. Also flooring horizontal padding
-    // to a fraction of the whole image width means a wide decorative word
-    // gets caught regardless of how narrow the element drawn on top of it
-    // happens to be.
-    const padX = Math.max(box.width * 0.5, 60, imageWidth * 0.3);
-    const padY = Math.max(box.height * 2.5, 80);
-    const cx0 = Math.max(0, Math.floor(box.x - padX));
-    const cy0 = Math.max(0, Math.floor(box.y - padY));
-    const cx1 = Math.min(imageWidth, Math.ceil(box.x + box.width + padX));
-    const cy1 = Math.min(imageHeight, Math.ceil(box.y + box.height + padY));
-    const cw = cx1 - cx0;
-    const ch = cy1 - cy0;
-    if (cw <= 0 || ch <= 0) return [];
-
-    const fullCanvas = document.createElement('canvas');
-    fullCanvas.width = imageWidth;
-    fullCanvas.height = imageHeight;
-    const fctx = fullCanvas.getContext('2d');
-    if (!fctx) return [];
-    fctx.drawImage(img, 0, 0, imageWidth, imageHeight);
-
-    const cropCanvas = document.createElement('canvas');
-    cropCanvas.width = cw;
-    cropCanvas.height = ch;
-    const cctx = cropCanvas.getContext('2d');
-    if (!cctx) return [];
-    cctx.putImageData(fctx.getImageData(cx0, cy0, cw, ch), 0, 0);
-
-    const blob: Blob | null = await new Promise((resolve) => cropCanvas.toBlob(resolve, 'image/png'));
-    if (!blob) return [];
-
-    const worker = await getSharedDetectWorker();
-    const { data } = await worker.recognize(blob);
-    const words = (data?.words || []).filter(
-      (w: any) => w.text && w.text.trim().length > 0 && w.bbox.x1 - w.bbox.x0 > 1 && w.bbox.y1 - w.bbox.y0 > 1
-    );
-
-    const targetX0 = box.x, targetY0 = box.y;
-    const targetX1 = box.x + box.width, targetY1 = box.y + box.height;
-    const results: { x0: number; y0: number; x1: number; y1: number }[] = [];
-    for (const w of words) {
-      const x0 = cx0 + w.bbox.x0;
-      const y0 = cy0 + w.bbox.y0;
-      const x1 = cx0 + w.bbox.x1;
-      const y1 = cy0 + w.bbox.y1;
-      // Skip words that are really just the element's own text re-detected —
-      // majority-overlapping the target box itself, not a genuinely
-      // different piece of text sitting behind/around it.
-      const ix0 = Math.max(x0, targetX0), iy0 = Math.max(y0, targetY0);
-      const ix1 = Math.min(x1, targetX1), iy1 = Math.min(y1, targetY1);
-      const interArea = Math.max(0, ix1 - ix0) * Math.max(0, iy1 - iy0);
-      const wordArea = Math.max(1, (x1 - x0) * (y1 - y0));
-      if (interArea / wordArea > 0.6) continue;
-      // Pad the exclusion box a little past OCR's literal bbox — verified on
-      // a real overlapping-text poster: a donor crop taken just outside the
-      // reported box still caught a glyph's descender/anti-aliased edge,
-      // since Tesseract's bbox doesn't always fully contain the visible
-      // stroke. This only widens what the patch-donor search avoids; it
-      // doesn't change what's treated as this word's own text.
-      const padX = Math.max(4, (x1 - x0) * 0.15);
-      const padY = Math.max(4, (y1 - y0) * 0.15);
-      results.push({ x0: x0 - padX, y0: y0 - padY, x1: x1 + padX, y1: y1 + padY });
-    }
-    return results;
-  } catch (err) {
-    console.warn('[OCR] detectNearbyTextRegions failed', err);
-    return [];
-  }
 }
 
 // Enhance image for better OCR: standard preprocessing

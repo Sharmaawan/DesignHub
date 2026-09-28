@@ -105,6 +105,39 @@ const SHAPE_TYPES = [
 
 const SHAPE_COLORS = ['#6366F1','#EC4899','#F59E0B','#10B981','#3B82F6','#EF4444','#8B5CF6','#14B8A6','#F97316','#06B6D4'];
 
+const FRAME_PRESETS = [
+  { key: 'circle', label: 'Circle', shape: 'circle' as const, w: 180, h: 180, cornerRadius: 0 },
+  { key: 'square', label: 'Square', shape: 'rectangle' as const, w: 180, h: 180, cornerRadius: 0 },
+  { key: 'rounded', label: 'Rounded', shape: 'rectangle' as const, w: 180, h: 180, cornerRadius: 28 },
+  { key: 'portrait', label: 'Portrait', shape: 'rectangle' as const, w: 150, h: 210, cornerRadius: 16 },
+];
+
+// Cell rects are normalized (0-1) within a `box`-sized square, scaled and
+// centered on the page at insert time — see handleAddGrid.
+const GRID_PRESETS = [
+  { key: '2x2', label: '2 x 2', box: 420, cells: [
+    { x: 0,    y: 0,    w: 0.48, h: 0.48, shape: 'rectangle' as const },
+    { x: 0.52, y: 0,    w: 0.48, h: 0.48, shape: 'rectangle' as const },
+    { x: 0,    y: 0.52, w: 0.48, h: 0.48, shape: 'rectangle' as const },
+    { x: 0.52, y: 0.52, w: 0.48, h: 0.48, shape: 'rectangle' as const },
+  ] },
+  { key: '3-row', label: '3 across', box: 420, cells: [
+    { x: 0,     y: 0.33, w: 0.31, h: 0.34, shape: 'rectangle' as const },
+    { x: 0.345, y: 0.33, w: 0.31, h: 0.34, shape: 'rectangle' as const },
+    { x: 0.69,  y: 0.33, w: 0.31, h: 0.34, shape: 'rectangle' as const },
+  ] },
+  { key: '1-plus-2', label: '1 + 2', box: 420, cells: [
+    { x: 0,    y: 0,    w: 1,    h: 0.58, shape: 'rectangle' as const },
+    { x: 0,    y: 0.62, w: 0.48, h: 0.38, shape: 'rectangle' as const },
+    { x: 0.52, y: 0.62, w: 0.48, h: 0.38, shape: 'rectangle' as const },
+  ] },
+  { key: 'circles-3', label: '3 circles', box: 420, cells: [
+    { x: 0,     y: 0.33, w: 0.31, h: 0.34, shape: 'circle' as const },
+    { x: 0.345, y: 0.33, w: 0.31, h: 0.34, shape: 'circle' as const },
+    { x: 0.69,  y: 0.33, w: 0.31, h: 0.34, shape: 'circle' as const },
+  ] },
+];
+
 // Heroicons v1 solid — viewBox 0 0 20 20
 const ICON_LIBRARY = [
   { name: 'Home',        cat: 'UI',            path: 'M10.707 2.293a1 1 0 00-1.414 0l-7 7a1 1 0 001.414 1.414L4 10.414V17a1 1 0 001 1h2a1 1 0 001-1v-2a1 1 0 011-1h2a1 1 0 011 1v2a1 1 0 001 1h2a1 1 0 001-1v-6.586l.293.293a1 1 0 001.414-1.414l-7-7z' },
@@ -143,8 +176,6 @@ const ICON_LIBRARY = [
 ];
 
 const ICON_CATEGORIES = ['All', ...Array.from(new Set(ICON_LIBRARY.map((i) => i.cat)))];
-
-const STICKER_CATEGORIES = ['Trending', 'Arrow', 'Word', 'Food', 'Love', 'Shape', 'Nature', 'Emoji', 'Weather', 'Business'];
 
 // Canonical canvas sizes per template category — matches Canva's real presets.
 const CATEGORY_SIZE: Record<string, { width: number; height: number }> = {
@@ -323,10 +354,9 @@ export default function LeftSidebar() {
   const [iconSearch, setIconSearch] = useState('');
   const [iconifyResults, setIconifyResults] = useState<{ name: string; prefix: string; body: string; width: number; height: number }[]>([]);
   const [iconifyLoading, setIconifyLoading] = useState(false);
-  const [stickerCat, setStickerCat] = useState('Trending');
-  const [stickerSearch, setStickerSearch] = useState('');
-  const [stickerResults, setStickerResults] = useState<{ id: string; url: string; thumb: string }[]>([]);
-  const [stickerLoading, setStickerLoading] = useState(false);
+  const [illustrationSearch, setIllustrationSearch] = useState('');
+  const [illustrationResults, setIllustrationResults] = useState<{ name: string; prefix: string; body: string; width: number; height: number }[]>([]);
+  const [illustrationLoading, setIllustrationLoading] = useState(false);
   const [showBgColorOptions, setShowBgColorOptions] = useState(false);
   const [bgPhotoCategory, setBgPhotoCategory] = useState<string | null>(null);
   const [bgPhotoResults, setBgPhotoResults] = useState<{ url: string; title: string }[]>([]);
@@ -386,22 +416,13 @@ export default function LeftSidebar() {
       .catch((err) => console.error('[AI] failed to load configured providers', err));
   }, [activeTab]);
 
-  // Auto-load Trending once when the Elements tab is first opened — matches the
-  // reference screenshot showing content immediately rather than requiring a
-  // search first. Guarded so revisiting the tab doesn't refetch every time.
-  useEffect(() => {
-    if (activeTab === 'elements' && stickerResults.length === 0 && !stickerLoading && import.meta.env.VITE_TENOR_API_KEY) {
-      handleStickerSearch('Trending');
-    }
-  }, [activeTab]);
-
-  // Same once-per-tab-open pattern as Trending stickers above — checks
-  // whether the server has a Zandovi key configured at all (silently shows
-  // nothing if not, rather than an error), then loads the first project's
-  // templates. Real accounts only have one project by default; if this ever
-  // needs multi-project support, this is the spot to add a project switcher.
-  useEffect(() => {
-    if (activeTab !== 'templates' || zandoviConfigured !== null) return;
+  // Real accounts only have one project by default; if this ever needs
+  // multi-project support, this is the spot to add a project switcher.
+  // Shared by the once-per-tab-open effect below and the manual refresh
+  // button next to "Your Zandovi Templates" — adding a template on
+  // Zandovi's own site doesn't push anything here, so without a way to
+  // re-fetch on demand, seeing a newly-added one would need a full reload.
+  const loadZandoviTemplates = () => {
     setZandoviLoading(true);
     zandoviAPI.status()
       .then(({ data }) => {
@@ -428,6 +449,14 @@ export default function LeftSidebar() {
       })
       .catch((err) => console.error('[Zandovi] failed to load templates', err))
       .finally(() => setZandoviLoading(false));
+  };
+
+  // Same once-per-tab-open pattern as Trending stickers above — checks
+  // whether the server has a Zandovi key configured at all (silently shows
+  // nothing if not, rather than an error), then loads templates once.
+  useEffect(() => {
+    if (activeTab !== 'templates' || zandoviConfigured !== null) return;
+    loadZandoviTemplates();
   }, [activeTab, zandoviConfigured]);
 
   const handleZandoviTemplateClick = async (tpl: { id: string; name: string }) => {
@@ -518,7 +547,7 @@ export default function LeftSidebar() {
   const {
     addElement, removeElements, pushHistory, pages, currentPageIndex, setPageBackgroundColor, updatePage, importDocumentPages,
     activeTool, setActiveTool, drawColor, setDrawColor, drawWidth, setDrawWidth,
-    addTrack, setPageDuration, setSidePanelTab, sidePanelTab,
+    addTrack, setPageDuration, setSidePanelTab, sidePanelTab, groupElements,
   } = useEditorStore();
 
   // sidePanelTab (IconNavigation's own click target) is the single source of
@@ -553,6 +582,43 @@ export default function LeftSidebar() {
       data: { type: 'shape', shapeType: shape, fill: color, stroke: 'transparent', strokeWidth: 0, cornerRadius: 0 },
     });
     pushHistory();
+  };
+
+  // Frames — an empty circle/rounded-rect shape flagged isFrameSlot, filled
+  // later via ShapeProperties' "Add photo" (renders as a dashed placeholder
+  // until then — see ShapeElement in EditorCanvas.tsx). Reuses the existing
+  // shape element entirely rather than a new element type.
+  const handleAddFrame = (frame: typeof FRAME_PRESETS[number]) => {
+    addElement({
+      type: 'shape', x: cx + jitter(), y: cy + jitter(),
+      width: frame.w, height: frame.h,
+      rotation: 0, opacity: 1, visible: true, locked: false, name: 'Frame', zIndex: 0,
+      data: { type: 'shape', shapeType: frame.shape, fill: '#F3F4F6', stroke: '#B8BCC4', strokeWidth: 2, cornerRadius: frame.cornerRadius, isFrameSlot: true },
+    });
+    pushHistory();
+  };
+
+  // Grids — several Frame slots inserted at once in a fixed layout, then
+  // grouped with the same mechanism a user's own multi-select "Group" uses,
+  // so they move/resize together like one asset.
+  const handleAddGrid = (preset: typeof GRID_PRESETS[number]) => {
+    const originX = cw / 2 - preset.box / 2;
+    const originY = ch / 2 - preset.box / 2;
+    const ids: string[] = [];
+    preset.cells.forEach((cell) => {
+      addElement({
+        type: 'shape',
+        x: originX + cell.x * preset.box,
+        y: originY + cell.y * preset.box,
+        width: cell.w * preset.box,
+        height: cell.h * preset.box,
+        rotation: 0, opacity: 1, visible: true, locked: false, name: 'Frame', zIndex: 0,
+        data: { type: 'shape', shapeType: cell.shape, fill: '#F3F4F6', stroke: '#B8BCC4', strokeWidth: 2, cornerRadius: cell.shape === 'rectangle' ? 12 : 0, isFrameSlot: true },
+      });
+      const page = useEditorStore.getState().pages[useEditorStore.getState().currentPageIndex];
+      ids.push(page.elements[page.elements.length - 1].id);
+    });
+    groupElements(ids);
   };
 
   const handleAddText = (preset: typeof TEXT_PRESETS[number]) => {
@@ -639,15 +705,16 @@ export default function LeftSidebar() {
       rotation: 0, opacity: 1, visible: true, locked: false, name: 'Photo Frame Ring', zIndex: 0,
       data: { type: 'shape', shapeType: party.frame === 'circle' ? 'circle' : 'rectangle', fill: party.frameRing, stroke: 'transparent', strokeWidth: 0, cornerRadius: frameRadius },
     });
+    // isFrameSlot makes this a real Frame — click it and the file picker opens
+    // right there, and the chosen photo gets clipped to the circle/rounded-rect
+    // (Konva fillPatternImage, see ShapeElement in EditorCanvas.tsx) instead of
+    // landing as a raw uncropped rectangle on top of the design. Its own empty
+    // state already draws a camera icon + "Add photo" hint, so no separate
+    // "Photo Hint" text element is needed alongside it any more.
     addElement({
       type: 'shape', x: cx - frameSize / 2 + ringInset, y: frameTop + ringInset, width: frameSize - ringInset * 2, height: frameSize - ringInset * 2,
       rotation: 0, opacity: 1, visible: true, locked: false, name: 'Photo Placeholder', zIndex: 0,
-      data: { type: 'shape', shapeType: party.frame === 'circle' ? 'circle' : 'rectangle', fill: 'rgba(255,255,255,0.85)', stroke: 'transparent', strokeWidth: 0, cornerRadius: Math.max(0, frameRadius - ringInset) },
-    });
-    addElement({
-      type: 'text', x: cx - frameSize / 2, y: frameTop + frameSize / 2 - 16, width: frameSize, height: 32,
-      rotation: 0, opacity: 1, visible: true, locked: false, name: 'Photo Hint', zIndex: 0,
-      data: { type: 'text', content: 'Add your photo', fontFamily: 'Inter', fontSize: 18, fontWeight: 500, fontStyle: 'normal', textDecoration: 'none', textAlign: 'center', color: party.frameRing, lineHeight: 1.2, letterSpacing: 0, textTransform: 'none' },
+      data: { type: 'shape', shapeType: party.frame === 'circle' ? 'circle' : 'rectangle', fill: 'rgba(255,255,255,0.85)', stroke: 'transparent', strokeWidth: 0, cornerRadius: Math.max(0, frameRadius - ringInset), isFrameSlot: true },
     });
 
     const headingY = frameTop + frameSize + 48;
@@ -796,11 +863,7 @@ export default function LeftSidebar() {
     const token = localStorage.getItem('designhub-token');
     if (!token) { toast.error('Please log in to use AI generation'); return; }
 
-    const provider = aiConfiguredProviders.includes('anthropic')
-      ? 'anthropic'
-      : aiConfiguredProviders.includes('openai')
-      ? 'openai'
-      : 'anthropic';
+    const provider = 'openai';
 
     setAiTemplateGenerating(true);
     console.log('[AI] generate template request', { provider, prompt: aiTemplatePrompt });
@@ -1016,58 +1079,45 @@ export default function LeftSidebar() {
     }
   };
 
-  // Tenor's public "demo" key was retired — this genuinely needs a real (free)
-  // key from https://console.cloud.google.com (Tenor API), same pattern as the
-  // other optional integrations (Pexels, LottieFiles) configured via VITE_ env vars.
-  const handleStickerSearch = async (query: string) => {
-    const key = import.meta.env.VITE_TENOR_API_KEY;
-    if (!key) return;
-    setStickerLoading(true);
+  // Same shape as handleIconifySearch above, scoped to illustration-style
+  // Iconify collections instead of general icon sets — reuses the same free,
+  // key-less Iconify API, just a different `prefixes` filter.
+  const ILLUSTRATION_PREFIXES = 'undraw,ouch,fluent-emoji-flat';
+  const handleIllustrationSearch = async (query: string) => {
+    if (!query.trim()) { setIllustrationResults([]); return; }
+    setIllustrationLoading(true);
     try {
-      const endpoint = query.toLowerCase() === 'trending'
-        ? `https://tenor.googleapis.com/v2/featured?key=${key}&searchfilter=sticker&media_filter=gif&limit=30`
-        : `https://tenor.googleapis.com/v2/search?q=${encodeURIComponent(query)}&key=${key}&searchfilter=sticker&media_filter=gif&limit=30`;
-      const res = await fetch(endpoint);
+      const res = await fetch(`https://api.iconify.design/search?query=${encodeURIComponent(query)}&prefixes=${ILLUSTRATION_PREFIXES}&limit=40&pretty=0`);
       if (!res.ok) throw new Error('Search failed');
       const data = await res.json();
-      const results = (data.results || [])
-        .map((r: any) => ({
-          id: r.id,
-          url: r.media_formats?.gif?.url || r.media_formats?.tinygif?.url,
-          thumb: r.media_formats?.tinygif?.url || r.media_formats?.gif?.url,
-        }))
-        .filter((r: any) => r.url);
-      setStickerResults(results);
-    } catch {
-      toast.error('Sticker search failed — check your connection');
-      setStickerResults([]);
-    } finally {
-      setStickerLoading(false);
-    }
-  };
-
-  // Sized to the sticker's own aspect ratio (capped) rather than a fixed square,
-  // same reasoning as addVideoToCanvas — most stickers aren't perfectly square.
-  const addStickerToCanvas = (url: string, name: string) => {
-    const probe = new window.Image();
-    probe.crossOrigin = 'anonymous';
-    probe.onload = () => {
-      const nw = probe.naturalWidth || 200;
-      const nh = probe.naturalHeight || 200;
-      const maxSize = 220;
-      const scale = Math.min(1, maxSize / Math.max(nw, nh));
-      const w = Math.round(nw * scale);
-      const h = Math.round(nh * scale);
-      addElement({
-        type: 'image', x: cx, y: cy, width: w, height: h,
-        rotation: 0, opacity: 1, visible: true, locked: false, name, zIndex: 0,
-        data: { type: 'image', src: url, animated: true, objectFit: 'contain', borderRadius: 0, brightness: 100, contrast: 100, saturation: 100, hue: 0, blur: 0, filters: [], cropX: 0, cropY: 0, cropWidth: 100, cropHeight: 100 },
+      const iconNames: string[] = data.icons || [];
+      const byPrefix: Record<string, string[]> = {};
+      iconNames.forEach((full) => {
+        const colon = full.indexOf(':');
+        if (colon === -1) return;
+        const prefix = full.slice(0, colon);
+        const name = full.slice(colon + 1);
+        (byPrefix[prefix] = byPrefix[prefix] || []).push(name);
       });
-      pushHistory();
-      toast.success('Sticker added to canvas');
-    };
-    probe.onerror = () => toast.error('Could not load that sticker');
-    probe.src = url;
+      const results: { name: string; prefix: string; body: string; width: number; height: number }[] = [];
+      await Promise.all(
+        Object.entries(byPrefix).map(async ([prefix, names]) => {
+          try {
+            const r = await fetch(`https://api.iconify.design/${prefix}.json?icons=${names.slice(0, 16).join(',')}`);
+            if (!r.ok) return;
+            const d = await r.json();
+            Object.entries(d.icons || {}).forEach(([n, v]: [string, any]) => {
+              results.push({ name: n, prefix, body: v.body || '', width: v.width || d.width || 24, height: v.height || d.height || 24 });
+            });
+          } catch {}
+        })
+      );
+      setIllustrationResults(results.slice(0, 36));
+    } catch {
+      toast.error('Illustration search failed — check internet connection');
+    } finally {
+      setIllustrationLoading(false);
+    }
   };
 
   const handleIconifySearch = async (query: string) => {
@@ -1728,7 +1778,21 @@ export default function LeftSidebar() {
                     hasn't connected one. */}
                 {zandoviConfigured && (
                   <div className="mb-4">
-                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-2">Your Zandovi Templates</p>
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Your Zandovi Templates</p>
+                      <button
+                        onClick={loadZandoviTemplates}
+                        disabled={zandoviLoading}
+                        title="Refresh templates from Zandovi"
+                        className="text-gray-400 hover:text-canva-purple disabled:opacity-40 transition-colors p-0.5 -mr-0.5"
+                      >
+                        <svg className={`h-3.5 w-3.5 ${zandoviLoading ? 'animate-spin' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M23 4v6h-6" />
+                          <path d="M1 20v-6h6" />
+                          <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
+                        </svg>
+                      </button>
+                    </div>
                     {zandoviLoading && zandoviTemplates.length === 0 ? (
                       <div className="flex items-center justify-center py-4 text-[11px] text-gray-400">
                         <svg className="animate-spin h-4 w-4 mr-1.5" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
@@ -1833,13 +1897,83 @@ export default function LeftSidebar() {
               <div className="p-3">
                 <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-2">Shapes</p>
                 <div className="grid grid-cols-5 gap-1 mb-4">
-                  {SHAPE_TYPES.map((shape, i) => (
+                  {SHAPE_TYPES.filter((s) => s !== 'line' && s !== 'arrow').map((shape, i) => (
                     <button key={shape} onClick={() => handleAddShape(shape, i)} title={shape}
                       className="flex flex-col items-center gap-0.5 p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors">
                       <ShapePreview shape={shape} color={SHAPE_COLORS[i % SHAPE_COLORS.length]} />
                       <span className="text-[8px] text-gray-400 capitalize">{shape}</span>
                     </button>
                   ))}
+                </div>
+
+                <div className="border-t border-gray-100 dark:border-gray-800 pt-3 mb-4">
+                  <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-2">Frames</p>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {FRAME_PRESETS.map((frame) => (
+                      <button key={frame.key} onClick={() => handleAddFrame(frame)} title={frame.label}
+                        className="flex flex-col items-center gap-1 p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors">
+                        <div
+                          className="w-9 h-9 bg-gray-200 dark:bg-gray-700 border-2 border-dashed border-gray-400"
+                          style={{ borderRadius: frame.shape === 'circle' ? '9999px' : frame.cornerRadius }}
+                        />
+                        <span className="text-[8px] text-gray-400">{frame.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="border-t border-gray-100 dark:border-gray-800 pt-3 mb-4">
+                  <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-2">Grids</p>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {GRID_PRESETS.map((preset) => (
+                      <button key={preset.key} onClick={() => handleAddGrid(preset)} title={preset.label}
+                        className="flex flex-col items-center gap-1 p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors">
+                        <div className="relative w-9 h-9">
+                          {preset.cells.map((c, ci) => (
+                            <div key={ci} className="absolute bg-gray-300 dark:bg-gray-600 border border-gray-400"
+                              style={{ left: `${c.x * 100}%`, top: `${c.y * 100}%`, width: `${c.w * 100}%`, height: `${c.h * 100}%`, borderRadius: c.shape === 'circle' ? '9999px' : 2 }} />
+                          ))}
+                        </div>
+                        <span className="text-[8px] text-gray-400">{preset.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="border-t border-gray-100 dark:border-gray-800 pt-3 mb-4">
+                  <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-2">Lines</p>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {[undefined, [10, 6], [2, 5]].map((dash, i) => (
+                      <button key={i} onClick={() => {
+                        addElement({
+                          type: 'shape', x: cx + jitter(), y: cy + jitter(), width: 220, height: 4,
+                          rotation: 0, opacity: 1, visible: true, locked: false, name: 'Line', zIndex: 0,
+                          data: { type: 'shape', shapeType: 'line', fill: '#111827', stroke: 'transparent', strokeWidth: 3, cornerRadius: 0, dash },
+                        });
+                        pushHistory();
+                      }} className="h-9 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 flex items-center justify-center">
+                        <svg width="32" height="8"><line x1="0" y1="4" x2="32" y2="4" stroke="#111827" strokeWidth="2" strokeDasharray={dash?.join(',')} /></svg>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="border-t border-gray-100 dark:border-gray-800 pt-3 mb-3">
+                  <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-2">Arrows</p>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {([{ dash: undefined, heads: 'end' }, { dash: undefined, heads: 'both' }, { dash: [10, 6], heads: 'end' }, { dash: [10, 6], heads: 'both' }] as const).map((opt, i) => (
+                      <button key={i} onClick={() => {
+                        addElement({
+                          type: 'shape', x: cx + jitter(), y: cy + jitter(), width: 200, height: 50,
+                          rotation: 0, opacity: 1, visible: true, locked: false, name: 'Arrow', zIndex: 0,
+                          data: { type: 'shape', shapeType: 'arrow', fill: '#111827', stroke: 'transparent', strokeWidth: 0, cornerRadius: 0, dash: opt.dash ? [...opt.dash] : undefined, arrowHeads: opt.heads },
+                        });
+                        pushHistory();
+                      }} className="h-9 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 flex items-center justify-center text-base">
+                        {opt.heads === 'both' ? '↔' : '→'}{opt.dash && <span className="text-[8px] ml-0.5">┄</span>}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
                 <div className="border-t border-gray-100 dark:border-gray-800 pt-3 mb-3">
@@ -1929,61 +2063,42 @@ export default function LeftSidebar() {
                   </div>
                 </div>
 
-                {/* Animated Stickers */}
-                <div className="border-t border-gray-100 dark:border-gray-800 pt-3">
-                  <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-2">Animated Stickers</p>
-
-                  {!import.meta.env.VITE_TENOR_API_KEY ? (
-                    <div className="text-center py-4 px-2 rounded-lg bg-gray-50 dark:bg-gray-800/60">
-                      <p className="text-[10px] text-gray-500 dark:text-gray-400">Add a free Tenor API key as <code className="text-[9px]">VITE_TENOR_API_KEY</code> to enable animated stickers.</p>
+                {/* Illustrations — same Iconify search as Icons above, scoped to illustration-style collections */}
+                <div className="border-t border-gray-100 dark:border-gray-800 pt-3 mb-3">
+                  <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-2">Illustrations</p>
+                  <div className="flex items-center gap-1.5 mb-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-2.5 py-1.5">
+                    <HiOutlineSearch size={12} className="text-gray-400 flex-shrink-0" />
+                    <input
+                      type="text"
+                      value={illustrationSearch}
+                      onChange={(e) => setIllustrationSearch(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') handleIllustrationSearch(illustrationSearch); }}
+                      placeholder="Search illustrations (press Enter)…"
+                      className="flex-1 bg-transparent text-[10px] text-gray-700 dark:text-gray-300 placeholder-gray-400 outline-none"
+                    />
+                    {illustrationSearch && (
+                      <button onClick={() => { setIllustrationSearch(''); setIllustrationResults([]); }} className="text-gray-300 hover:text-gray-500">×</button>
+                    )}
+                  </div>
+                  {illustrationLoading ? (
+                    <div className="flex items-center justify-center py-4 text-[10px] text-gray-400">
+                      <svg className="animate-spin h-4 w-4 mr-1.5" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                      Searching…
+                    </div>
+                  ) : illustrationResults.length > 0 ? (
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {illustrationResults.map((ill) => (
+                        <button key={`${ill.prefix}:${ill.name}`} onClick={() => handleAddIconifyIcon(ill)} title={ill.name}
+                          className="rounded-lg overflow-hidden bg-gray-100 dark:bg-gray-800 hover:ring-2 hover:ring-canva-purple transition-all aspect-square flex items-center justify-center p-1.5">
+                          <svg viewBox={`0 0 ${ill.width} ${ill.height}`} className="w-full h-full" dangerouslySetInnerHTML={{ __html: ill.body }} />
+                        </button>
+                      ))}
                     </div>
                   ) : (
-                    <>
-                      <div className="flex items-center gap-1.5 mb-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-2.5 py-1.5">
-                        <HiOutlineSearch size={12} className="text-gray-400 flex-shrink-0" />
-                        <input
-                          type="text"
-                          value={stickerSearch}
-                          onChange={(e) => setStickerSearch(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === 'Enter' && stickerSearch.trim()) { setStickerCat(''); handleStickerSearch(stickerSearch); } }}
-                          placeholder="Search animated stickers (press Enter)…"
-                          className="flex-1 bg-transparent text-[10px] text-gray-700 dark:text-gray-300 placeholder-gray-400 outline-none"
-                        />
-                        {stickerSearch && (
-                          <button onClick={() => { setStickerSearch(''); setStickerCat('Trending'); handleStickerSearch('Trending'); }} className="text-gray-300 hover:text-gray-500">×</button>
-                        )}
-                      </div>
-
-                      <div className="flex gap-1 flex-wrap mb-2">
-                        {STICKER_CATEGORIES.map((cat) => (
-                          <button key={cat}
-                            onClick={() => { setStickerCat(cat); setStickerSearch(''); handleStickerSearch(cat); }}
-                            className={`px-2 py-0.5 rounded-full text-[9px] font-medium transition-colors flex-shrink-0 ${stickerCat === cat ? 'bg-canva-purple text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'}`}>
-                            {cat}
-                          </button>
-                        ))}
-                      </div>
-
-                      {stickerLoading ? (
-                        <div className="flex items-center justify-center py-4 text-[10px] text-gray-400">
-                          <svg className="animate-spin h-4 w-4 mr-1.5" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-                          Loading stickers…
-                        </div>
-                      ) : stickerResults.length > 0 ? (
-                        <div className="grid grid-cols-3 gap-1.5">
-                          {stickerResults.map((s) => (
-                            <button key={s.id} onClick={() => addStickerToCanvas(s.url, 'Sticker')}
-                              className="rounded-lg overflow-hidden bg-gray-100 dark:bg-gray-800 hover:ring-2 hover:ring-canva-purple transition-all aspect-square">
-                              <img src={s.thumb} alt="" loading="lazy" className="w-full h-full object-contain" />
-                            </button>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="text-center text-[10px] text-gray-400 py-4">No stickers found — try a different search</p>
-                      )}
-                    </>
+                    <p className="text-center text-[10px] text-gray-400 py-4">Search for illustrations, e.g. "team" or "growth"</p>
                   )}
                 </div>
+
               </div>
             )}
 

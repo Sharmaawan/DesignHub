@@ -10,7 +10,7 @@ import {
   HiOutlineBell, HiOutlinePlus, HiOutlineTrash, HiOutlineCheck,
   HiOutlineUpload, HiOutlinePhotograph, HiOutlineColorSwatch,
   HiOutlinePencilAlt, HiOutlineTemplate, HiOutlineStar, HiOutlineX,
-  HiOutlineSearch, HiOutlineDocumentText,
+  HiOutlineSearch, HiOutlineDocumentText, HiOutlineSparkles,
 } from 'react-icons/hi';
 import toast from 'react-hot-toast';
 
@@ -21,7 +21,11 @@ const FONT_FAMILIES = [
 
 export default function BrandHubPage() {
   const navigate = useNavigate();
-  const { logos, colors, fonts, images, activeTab, setActiveTab, addLogo, removeLogo, setDefaultLogo, addColor, removeColor, addFont, removeFont, setDefaultFont, addImage, removeImage, loadAll, isLoading } = useBrandStore();
+  const {
+    logos, colors, fonts, images, graphics, activeTab, setActiveTab,
+    addLogo, removeLogo, setDefaultLogo, addColor, removeColor, addFont, removeFont, setDefaultFont,
+    addImage, removeImage, addGraphic, removeGraphic, loadAll, isLoading,
+  } = useBrandStore();
   const { unreadCount, setIsOpen: setNotifOpen } = useNotificationStore();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('designhub-sidebar-collapsed') === 'true');
   const [activeSection, setActiveSection] = useState('brand');
@@ -36,6 +40,7 @@ export default function BrandHubPage() {
 
   const logoInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const graphicInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     loadAll();
@@ -47,6 +52,7 @@ export default function BrandHubPage() {
     { id: 'fonts' as const, label: 'Fonts', icon: HiOutlineDocumentText, count: fonts.length },
     { id: 'templates' as const, label: 'Templates', icon: HiOutlineTemplate, count: 0 },
     { id: 'images' as const, label: 'Images', icon: HiOutlinePhotograph, count: images.length },
+    { id: 'graphics' as const, label: 'Assets', icon: HiOutlineSparkles, count: graphics.length },
   ];
 
   // Upload the actual file (multipart, same endpoint every other file upload in this app
@@ -80,6 +86,21 @@ export default function BrandHubPage() {
     } catch (err: any) {
       console.error('[BrandHub] image upload failed', err);
       toast.error(err.response?.data?.error || err.message || 'Failed to upload image');
+    }
+    e.target.value = '';
+  };
+
+  const handleGraphicUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const { data: saved } = await uploadAPI.upload(file);
+      const url = `${BACKEND}${saved.url}`;
+      await addGraphic({ name: file.name, url, folder: 'Assets' });
+      toast.success('Asset uploaded');
+    } catch (err: any) {
+      console.error('[BrandHub] asset upload failed', err);
+      toast.error(err.response?.data?.error || err.message || 'Failed to upload asset');
     }
     e.target.value = '';
   };
@@ -143,12 +164,13 @@ export default function BrandHubPage() {
 
         <main className="px-6 py-8 max-w-[1200px] mx-auto">
           {/* Brand summary */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
             {[
               { label: 'Logos', value: logos.length, icon: '🎨', color: 'from-purple-500 to-indigo-500' },
               { label: 'Colors', value: colors.length, icon: '🎯', color: 'from-pink-500 to-rose-500' },
               { label: 'Fonts', value: fonts.length, icon: '✏️', color: 'from-blue-500 to-cyan-500' },
               { label: 'Images', value: images.length, icon: '🖼️', color: 'from-green-500 to-emerald-500' },
+              { label: 'Assets', value: graphics.length, icon: '✨', color: 'from-orange-500 to-amber-500' },
             ].map((stat) => (
               <div key={stat.label} className="bg-white dark:bg-[#1e1e30] rounded-2xl border border-gray-200 dark:border-gray-700 p-4">
                 <div className="flex items-center gap-3">
@@ -378,6 +400,39 @@ export default function BrandHubPage() {
                 </>
               )}
               <input ref={imageInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
+            </div>
+          )}
+
+          {/* Assets Tab — decorative design graphics: 3D letters, birthday tags, etc. */}
+          {activeTab === 'graphics' && (
+            <div>
+              {graphics.length === 0 ? (
+                renderEmptyState('✨', 'Add your first asset', 'Upload decorative design graphics — 3D letters, birthday tags, stickers, and other elements — to reuse across your designs.', () => graphicInputRef.current?.click(), 'Upload asset')
+              ) : (
+                <>
+                  <div className="flex justify-end mb-4">
+                    <button onClick={() => graphicInputRef.current?.click()} className="flex items-center gap-2 px-4 py-2 bg-[#7B2FBE] text-white rounded-xl text-sm font-medium hover:bg-[#6A25A8] transition-colors">
+                      <HiOutlineUpload size={16} /> Upload asset
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                    {graphics.map((graphic) => (
+                      <div key={graphic.id} className="group bg-white dark:bg-[#1e1e30] rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+                        <div className="aspect-square relative bg-gray-50 dark:bg-gray-800">
+                          <img src={graphic.url} alt={graphic.name} className="w-full h-full object-contain p-3" />
+                          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100">
+                            <button onClick={async () => { await removeGraphic(graphic.id); toast.success('Asset removed'); }} className="p-2 bg-white rounded-lg text-red-600 shadow"><HiOutlineTrash size={14} /></button>
+                          </div>
+                        </div>
+                        <div className="p-2">
+                          <p className="text-xs text-gray-500 truncate">{graphic.name}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+              <input ref={graphicInputRef} type="file" accept="image/*" className="hidden" onChange={handleGraphicUpload} />
             </div>
           )}
         </main>

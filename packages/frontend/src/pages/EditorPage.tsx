@@ -85,13 +85,28 @@ export default function EditorPage() {
   // this just avoids attempting a save every 30s that can only ever fail, and avoids
   // the "Saved" indicator misleadingly implying it worked.
   useEffect(() => {
+    // Tracks the `pages` reference as of the last successful save (or as of
+    // this effect starting) — a plain closure variable, not a ref, so it
+    // naturally resets whenever this effect restarts (new projectId, etc.).
+    // Without this, a tab with nothing new to save still blindly re-PUTs its
+    // own in-memory `pages` every 30s forever. That's a real problem the
+    // moment more than one tab/session has the same project open (two tabs
+    // on one project, a stray verification session, a second device): the
+    // idle tab's next tick has no way to know the *server* has moved on —
+    // it just overwrites whatever's there with its own now-stale snapshot.
+    // Skipping the PUT entirely when `pages` hasn't changed locally means an
+    // idle tab can never clobber newer data, though it doesn't by itself
+    // resolve two tabs *actively* editing at the same time — that needs real
+    // conflict resolution, not just a dirty check.
+    let lastSavedPages = useEditorStore.getState().pages;
     autosaveTimerRef.current = setInterval(() => {
       if (projectId && !isReadOnlyView) {
         const state = useEditorStore.getState();
-        if (state.pages.length > 0) {
+        if (state.pages.length > 0 && state.pages !== lastSavedPages) {
           setSaving(true);
           setTimeout(() => {
             updateProject(projectId, { canvasData: state.pages, name: state.project?.name || 'Untitled' });
+            lastSavedPages = state.pages;
             setSaving(false);
             setLastSaved(new Date().toISOString());
           }, 500);

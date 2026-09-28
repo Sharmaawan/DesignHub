@@ -28,7 +28,7 @@ export default function TopToolbarNew({
 }: TopToolbarNewProps) {
   const navigate = useNavigate();
   const { projectId } = useParams();
-  const { project, undo, redo, zoomIn, zoomOut, setZoom, zoom, isSaving, lastSaved } = useEditorStore();
+  const { project, undo, redo, zoomIn, zoomOut, zoomToFit, zoom, isSaving, lastSaved } = useEditorStore();
 
   return (
     <div className="relative h-14 bg-white dark:bg-canva-dark-surface flex items-center justify-between px-4 gap-4 flex-shrink-0">
@@ -109,7 +109,7 @@ export default function TopToolbarNew({
           </button>
           <div className="w-px h-4 bg-gray-300 dark:bg-gray-600 mx-0.5" />
           <button
-            onClick={() => setZoom(1)}
+            onClick={zoomToFit}
             className="px-2 h-6 text-xs font-medium text-gray-600 dark:text-gray-400 hover:bg-white dark:hover:bg-gray-700 rounded-md shadow-none hover:shadow-sm transition-all"
             title="Fit to screen"
           >

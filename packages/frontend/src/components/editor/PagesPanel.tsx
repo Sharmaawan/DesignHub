@@ -11,8 +11,8 @@ import toast from 'react-hot-toast';
  */
 export default function PagesPanel() {
   const {
-    pages, currentPageIndex, setCurrentPageIndex,
-    addPage, deletePage, duplicateElements,
+    pages, currentPageIndex, setCurrentPage,
+    addPage, removePage, duplicateElements,
   } = useEditorStore();
 
   const [contextMenu, setContextMenu] = useState<{ pageId: string; x: number; y: number } | null>(null);
@@ -26,9 +26,9 @@ export default function PagesPanel() {
       toast.error('Cannot delete the last page');
       return;
     }
-    deletePage(index);
+    removePage(index);
     setContextMenu(null);
-  }, [pages.length, deletePage]);
+  }, [pages.length, removePage]);
 
   const handleDuplicatePage = useCallback((index: number) => {
     const page = pages[index];
@@ -46,7 +46,7 @@ export default function PagesPanel() {
       {pages.map((page, index) => (
         <div
           key={page.id}
-          onClick={() => setCurrentPageIndex(index)}
+          onClick={() => setCurrentPage(index)}
           onContextMenu={(e) => {
             e.preventDefault();
             setContextMenu({ pageId: page.id, x: e.clientX, y: e.clientY });

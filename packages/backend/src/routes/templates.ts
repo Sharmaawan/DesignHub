@@ -1,6 +1,8 @@
 import { Router, Request, Response } from 'express';
+import path from 'path';
 import prisma from '../lib/prisma';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
+import { detectFrameHole } from '../lib/frameHoleDetection';
 
 const router = Router();
 
@@ -55,6 +57,31 @@ router.post('/', authMiddleware, async (req: AuthRequest, res: Response) => {
     res.json(template);
   } catch (error) {
     res.status(500).json({ error: 'Failed to create template' });
+  }
+});
+
+// Scans a just-uploaded image for a blank "photo goes here" hole — real
+// alpha transparency only (see frameHoleDetection.ts for why a flat black/
+// white "marker color" isn't trustworthy enough to act on) — so
+// UploadTemplateModal can turn it into a real clickable Frame instead of a
+// flat background the user's photo just gets dumped on top of. `url` is the
+// relative /uploads/... path POST /api/upload already returned — resolving it
+// against cwd (not trusting any path outside uploads/) matches how the other
+// uploads-relative routes in this app resolve local files.
+router.post('/detect-frame', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const { url } = req.body as { url?: string };
+    if (!url || !url.startsWith('/uploads/')) {
+      return res.status(400).json({ error: 'url must be a /uploads/... path' });
+    }
+    const absolutePath = path.join(process.cwd(), url.replace(/^\//, ''));
+    const hole = await detectFrameHole(absolutePath);
+    // A real transparent hole already lets a Frame underneath show through —
+    // the uploaded image itself never needs modifying.
+    res.json({ hole, overlayUrl: hole ? url : null });
+  } catch (error) {
+    console.error('[templates/detect-frame] failed', error);
+    res.status(500).json({ error: 'Failed to analyze image' });
   }
 });
 

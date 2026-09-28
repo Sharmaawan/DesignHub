@@ -1,12 +1,13 @@
 import { useEditorStore } from '../../../stores/editorStore';
-import { useCallback } from 'react';
-import { HiOutlineExclamationCircle } from 'react-icons/hi';
+import { useCallback, useRef } from 'react';
+import { HiOutlineExclamationCircle, HiOutlinePhotograph } from 'react-icons/hi';
 
 export default function ImageProperties() {
   const { selectedElementIds, pages, currentPageIndex, updateElement } = useEditorStore();
 
   const currentPage = pages[currentPageIndex];
   const element = currentPage?.elements.find((el) => el.id === selectedElementIds[0]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (!element || element.type !== 'image') {
     return (
@@ -25,6 +26,20 @@ export default function ImageProperties() {
     });
   }, [element, updateElement]);
 
+  // Swaps only `src` — position, size, crop, rotation, corner radius, filters
+  // and layer order all stay on the same element exactly as they were. This
+  // is the direct "click the existing picture, change it in place" action;
+  // it's not a new element, so there's nothing left floating on top of the
+  // template afterward the way adding a separate Frame would.
+  const handleReplaceImage = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => handleImageChange('src', ev.target?.result as string);
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
   return (
     <div className="space-y-4 p-4">
       {/* Image Preview */}
@@ -37,6 +52,16 @@ export default function ImageProperties() {
           />
         </div>
       )}
+
+      <div>
+        <input ref={fileInputRef} type="file" accept="image/*" onChange={handleReplaceImage} className="hidden" />
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          className="w-full h-9 rounded-lg border border-gray-200 dark:border-gray-700 flex items-center justify-center gap-2 text-xs font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+        >
+          <HiOutlinePhotograph size={14} /> Replace Image
+        </button>
+      </div>
 
       {/* Object Fit */}
       <div>

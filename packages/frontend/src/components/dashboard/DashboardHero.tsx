@@ -1,8 +1,10 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { HiOutlineUpload, HiOutlineSparkles, HiOutlineTemplate } from 'react-icons/hi';
 import { useAuthStore } from '../../stores/authStore';
 import { projectAPI } from '../../utils/api';
 import toast from 'react-hot-toast';
+import MakeEditableModal from './MakeEditableModal';
 
 function getGreeting() {
   const hour = new Date().getHours();
@@ -25,6 +27,7 @@ const FLOATING_CARDS = [
 export default function DashboardHero() {
   const navigate = useNavigate();
   const { user } = useAuthStore();
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
 
   const handleStartFromScratch = async () => {
     const pages = [{
@@ -39,42 +42,15 @@ export default function DashboardHero() {
     }
   };
 
+  // Picking a file no longer changes anything by itself — it opens a preview where
+  // the user chooses Make Editable or Use as Background.
   const handleUploadFile = () => {
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = 'image/*';
     input.onchange = (e) => {
       const file = (e.target as HTMLInputElement).files?.[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        const img = new Image();
-        img.onload = async () => {
-          const width = Math.min(img.width, 1920);
-          const height = Math.min(img.height, 1920);
-          const pages = [{
-            id: `page-${Date.now()}`, name: 'Page 1',
-            elements: [{
-              id: `el-${Date.now()}`, type: 'image', x: 0, y: 0, width, height,
-              rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 0, name: 'Uploaded Image',
-              data: {
-                type: 'image', src: ev.target?.result as string, objectFit: 'contain', borderRadius: 0,
-                brightness: 100, contrast: 100, saturation: 100, hue: 0, blur: 0, filters: [],
-                cropX: 0, cropY: 0, cropWidth: 100, cropHeight: 100,
-              },
-            }],
-            backgroundColor: '#FFFFFF', width, height,
-          }];
-          try {
-            const { data } = await projectAPI.create({ name: file.name.replace(/\.[^/.]+$/, ''), canvasData: pages });
-            navigate(`/editor/${data.id}`);
-          } catch {
-            toast.error('Failed to create design');
-          }
-        };
-        img.src = ev.target?.result as string;
-      };
-      reader.readAsDataURL(file);
+      if (file) setPendingFile(file);
     };
     input.click();
   };
@@ -140,6 +116,7 @@ export default function DashboardHero() {
           ))}
         </div>
       </div>
+      {pendingFile && <MakeEditableModal file={pendingFile} onClose={() => setPendingFile(null)} />}
     </div>
   );
 }

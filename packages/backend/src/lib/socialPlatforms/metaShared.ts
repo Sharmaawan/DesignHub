@@ -18,6 +18,14 @@ export function metaAuthUrl(state: string, redirectUri: string, scopes: string[]
     state,
     scope: scopes.join(','),
     response_type: 'code',
+    // Without this, Facebook's OAuth dialog silently reuses whatever Facebook
+    // session is already active in the browser — clicking "Connect another
+    // account" a second time would just re-fetch the SAME person's Pages
+    // instead of letting them switch accounts. auth_type=reauthenticate forces
+    // the dialog to require credentials again, which is what surfaces
+    // Facebook's own "switch account" option instead of skipping straight
+    // through on the existing session.
+    auth_type: 'reauthenticate',
   });
   return `https://www.facebook.com/${GRAPH_VERSION}/dialog/oauth?${params.toString()}`;
 }

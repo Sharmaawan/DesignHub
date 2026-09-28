@@ -35,6 +35,8 @@ import backgroundRemovalRoutes from './routes/backgroundRemoval';
 import emailSettingsRoutes from './routes/emailSettings';
 import zandoviRoutes from './routes/zandovi';
 import socialRoutes from './routes/social';
+import designDecompositionRoutes from './routes/designDecomposition';
+import { ensureWorkerRunning } from './services/designDecomposition/pythonWorker';
 import { startScheduler } from './lib/scheduler';
 
 // uploads/ is gitignored (user content, not source) so a fresh clone/deploy never
@@ -108,6 +110,7 @@ app.use('/api/projects', projectRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/export', exportRoutes);
 app.use('/api/templates', templateRoutes);
+app.use('/api/design', designDecompositionRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/teams', teamRoutes);
 app.use('/api/notifications', notificationRoutes);
@@ -224,6 +227,15 @@ httpServer.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`Health check: http://localhost:${PORT}/api/health`);
   startScheduler();
+  // Fire-and-forget: spawns the local segmentation worker and loads its
+  // model now instead of on the first "Make Editable" request, so that
+  // request doesn't pay the ~4s process-spawn + model-load cost on top of
+  // actual inference. A failure here just means the first real request
+  // pays that cost itself (and reports its own error) — never fatal to
+  // server startup.
+  ensureWorkerRunning().catch((err) => {
+    console.warn('[startup] local segmentation worker did not warm up:', err?.message || err);
+  });
 });
 
 export { io };

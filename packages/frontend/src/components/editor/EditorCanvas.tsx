@@ -1,17 +1,17 @@
-import { useRef, useState, useCallback, useEffect, useMemo } from 'react';
+import { useRef, useState, useCallback, useEffect, useMemo, Fragment } from 'react';
 import { Stage, Layer, Rect, Text, Image as KonvaImage, Group, Transformer, Line } from 'react-konva';
 import { useEditorStore } from '../../stores/editorStore';
 import { CanvasElement, Page, TextData, ImageData, ShapeData, TableData, ChartData, VideoData, AudioData, PageBackgroundImage, ElementAnimation, ElementAnimationType } from '../../types';
 import Konva from 'konva';
 import { Collaborator } from '../../hooks/useCollaboration';
 import { timelineClock as defaultTimelineClock, TimelineClock } from '../../lib/timelineClock';
-import { uploadAPI, BACKEND_ORIGIN as BACKEND } from '../../utils/api';
-import { sampleColorsForRegion, detectNearbyTextRegions } from '../../utils/templateDecomposition';
+import { uploadAPI, designAPI, BACKEND_ORIGIN as BACKEND } from '../../utils/api';
 import toast from 'react-hot-toast';
 import {
   HiOutlineClipboard, HiOutlineDocumentDownload, HiOutlineDuplicate,
   HiOutlineArrowSmUp, HiOutlineArrowUp, HiOutlineArrowSmDown, HiOutlineArrowDown,
   HiOutlineLockClosed, HiOutlineLockOpen, HiOutlineEye, HiOutlineEyeOff, HiOutlineTrash,
+  HiOutlineTemplate, HiOutlinePhotograph,
 } from 'react-icons/hi';
 
 interface EditorCanvasProps {
@@ -153,6 +153,9 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
   // call, so a second attempt on the same element is skipped rather than
   // racing it.
   const revealingOcrTextIdsRef = useRef<Set<string>>(new Set());
+  // Same idea as revealingOcrTextIdsRef, for object layers (logos/photos/icons)
+  // whose background hole gets cleaned on first move/delete instead of first edit.
+  const reconstructingObjectIdsRef = useRef<Set<string>>(new Set());
 
   // Smart alignment guides (Canva/Figma-style pink lines): computed once at drag
   // start from every other element's bounds on the page, then checked against the
@@ -167,15 +170,47 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
     showGuides: storeShowGuides, showRulers: storeShowRulers,
     panX: storePanX, panY: storePanY,
     selectElement, deselectAll, moveElement, updateElement, setZoom, setPan,
-    setHoveredElement, pushHistory, setViewportCenter, addElement,
+    setHoveredElement, pushHistory, setViewportCenter, setViewportSize, addElement,
     activeTool, drawColor, drawWidth, addDrawing,
     isPlaying, setPlayheadMs, setIsPlaying,
     copy, paste, duplicateElements, bringForward, sendBackward, bringToFront, sendToBack,
-    lockElement, unlockElement, hideElement, showElement,
+    lockElement, unlockElement, hideElement, showElement, setElementAsPageBackground,
+    patchPageBackgroundImageSrc, alignElements, distributeElements,
   } = useEditorStore();
   const [currentStroke, setCurrentStroke] = useState<number[]>([]);
   const isDrawingRef = useRef(false);
   const [contextMenu, setContextMenu] = useState<{ elementId: string; x: number; y: number } | null>(null);
+  // Clicking an empty Frame directly on the canvas opens the file picker right
+  // there — matching the "Add photo" hint drawn on the frame itself — rather
+  // than making the user hunt for the Replace/Add photo button in the right
+  // panel. frameUploadTargetRef holds which element the next file picked
+  // belongs to, since the <input> fires its change event async.
+  const frameUploadInputRef = useRef<HTMLInputElement>(null);
+  const frameUploadTargetRef = useRef<string | null>(null);
+  const handleFrameFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    const targetId = frameUploadTargetRef.current;
+    e.target.value = '';
+    if (!file || !targetId) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const src = ev.target?.result as string;
+      const target = page.elements.find((el) => el.id === targetId);
+      if (!target) return;
+      // Two different "empty photo slot" shapes exist in this codebase: the
+      // new Frame (a shape with isFrameSlot) added this session, and the
+      // older empty `image`-type placeholder some built-in quick-style
+      // templates already used (e.g. "Background Photo") — both get filled
+      // by whatever file the same canvas click opened a picker for.
+      if (target.type === 'image') {
+        updateElement(targetId, { data: { ...(target.data as any), src } });
+      } else {
+        updateElement(targetId, { data: { ...(target.data as any), frameImage: { src, scale: 1, offsetX: 0, offsetY: 0 } } });
+      }
+      pushHistory();
+    };
+    reader.readAsDataURL(file);
+  };
 
   const zoom = zoomOverride ?? storeZoom;
   const panX = panOverride?.x ?? storePanX;
@@ -216,10 +251,45 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
           width: entry.contentRect.width,
           height: entry.contentRect.height,
         });
+        setViewportSize(entry.contentRect.width, entry.contentRect.height);
       }
     });
     observer.observe(container);
     return () => observer.disconnect();
+  }, []);
+
+  // Konva.Text measures its own word-wrapped lines once, the first time
+  // text/fontFamily/width/etc. is set, and caches the result — it does NOT
+  // re-measure just because the browser finishes loading a web font
+  // afterward, even if that font asked for it hadn't downloaded yet at that
+  // first measurement. Verified directly: a freshly-picked "Work Sans"
+  // heading's node.getTextWidth() stayed cached at 243px — the width of the
+  // *fallback* font Konva measured with before Work Sans had loaded — even
+  // well after document.fonts confirmed Work Sans 800 had finished loading
+  // and a raw canvas ctx.measureText() with the same font correctly returned
+  // 649px. Konva's word-wrap then kept deciding (on the stale 243px number)
+  // that the text needed two lines, and the box — sized for one — only
+  // showed the second ("STANDARD" visible, "GOLD" not, though the stored
+  // text was always the full "GOLD STANDARD"; this was a stale-measurement
+  // rendering bug, not data loss). A plain redraw doesn't help — it reuses
+  // the same cached lines. Re-setting a tracked attribute (e.g. fontFamily)
+  // to itself doesn't help either: Konva's own setter no-ops whenever
+  // `newValue === oldValue` (confirmed by reading Node.js's `_setAttr` —
+  // `if (oldVal === val && !isObject(val)) return;`), so it never fires the
+  // change event `_setTextData` listens for. Calling Konva's own recompute
+  // method directly is the one thing that actually works.
+  useEffect(() => {
+    const remeasure = () => {
+      const stage = stageRef.current;
+      if (!stage) return;
+      stage.find('Text').forEach((node: any) => {
+        if (typeof node._setTextData === 'function') node._setTextData();
+      });
+      stage.getLayers().forEach((l) => l.batchDraw());
+    };
+    document.fonts.ready.then(remeasure).catch(() => {});
+    document.fonts.addEventListener('loadingdone', remeasure);
+    return () => document.fonts.removeEventListener('loadingdone', remeasure);
   }, []);
 
   // Drive the shared video-timeline clock off this page's duration and the store's
@@ -335,18 +405,27 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
     const transformer = transformerRef.current;
     const stage = stageRef.current;
     if (!transformer || !stage) return;
-    // Defensive: locked elements must never get resize/rotate handles, even if
-    // something upstream (e.g. a future select-all-ish action) puts a locked id
-    // into selectedElementIds — dragging is already blocked at the node level via
-    // `draggable`, but the Transformer has no equivalent prop, so it's filtered here.
+    // A text element being actively edited already gets its own indicator —
+    // the DOM textarea's own purple border — and its underlying Konva node is
+    // hidden for the duration (visible={!isTextEdit} in renderElement/
+    // AnimatedTextElement) so there's only one rendering of the text on
+    // screen at a time. The Transformer isn't part of that: it attaches
+    // purely off selectedElementIds, with no awareness of edit mode, so it
+    // kept drawing its own handles around the (invisible) node's last-known
+    // geometry — which rarely matches the textarea's box pixel-for-pixel —
+    // the whole time. Verified directly: editing a real text element showed
+    // two independently-outlined purple boxes slightly offset from each
+    // other, not one. Excluding the actively-edited id here is what the
+    // node's own visible={!isTextEdit} already implies the Transformer
+    // should do too.
     const lockedIds = new Set(page.elements.filter((e) => e.locked).map((e) => e.id));
     const nodes = selectedElementIds
-      .filter((id) => !lockedIds.has(id))
+      .filter((id) => !lockedIds.has(id) && id !== editingTextId)
       .map((id) => stage.findOne('#' + id))
       .filter(Boolean);
     transformer.nodes(nodes as any);
     transformer.getLayer()?.batchDraw();
-  }, [selectedElementIds, page.elements]);
+  }, [selectedElementIds, page.elements, editingTextId]);
 
   const handleWheel = useCallback((e: Konva.KonvaEventObject<WheelEvent>) => {
     e.evt.preventDefault();
@@ -365,16 +444,11 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
     const scaleBy = 1.1;
     const oldScale = zoom;
     const newScale = Math.max(0.1, Math.min(5, e.evt.deltaY > 0 ? oldScale / scaleBy : oldScale * scaleBy));
-    // Anchor the zoom to the viewport center — without adjusting pan here, scaling
-    // happens around the Stage's own (0,0), which visibly drags the page toward
-    // wherever that point currently sits on screen instead of zooming in place.
-    const cx = containerSize.width / 2;
-    const cy = containerSize.height / 2;
-    const stageX = (cx - panX) / oldScale;
-    const stageY = (cy - panY) / oldScale;
+    // setZoom itself anchors to the viewport center now (editorStore.ts) —
+    // every zoom entry point (this, the toolbar buttons, Ctrl+0) shares that
+    // one implementation instead of each recomputing the same pan math.
     setZoom(newScale);
-    setPan(cx - stageX * newScale, cy - stageY * newScale);
-  }, [zoom, panX, panY, containerSize, setZoom, setPan]);
+  }, [zoom, panX, panY, setZoom]);
 
   // Dragging an image file in from the OS (Explorer/Finder/desktop) straight onto
   // the canvas — the Uploads panel already had a small drop zone for this, but
@@ -494,6 +568,70 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
     };
   };
 
+  // The text-edit textarea (below) is a real DOM element, not part of the
+  // Konva Stage the pan/zoom transform applies to — it has to be positioned
+  // in screen pixels using designToScreen, same as this. Unlike everything
+  // else that uses designToScreen, that positioning has to survive the user
+  // panning or zooming the canvas mid-edit, not just run once at creation —
+  // factored out here so both the initial placement and the reposition
+  // effect below stay in exact sync instead of drifting apart over time.
+  const positionTextEditTextarea = (textarea: HTMLTextAreaElement, element: CanvasElement, data: TextData) => {
+    const stageBox = stageRef.current?.container().getBoundingClientRect();
+    if (!stageBox) return;
+    const { screenX, screenY, screenW, screenH } = designToScreen(element.x, element.y, element.width, element.height);
+    const wrappedLines = measureWrappedLineCount(data.content, data.fontFamily, data.fontSize, data.fontWeight, data.fontStyle, element.width);
+    const naturalHeightDesign = wrappedLines * data.fontSize * data.lineHeight + 8;
+    const minHeightDesign = wrappedLines * data.fontSize * data.lineHeight;
+    const cappedScreenH = Math.max(minHeightDesign * zoom, Math.min(screenH, naturalHeightDesign * zoom));
+    const EDIT_WIDTH_SAFETY_PX = 10;
+    const taTop = stageBox.top + screenY;
+    const taLeft = stageBox.left + screenX;
+    const taWidth = screenW + EDIT_WIDTH_SAFETY_PX;
+    const taHeight = cappedScreenH;
+    textarea.style.top = `${taTop}px`;
+    textarea.style.left = `${taLeft}px`;
+    textarea.style.width = `${taWidth}px`;
+    textarea.style.height = `${taHeight}px`;
+    textarea.style.fontSize = `${data.fontSize * zoom}px`;
+    textarea.style.letterSpacing = `${data.letterSpacing * zoom}px`;
+    // The textarea is a real DOM element, not part of the Konva Stage — the
+    // Stage's own <canvas> naturally clips anything drawn past its edges, but
+    // this element doesn't, so without this a text element scrolled near/past
+    // the canvas container's edge (especially the top, right under the
+    // toolbar) kept rendering outside the editing area and visibly floated
+    // over the toolbar/sidebars instead of scrolling out of view like
+    // everything else on the page. Clip it to exactly the portion that
+    // overlaps the canvas container, same as the Stage already does for
+    // every Konva-rendered element.
+    // clip-path's inset() is relative to the element's BORDER box by default,
+    // but taWidth/taHeight above are the CONTENT box (this textarea uses
+    // box-sizing: content-box — see below) — off by the 4px padding + 2px
+    // border on every side. Verified directly: without accounting for that,
+    // the content clipped correctly but a hairline sliver of the border kept
+    // rendering past the canvas edge instead of disappearing with it. +1px
+    // further margin absorbs ordinary sub-pixel rounding on top of that.
+    const BORDER_PLUS_PADDING_PX = 2 + 4;
+    const borderBoxWidth = taWidth + BORDER_PLUS_PADDING_PX * 2;
+    const borderBoxHeight = taHeight + BORDER_PLUS_PADDING_PX * 2;
+    const CLIP_MARGIN = 1;
+    const clipTop = Math.min(borderBoxHeight, Math.max(0, stageBox.top - taTop + CLIP_MARGIN));
+    const clipLeft = Math.min(borderBoxWidth, Math.max(0, stageBox.left - taLeft + CLIP_MARGIN));
+    const clipRight = Math.min(borderBoxWidth, Math.max(0, (taLeft + borderBoxWidth) - stageBox.right + CLIP_MARGIN));
+    const clipBottom = Math.min(borderBoxHeight, Math.max(0, (taTop + borderBoxHeight) - stageBox.bottom + CLIP_MARGIN));
+    textarea.style.clipPath = `inset(${clipTop}px ${clipRight}px ${clipBottom}px ${clipLeft}px)`;
+  };
+
+  // Re-syncs the open textarea whenever the canvas is panned or zoomed —
+  // without this it stays glued to whatever screen position it was created
+  // at, visibly detaching from the (now-panned) design underneath it.
+  useEffect(() => {
+    const active = activeTextEditRef.current;
+    if (!active) return;
+    const el = page.elements.find((e) => e.id === active.id);
+    if (!el || el.type !== 'text') return;
+    positionTextEditTextarea(active.textarea, el, el.data as TextData);
+  }, [panX, panY, zoom]);
+
   const handleStageMouseMove = (e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
     if (onCursorMove) {
       // Throttled — this fires on every pixel of mouse movement, and broadcasting
@@ -523,34 +661,23 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
     }
   };
 
-  // OCR-extracted text is created invisible (opacity 0, see
-  // templateDecomposition.ts) and stays that way until genuinely edited —
-  // it sits exactly on top of the same text already baked into the
-  // background image, so leaving it undrawn is what keeps an untouched
-  // template pixel-identical to the original upload. The moment it IS
-  // edited, revealing it with nothing behind it isn't right either — the
-  // old baked-in pixels are still there underneath, and confirmed directly:
-  // without a cover, old and new text visibly double-expose whenever the
-  // edit doesn't land exactly over the original glyphs. A patch behind just
-  // this one element covers that.
-  //
-  // Sampling the colors/texture for that patch used to happen eagerly for
-  // every detected line during upload — often 70+ on a dense poster, each
-  // needing several canvas reads, which was the dominant cost in the
-  // "Creating…" step even though the overwhelming majority of those lines
-  // are never edited. It's on demand now: this only runs once, the first
-  // time a specific OCR-extracted element is actually changed, against the
-  // live background image and current sibling text boxes (read fresh via
-  // getState() since this resolves after an await, by which point the
-  // render that created this closure may be stale — the store actions
-  // themselves stay correct regardless, they read current state internally,
-  // but the box positions used to pick a non-overlapping donor region need
-  // to be current too).
-  const revealOcrTextWithPatch = async (el: CanvasElement) => {
+  // Progressive/non-destructive decomposition: a text layer created by
+  // "Make Editable" starts `revealed: false` and renders nothing — its real
+  // pixels are still visible only through page.backgroundImage, which is the
+  // *untouched original upload* (not a reconstruction) until this runs. The
+  // very first time the element is actually edited, this cleans exactly that
+  // element's region against the server's incrementally-patched working
+  // background (reconstructElementRegion — real per-pixel glyph masking +
+  // local inpainting, never a bounding-box rectangle) and swaps
+  // page.backgroundImage.src to the newly-patched version. Every other
+  // element's region — logo, icons, other text the user never touches —
+  // is never reconstructed at all, matching the original upload pixel for
+  // pixel. Selecting/panning/zooming never reaches this function; only
+  // actually entering edit mode does (see its one call site below).
+  const reconstructAndRevealText = async (el: CanvasElement) => {
     // See revealingOcrTextIdsRef above for why this guard exists — without
-    // it, re-editing the same element before its first reveal finishes
-    // sampling fires a second, concurrent call that adds its own separate
-    // patch.
+    // it, re-editing the same element before its first reconstruction call
+    // resolves fires a second, concurrent call for the same region.
     if (revealingOcrTextIdsRef.current.has(el.id)) return;
     revealingOcrTextIdsRef.current.add(el.id);
     try {
@@ -559,92 +686,131 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
         return s.pages[s.currentPageIndex];
       };
       const pageNow = storeNow();
-      const bg = pageNow.elements.find((e) => e.type === 'image' && e.name === 'Background');
-      if (!bg) {
-        updateElement(el.id, { opacity: 1 });
+      const decomposition = pageNow.decomposition;
+      if (!decomposition || !el.source) {
+        // Not a decomposition-derived layer (or the page predates this field) —
+        // nothing to reconstruct against; just let it render as authored.
+        updateElement(el.id, { revealed: true });
         return;
       }
-      const bgData = bg.data as ImageData;
-      const knownBoxes = pageNow.elements
-        .filter((e) => e.type === 'text' && e.id !== el.id)
-        .map((e) => ({ x0: e.x, y0: e.y, x1: e.x + e.width, y1: e.y + e.height }));
-
-      // Some templates draw one word directly overlapping another as a
-      // deliberate layered design (a small caption drawn on top of a much
-      // bigger decorative word, all one flat image) — the bigger word often
-      // has no element of its own (OCR reads garbage on it standalone), so
-      // it's invisible to knownBoxes above and the texture-patch donor
-      // search below would happily crop straight through its letters. A
-      // small, on-demand OCR pass scoped to just this element's local area
-      // (not the whole image, and not run at upload time) catches that and
-      // folds it into the exclusion list.
-      const nearbyBoxes = await detectNearbyTextRegions(
-        bgData.src,
-        { x: el.x, y: el.y, width: el.width, height: el.height },
-        bg.width,
-        bg.height
-      );
-      const otherBoxes = [...knownBoxes, ...nearbyBoxes];
-
-      const { color, bgColor, bgPatchImage } = await sampleColorsForRegion(
-        bgData.src,
-        { x: el.x, y: el.y, width: el.width, height: el.height },
-        otherBoxes,
-        bg.width,
-        bg.height
+      if (el.requiresFlattenedEditing) {
+        toast.error("This text's background is too detailed to reconstruct cleanly and can't be edited independently.");
+        return;
+      }
+      const relativeOriginalUrl = decomposition.originalUrl.startsWith(BACKEND)
+        ? decomposition.originalUrl.slice(BACKEND.length)
+        : decomposition.originalUrl;
+      const { data: result } = await designAPI.reconstructRegion(
+        relativeOriginalUrl, decomposition.textRegions, el.source.regionId, 'text',
       );
 
       const pageAfter = storeNow();
       const liveEl = pageAfter.elements.find((e) => e.id === el.id);
-      if (!liveEl || liveEl.type !== 'text') return; // deleted while sampling was in flight
-      const maxZ = Math.max(0, ...pageAfter.elements.map((e) => e.zIndex));
-      const patchBase = {
-        x: el.x, y: el.y, width: el.width, height: el.height,
-        rotation: el.rotation, opacity: 1, visible: true as const, locked: false,
-        name: `${el.name || 'Text'} background`,
-      };
-      if (bgPatchImage) {
-        addElement({
-          ...patchBase,
-          type: 'image',
-          data: {
-            type: 'image', src: bgPatchImage, objectFit: 'cover', borderRadius: 0,
-            brightness: 100, contrast: 100, saturation: 100, hue: 0, blur: 0,
-            filters: [], cropX: 0, cropY: 0, cropWidth: 100, cropHeight: 100,
-          },
-        });
-      } else {
-        addElement({
-          ...patchBase,
-          type: 'shape',
-          data: { type: 'shape', shapeType: 'rectangle', fill: bgColor, stroke: 'transparent', strokeWidth: 0, cornerRadius: 0 },
-        });
+      if (!liveEl || liveEl.type !== 'text') return; // deleted while reconstruction was in flight
+
+      if (!result.ok) {
+        updateElement(el.id, { requiresFlattenedEditing: true });
+        toast.error(result.reason || "This text's background is too detailed to reconstruct cleanly and can't be edited independently.");
+        return;
+      }
+      if (result.workingBackgroundUrl) {
+        patchPageBackgroundImageSrc(pageAfter.id, `${BACKEND}${result.workingBackgroundUrl}`);
       }
       updateElement(el.id, {
-        opacity: 1,
-        zIndex: maxZ + 2,
-        data: { ...(liveEl.data as TextData), color } as TextData,
+        revealed: true,
+        data: result.inkColor ? { ...(liveEl.data as TextData), color: result.inkColor } as TextData : liveEl.data,
       });
+    } catch (err: any) {
+      updateElement(el.id, { requiresFlattenedEditing: true });
+      toast.error(err?.response?.data?.error || err?.message || 'Could not prepare this text for editing');
     } finally {
       revealingOcrTextIdsRef.current.delete(el.id);
     }
   };
 
+  // Object layers (logos/photos/icons) render their cutout immediately at
+  // creation — it already occludes the original pixels 1:1, so there's
+  // nothing to "reveal" the way text needs. But the background hole *behind*
+  // it is still the untouched original until the object is actually moved or
+  // deleted, at which point the old position would otherwise show through.
+  // Fire-and-forget: the working background swaps in a moment after the
+  // gesture completes rather than blocking the drag/delete itself.
+  const ensureObjectRegionReconstructed = (el: CanvasElement) => {
+    if (!el.source || el.revealed || el.requiresFlattenedEditing) return;
+    if (reconstructingObjectIdsRef.current.has(el.id)) return;
+    reconstructingObjectIdsRef.current.add(el.id);
+    (async () => {
+      try {
+        const s = useEditorStore.getState();
+        const pageNow = s.pages[s.currentPageIndex];
+        const decomposition = pageNow.decomposition;
+        if (!decomposition) { updateElement(el.id, { revealed: true }); return; }
+        const relativeOriginalUrl = decomposition.originalUrl.startsWith(BACKEND)
+          ? decomposition.originalUrl.slice(BACKEND.length)
+          : decomposition.originalUrl;
+        const { data: result } = await designAPI.reconstructRegion(
+          relativeOriginalUrl, decomposition.textRegions, el.source!.regionId, 'object',
+        );
+        const pageAfter = useEditorStore.getState().pages[s.currentPageIndex];
+        if (!pageAfter.elements.some((e) => e.id === el.id)) return; // deleted meanwhile
+        if (!result.ok) {
+          updateElement(el.id, { requiresFlattenedEditing: true });
+          return;
+        }
+        if (result.workingBackgroundUrl) patchPageBackgroundImageSrc(pageAfter.id, `${BACKEND}${result.workingBackgroundUrl}`);
+        updateElement(el.id, { revealed: true });
+      } catch {
+        updateElement(el.id, { requiresFlattenedEditing: true });
+      } finally {
+        reconstructingObjectIdsRef.current.delete(el.id);
+      }
+    })();
+  };
+
   const handleElementClick = (e: Konva.KonvaEventObject<MouseEvent>, id: string) => {
     e.cancelBubble = true;
+    // Konva's 'click' fires for every mouse button, not just the left one — a
+    // right-click reaches both this AND onContextMenu below. Without this
+    // guard, right-clicking a text element inside an existing multi-selection
+    // ran this handler's plain-click branch (selectElement(id, false)),
+    // collapsing the whole multi-selection down to just the right-clicked
+    // element — and for text specifically, also opened its edit textarea —
+    // a moment before the context menu even appeared. Left-click is button 0;
+    // right-click is button 2 (middle is 1, also excluded here since it isn't
+    // a selection gesture either).
+    if (e.evt.button !== 0) return;
     const element = page.elements.find((el) => el.id === id);
     if (element?.locked) return;
 
-    // Single click enters edit mode directly for text (like real Canva) —
-    // deferred one tick so the click's own selection change settles first.
+    // Single click enters edit mode directly for text (like real Canva) — but
+    // ONLY for a plain click. A shift-click must only toggle this element into
+    // or out of a multi-selection, same as every other element type below —
+    // auto-entering edit mode regardless of shiftKey used to immediately
+    // collapse a just-built multi-selection back down to one element the
+    // moment a second text element was shift-clicked, since edit-mode entry
+    // has nothing to do with (and shouldn't touch) the multi-select set.
+    // Deferred one tick so the click's own selection change settles first.
     // handleElementDblClick owns all of editingTextId/isEditing/the node-exists
     // check/duplicate-session guarding itself now, so this only needs to select
     // and hand off; see handleElementDblClick for why calling it here, from its
     // own dblclick wiring, and from Enter-to-edit can't create duplicate
     // textareas for the same element.
-    if (element?.type === 'text') {
-      selectElement(id, e.evt.shiftKey);
+    if (element?.type === 'text' && !e.evt.shiftKey) {
+      selectElement(id, false);
       setTimeout(() => handleElementDblClick(e as any, element), 0);
+    } else if (element?.type === 'text' && e.evt.shiftKey) {
+      selectElement(id, true);
+    } else if (
+      (element?.type === 'shape' && (element.data as any)?.isFrameSlot && !(element.data as any)?.frameImage)
+      || (element?.type === 'image' && !(element.data as any)?.src)
+    ) {
+      // Empty photo slot — either a Frame (isFrameSlot shape) or a plain
+      // image element with no src yet (older built-in template placeholders
+      // like "Background Photo") — click opens the file picker directly
+      // instead of making the user find Replace/Add photo in the side panel.
+      selectElement(id, e.evt.shiftKey);
+      frameUploadTargetRef.current = id;
+      frameUploadInputRef.current?.click();
     } else {
       // For other elements: just select
       selectElement(id, e.evt.shiftKey);
@@ -678,25 +844,33 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
       // once the first call's reveal finishes — open a second textarea
       // against still-black, pre-reveal data. Bail out; the in-flight call
       // will finish the job.
-      if (element.opacity === 0 && revealingOcrTextIdsRef.current.has(element.id)) {
+      const isUnrevealedDecomposition = !!element.source && element.revealed === false;
+      if (isUnrevealedDecomposition && revealingOcrTextIdsRef.current.has(element.id)) {
         return;
       }
 
-      // OCR-extracted text starts invisible with a placeholder black color —
-      // the real ink color/background patch is only known once sampled. Do
-      // that sampling BEFORE opening the textarea (not after closing it) so
-      // the edit box shows the correct final color from its first frame,
-      // instead of flashing the OCR-guessed word in black and only fixing
-      // the color once the user clicks away.
+      // A decomposition-derived text layer starts unrevealed — its real
+      // pixels are still only visible through the original background image
+      // underneath. Reconstruct (clean) exactly this element's region BEFORE
+      // opening the textarea (not after closing it) so the edit box shows the
+      // real ink color from its first frame, instead of flashing a guessed
+      // placeholder color and only fixing it once the user clicks away.
       let liveElement = element;
-      if (element.opacity === 0) {
-        await revealOcrTextWithPatch(element);
+      if (isUnrevealedDecomposition) {
+        await reconstructAndRevealText(element);
         const s = useEditorStore.getState();
         const found = s.pages[s.currentPageIndex].elements.find((el) => el.id === element.id);
         if (!found) {
-          // Deleted while sampling was in flight.
+          // Deleted while reconstruction was in flight.
           setEditingTextId(null);
           useEditorStore.setState({ isEditing: false });
+          return;
+        }
+        if (found.requiresFlattenedEditing) {
+          // Reconstruction failed — the original pixels were left untouched
+          // and this element must stay flattened rather than risk a visible
+          // patch (see reconstructAndRevealText). Don't open an editor over
+          // still-original pixels; the failure toast already explained why.
           return;
         }
         liveElement = found;
@@ -723,24 +897,65 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
       textarea.value = data.content;
       textarea.style.position = 'absolute';
 
-      // Use single coordinate transformation: design space → screen space
-      const { screenX, screenY, screenW, screenH } = designToScreen(
-        liveElement.x, liveElement.y, liveElement.width, liveElement.height
-      );
-      textarea.style.top = `${stageBox.top + screenY}px`;
-      textarea.style.left = `${stageBox.left + screenX}px`;
-      textarea.style.width = `${screenW}px`;
-      textarea.style.height = `${screenH}px`;
-      textarea.style.fontSize = `${data.fontSize * zoom}px`;
+      // The element's own stored height can be wrong for what the text
+      // actually needs (see measureWrappedLineCount in positionTextEditTextarea
+      // above) — never let the edit box stretch past however many lines the
+      // content really wraps to, even though it's still free to be shorter
+      // than that if the element itself is a deliberately small box. That
+      // said, it can never be shorter than the content's own bare minimum
+      // either: a tightly fit element (stored height == exactly one line,
+      // zero margin — which is what this app's own "Make Editable"
+      // font-fitting deliberately produces) would otherwise get capped down
+      // to less than one full line of text, clipping/scrolling it out of
+      // view mid-edit. Verified directly on a real decomposed design:
+      // min(screenH, natural) picked the tighter stored height for two of
+      // its four text layers, leaving their edit boxes ~40% too short for
+      // even their own single line.
+      // A global CSS reset (box-sizing: border-box) makes a plain `width` on
+      // this textarea mean the OUTER size, not the content area — its own
+      // border (2px) and padding (4px), set below, silently eat 12px out of
+      // whatever `screenW` says, on every side combined. That 12px was never
+      // budgeted for: screenW is computed purely from the element's design-
+      // space content width. Verified directly: at a stored width barely
+      // wide enough for its text to fit on one line, the missing 12px was
+      // enough to push the textarea's own native text layout into wrapping
+      // it onto a second line — and since overflow is clipped to a one-line-
+      // tall box with the cursor (at the end of the text) kept in view, the
+      // wrapped first line scrolled out of sight entirely: editing "GOLD
+      // STANDARD" looked like it had silently lost the word "GOLD". Forcing
+      // content-box here (only for this element) makes `width` mean content
+      // width again, matching every measurement this code already assumes.
+      textarea.style.boxSizing = 'content-box';
+      // Even with box-sizing fixed, the browser's own CSS text layout can
+      // still measure a few px wider than this app's Canvas2D measurements
+      // (measureWrappedLineCount above, and the offscreen Konva measurement
+      // used when this element was first fitted to its text at decomposition
+      // time) — verified directly: two of four layers on a real decomposed
+      // design wrapped onto a second line in this textarea despite both of
+      // those measurements agreeing the content fit on one. A few px of
+      // margin here is cheap, edit-mode-only insurance against that drift —
+      // it never touches the element's own stored width or its real
+      // (already-correct) rendering once out of edit mode.
+      // Sets top/left/width/height/fontSize/letterSpacing — the reposition
+      // effect above calls this same function again on every pan/zoom
+      // change so this box never desyncs from the (correctly scaled)
+      // design underneath it, the way it used to when these were only ever
+      // set once, here, at creation.
+      positionTextEditTextarea(textarea, liveElement, data);
       textarea.style.fontFamily = data.fontFamily;
       textarea.style.fontWeight = String(data.fontWeight);
       textarea.style.fontStyle = data.fontStyle;
       textarea.style.textAlign = data.textAlign;
       textarea.style.color = data.color;
       textarea.style.lineHeight = String(data.lineHeight);
-      textarea.style.letterSpacing = `${data.letterSpacing}px`;
       textarea.style.textDecoration = data.textDecoration;
-      textarea.style.background = 'rgba(255,255,255,0.9)';
+      // Transparent, not a solid white fill — this sits directly over the
+      // real canvas (often a colored or photo background), and `color` above
+      // is already set to the element's actual text color. A white fill used
+      // to both hide whatever's really behind the text while editing it and,
+      // for light-colored text like white-on-orange, make the text itself
+      // nearly invisible against its own edit box.
+      textarea.style.background = 'transparent';
       textarea.style.border = '2px solid #7B2FBE';
       textarea.style.borderRadius = '4px';
       textarea.style.padding = '4px';
@@ -753,7 +968,21 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
 
       textarea.focus();
 
+      // Escape's own handler calls finishEdit() directly, which removes this
+      // (currently focused) textarea from the DOM — and removing a focused
+      // element makes the browser fire a native 'blur' on it synchronously,
+      // re-entering finishEdit() a second time via the listener below, now
+      // against an already-detached node. Verified directly: that second
+      // entry's own textarea.remove() call threw "the node to be removed is
+      // no longer a child of this node." Guarding on a plain closure flag —
+      // not on activeTextEditRef, which a different element's edit session
+      // could already have overwritten by the time this fires — makes the
+      // whole function a no-op the second time, for any of its three entry
+      // points (blur, Enter, Escape).
+      let finished = false;
       const finishEdit = () => {
+        if (finished) return;
+        finished = true;
         // Only touch the store — and undo history — when the text actually
         // changed. A no-op commit here (e.g. the click that merely opened the
         // textarea, or a leftover duplicate session guarded against above)
@@ -833,7 +1062,13 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
       input.focus();
       input.select();
 
+      // Same double-invocation hazard as the text textarea above: Escape's
+      // handler removes this (focused) input, which fires a synchronous
+      // native 'blur' that re-enters finishEdit() a second time.
+      let finished = false;
       const finishEdit = () => {
+        if (finished) return;
+        finished = true;
         const newCells = data.cells.map((r) => [...r]);
         while (newCells.length <= row) newCells.push(Array(data.cols).fill(''));
         while (newCells[row].length <= col) newCells[row].push('');
@@ -890,6 +1125,12 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
 
   const handleElementDragStart = (_e: Konva.KonvaEventObject<DragEvent>, id: string) => {
     dragGuideContextRef.current = buildDragGuideContext(id);
+    // Moving a decomposition-derived object away from its original spot is
+    // about to expose the (still-original) pixels underneath it — clean that
+    // region now. Fire-and-forget: the working background catches up a
+    // moment after the drag, it doesn't block the gesture itself.
+    const el = page.elements.find((e) => e.id === id);
+    if (el && el.type !== 'text') ensureObjectRegionReconstructed(el);
   };
 
   const handleElementDragMove = (e: Konva.KonvaEventObject<DragEvent>) => {
@@ -945,12 +1186,22 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
 
   const renderElement = (element: CanvasElement) => {
     const isTextEdit = editingTextId === element.id;
+    // A decomposition-derived text layer that hasn't been reconstructed yet
+    // renders nothing — its real pixels are still only visible through
+    // page.backgroundImage (the untouched original) underneath. This is a
+    // pure render-time gate on the Konva node's own opacity prop, never the
+    // element's stored `data`-level opacity (the user's real, independently
+    // adjustable setting) — so it can't be confused with someone intentionally
+    // setting a text element to 0% opacity. The node still exists and is
+    // still selectable/draggable while gated (Konva hit-tests regardless of
+    // opacity), matching "selection must remain purely visual."
+    const isUnrevealedText = element.type === 'text' && !!element.source && element.revealed === false;
     const commonProps = {
       id: element.id,
       x: element.x,
       y: element.y,
       rotation: element.rotation,
-      opacity: element.opacity,
+      opacity: isUnrevealedText ? 0 : element.opacity,
       draggable: !element.locked && activeTool === 'select',
       ...(element.shadow ? {
         shadowColor: element.shadow.color,
@@ -996,13 +1247,33 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
       case 'text': {
         const data = element.data as TextData;
         return (
-          <AnimatedTextElement
-            key={element.id}
-            element={element}
-            commonProps={commonProps}
-            data={data}
-            isTextEdit={isTextEdit}
-          />
+          <Fragment key={element.id}>
+            {/* A highlight box has to be a real sibling shape behind the text,
+                not baked into AnimatedTextElement's own node — that component's
+                id is what handleElementDblClick's stageRef.findOne(id) looks up
+                to read text metrics for the edit overlay, so wrapping it in a
+                Group or adding a second child there would break that lookup.
+                listening=false keeps it out of the way of clicks/drags, which
+                stay targeted at the text node itself. */}
+            {(data as any).highlightColor && (
+              <Rect
+                x={element.x}
+                y={element.y}
+                width={element.width}
+                height={element.height}
+                rotation={element.rotation}
+                fill={(data as any).highlightColor}
+                opacity={element.opacity}
+                listening={false}
+              />
+            )}
+            <AnimatedTextElement
+              element={element}
+              commonProps={commonProps}
+              data={data}
+              isTextEdit={isTextEdit}
+            />
+          </Fragment>
         );
       }
       case 'image': {
@@ -1105,6 +1376,13 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
       onDragLeave={handleCanvasDragLeave}
       onDrop={handleCanvasDrop}
     >
+      <input
+        ref={frameUploadInputRef}
+        type="file"
+        accept="image/*"
+        onChange={handleFrameFileChange}
+        className="hidden"
+      />
       {isDraggingFile && (
         <div className="absolute inset-0 z-50 pointer-events-none flex items-center justify-center bg-canva-purple/10 border-4 border-dashed border-canva-purple">
           <div className="bg-white dark:bg-gray-800 rounded-xl px-5 py-3 shadow-lg text-sm font-semibold text-canva-purple">
@@ -1286,10 +1564,57 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
       {contextMenu && (() => {
         const menuElement = page.elements.find((e) => e.id === contextMenu.elementId);
         if (!menuElement) return null;
+        // Matches real Canva: the image becomes a page-level background — auto-cropped
+        // to exactly cover the page, pinned to the back, no longer a separate element.
+        // Cover-fit math matches LeftSidebar.tsx's handleAddSearchedBackgroundPhoto.
+        const handleSetAsBackground = () => {
+          if (menuElement.type !== 'image') return;
+          const data = menuElement.data as ImageData;
+          const img = new window.Image();
+          img.crossOrigin = 'anonymous';
+          img.onload = () => {
+            const targetRatio = page.width / page.height;
+            const srcRatio = img.naturalWidth / img.naturalHeight;
+            let cropX = 0, cropY = 0, cropWidth = 100, cropHeight = 100;
+            if (srcRatio > targetRatio) {
+              cropWidth = (targetRatio / srcRatio) * 100;
+              cropX = (100 - cropWidth) / 2;
+            } else if (srcRatio < targetRatio) {
+              cropHeight = (srcRatio / targetRatio) * 100;
+              cropY = (100 - cropHeight) / 2;
+            }
+            setElementAsPageBackground(menuElement.id, { src: data.src, cropX, cropY, cropWidth, cropHeight });
+            toast.success('Set as background');
+          };
+          img.onerror = () => toast.error('Could not load that image');
+          img.src = data.src;
+        };
         const menuItems: { icon: any; label: string; shortcut?: string; danger?: boolean; action: () => void }[] = [
           { icon: HiOutlineClipboard, label: 'Copy', shortcut: 'Ctrl+C', action: () => copy() },
           { icon: HiOutlineDocumentDownload, label: 'Paste', shortcut: 'Ctrl+V', action: () => paste() },
           { icon: HiOutlineDuplicate, label: 'Duplicate', shortcut: 'Ctrl+D', action: () => duplicateElements([menuElement.id]) },
+          { type: 'divider' } as any,
+          // 2+ selected elements align to each other (the selection's own bounding
+          // box); a single element aligns to the page — see alignElements in the store.
+          ...(() => {
+            const alignTargets = selectedElementIds.length > 1 ? selectedElementIds : [menuElement.id];
+            const items: { icon: any; label: string; action: () => void }[] = [
+              { icon: HiOutlineTemplate, label: 'Align Left', action: () => alignElements(alignTargets, 'left') },
+              { icon: HiOutlineTemplate, label: 'Align Center', action: () => alignElements(alignTargets, 'centerH') },
+              { icon: HiOutlineTemplate, label: 'Align Right', action: () => alignElements(alignTargets, 'right') },
+              { icon: HiOutlineTemplate, label: 'Align Top', action: () => alignElements(alignTargets, 'top') },
+              { icon: HiOutlineTemplate, label: 'Align Middle', action: () => alignElements(alignTargets, 'centerV') },
+              { icon: HiOutlineTemplate, label: 'Align Bottom', action: () => alignElements(alignTargets, 'bottom') },
+            ];
+            if (alignTargets.length >= 3) {
+              items.push(
+                { icon: HiOutlineTemplate, label: 'Distribute Horizontally', action: () => distributeElements(alignTargets, 'horizontal') },
+                { icon: HiOutlineTemplate, label: 'Distribute Vertically', action: () => distributeElements(alignTargets, 'vertical') },
+              );
+            }
+            return items;
+          })(),
+          ...(menuElement.type === 'image' ? [{ icon: HiOutlinePhotograph, label: 'Set as Background', action: handleSetAsBackground }] : []),
           { type: 'divider' } as any,
           { icon: HiOutlineArrowSmUp, label: 'Forward', action: () => bringForward(menuElement.id) },
           { icon: HiOutlineArrowUp, label: 'Bring to Front', action: () => bringToFront(menuElement.id) },
@@ -1401,6 +1726,25 @@ function AnimatedTextElement({ element, commonProps, data, isTextEdit }: {
 
   const text = applyTextTransform(displayText);
 
+  // Hollow renders the text as an outline of its own color with no fill,
+  // instead of a solid fill — computed here rather than stored as a separate
+  // color so switching the effect off restores the original fill exactly.
+  const hollow = (data as any).hollow as boolean | undefined;
+  const fillColor = hollow ? 'transparent' : data.color;
+  const strokeColor = hollow ? data.color : data.outline?.color;
+  const strokeW = hollow ? Math.max(1, Math.round(data.fontSize * 0.05)) : (data.outline?.width ?? 0);
+
+  // Konva.Text has no real fontWeight setter — like any canvas 2D context,
+  // it only builds one `font` shorthand string, so weight has to be folded
+  // into fontStyle's own token (matching how measureCharWidths below already
+  // builds its font string). Passing fontWeight as a separate prop, as this
+  // used to, silently did nothing: every Style button in the panel looked
+  // selected but never changed a single pixel on the canvas.
+  const konvaFontStyle = [
+    data.fontStyle === 'italic' ? 'italic' : '',
+    data.fontWeight && data.fontWeight !== 400 ? String(data.fontWeight) : '',
+  ].filter(Boolean).join(' ') || 'normal';
+
   // Curved text: positive curvature arches the text upward (peak in the middle),
   // negative dips it downward — each character is measured and placed as its own
   // Text node along a circular arc, since Konva has no built-in text-on-a-path.
@@ -1435,11 +1779,10 @@ function AnimatedTextElement({ element, commonProps, data, isTextEdit }: {
             rotation={c.rotation}
             fontFamily={data.fontFamily}
             fontSize={data.fontSize}
-            fontStyle={data.fontStyle === 'italic' ? 'italic' : 'normal'}
-            fontWeight={data.fontWeight as any}
-            fill={data.color}
-            stroke={data.outline?.color}
-            strokeWidth={data.outline?.width ?? 0}
+            fontStyle={konvaFontStyle}
+            fill={fillColor}
+            stroke={strokeColor}
+            strokeWidth={strokeW}
           />
         ))}
       </Group>
@@ -1453,17 +1796,16 @@ function AnimatedTextElement({ element, commonProps, data, isTextEdit }: {
       text={text}
       fontFamily={data.fontFamily}
       fontSize={data.fontSize}
-      fontStyle={data.fontStyle === 'italic' ? 'italic' : 'normal'}
-      fontWeight={data.fontWeight as any}
-      fill={data.color}
+      fontStyle={konvaFontStyle}
+      fill={fillColor}
       width={element.width}
       height={element.height}
       align={data.textAlign}
       lineHeight={data.lineHeight}
       letterSpacing={data.letterSpacing}
       textDecoration={data.textDecoration}
-      stroke={data.outline?.color}
-      strokeWidth={data.outline?.width ?? 0}
+      stroke={strokeColor}
+      strokeWidth={strokeW}
       visible={!isTextEdit}
     />
   );
@@ -1649,6 +1991,38 @@ function measureCharWidths(text: string, fontFamily: string, fontSize: number, f
   const ctx = canvas.getContext('2d')!;
   ctx.font = `${fontStyle === 'italic' ? 'italic ' : ''}${fontWeight} ${fontSize}px ${fontFamily}`;
   return Array.from(text).map((ch) => ctx.measureText(ch).width);
+}
+
+// How many lines `content` actually wraps into at `maxWidth` — greedy
+// word-wrap, same approach a textarea/Konva.Text itself uses. The text-edit
+// overlay's box used to just trust the element's own stored width/height,
+// which for OCR-extracted text can be well off (e.g. two OCR'd lines with
+// different styling merged into one oversized bounding box) — sized instead
+// from this, the edit box always hugs however many lines the text actually
+// needs, however wrong the element's own stored height happens to be.
+function measureWrappedLineCount(content: string, fontFamily: string, fontSize: number, fontWeight: number, fontStyle: string, maxWidth: number): number {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d')!;
+  ctx.font = `${fontStyle === 'italic' ? 'italic ' : ''}${fontWeight} ${fontSize}px ${fontFamily}`;
+  const paragraphs = content.split('\n');
+  let totalLines = 0;
+  for (const para of paragraphs) {
+    if (para === '') { totalLines += 1; continue; }
+    const words = para.split(' ');
+    let lineCount = 1;
+    let currentLine = '';
+    for (const word of words) {
+      const candidate = currentLine ? `${currentLine} ${word}` : word;
+      if (ctx.measureText(candidate).width > maxWidth && currentLine) {
+        lineCount++;
+        currentLine = word;
+      } else {
+        currentLine = candidate;
+      }
+    }
+    totalLines += lineCount;
+  }
+  return Math.max(1, totalLines);
 }
 
 // Konva's own Path.parsePathData() uses a regex tokenizer that mis-parses compact SVG
@@ -2313,6 +2687,43 @@ function ShapeElement({ element, commonProps: rawCommonProps, data }: { element:
   const cx = width / 2;
   const cy = height / 2;
 
+  // Frame-slot photo — loaded the same way StaticImageElement loads its own
+  // image, then used as a Konva fillPatternImage on the same Rect every other
+  // circle/rectangle shape already renders with. A fill pattern is clipped to
+  // its shape's geometry automatically, so this is how a frame gets its photo
+  // masked to a circle/rounded-rect without any new Konva APIs or a second
+  // element type.
+  const frameSrc = data.isFrameSlot ? data.frameImage?.src : undefined;
+  const [frameImg, setFrameImg] = useState<HTMLImageElement | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setFrameImg(null);
+    if (frameSrc) {
+      const img = new window.Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => { if (!cancelled) setFrameImg(img); };
+      img.onerror = () => { if (!cancelled) console.error('[ShapeElement] failed to load frame photo', frameSrc); };
+      img.src = frameSrc;
+    }
+    return () => { cancelled = true; };
+  }, [frameSrc]);
+
+  const getFramePatternProps = () => {
+    if (!frameImg) return null;
+    const zoom = data.frameImage?.scale ?? 1;
+    const coverScale = Math.max(width / frameImg.width, height / frameImg.height) * zoom;
+    const patW = frameImg.width * coverScale;
+    const patH = frameImg.height * coverScale;
+    return {
+      fillPatternImage: frameImg,
+      fillPatternScaleX: coverScale,
+      fillPatternScaleY: coverScale,
+      fillPatternX: -(patW - width) / 2 + (data.frameImage?.offsetX ?? 0),
+      fillPatternY: -(patH - height) / 2 + (data.frameImage?.offsetY ?? 0),
+      fillPatternRepeat: 'no-repeat' as const,
+    };
+  };
+
   // Shadow commonProps with a flip-adjusted version so every case below (there's one
   // per shape type) picks it up automatically without needing its own flip handling.
   const flipH = !!(data as any).flipH;
@@ -2357,29 +2768,67 @@ function ShapeElement({ element, commonProps: rawCommonProps, data }: { element:
 
   switch (data.shapeType) {
     case 'rectangle':
+    case 'circle': {
+      const cornerRadius = data.shapeType === 'circle' ? Math.min(width, height) / 2 : data.cornerRadius;
+      if (!data.isFrameSlot) {
+        return (
+          <Rect
+            {...commonProps}
+            width={width}
+            height={height}
+            fill={fill}
+            stroke={stroke}
+            strokeWidth={strokeWidth}
+            cornerRadius={cornerRadius}
+          />
+        );
+      }
+      const patternProps = getFramePatternProps();
+      if (patternProps) {
+        return (
+          <Rect
+            {...commonProps}
+            width={width}
+            height={height}
+            {...patternProps}
+            stroke={stroke}
+            strokeWidth={strokeWidth}
+            cornerRadius={cornerRadius}
+          />
+        );
+      }
+      // Empty frame slot — dashed placeholder with a camera hint, same visual
+      // language as the birthday templates' original photo-placeholder pattern.
       return (
-        <Rect
-          {...commonProps}
-          width={width}
-          height={height}
-          fill={fill}
-          stroke={stroke}
-          strokeWidth={strokeWidth}
-          cornerRadius={data.cornerRadius}
-        />
+        <Group {...commonProps} width={width} height={height}>
+          <Rect
+            width={width}
+            height={height}
+            fill="#F3F4F6"
+            stroke="#B8BCC4"
+            strokeWidth={2}
+            dash={[8, 6]}
+            cornerRadius={cornerRadius}
+          />
+          <Text
+            text="📷"
+            width={width}
+            height={height * 0.6}
+            align="center"
+            verticalAlign="middle"
+            fontSize={Math.min(width, height) * 0.22}
+          />
+          <Text
+            text="Add photo"
+            y={height * 0.62}
+            width={width}
+            align="center"
+            fontSize={Math.max(10, Math.min(width, height) * 0.08)}
+            fill="#9AA0AC"
+          />
+        </Group>
       );
-    case 'circle':
-      return (
-        <Rect
-          {...commonProps}
-          width={width}
-          height={height}
-          fill={fill}
-          stroke={stroke}
-          strokeWidth={strokeWidth}
-          cornerRadius={Math.min(width, height) / 2}
-        />
-      );
+    }
     case 'triangle':
       return (
         <Line
@@ -2468,18 +2917,24 @@ function ShapeElement({ element, commonProps: rawCommonProps, data }: { element:
       );
     }
     case 'arrow': {
-      // Arrow pointing right
+      // Arrow pointing right; arrowHeads:'both' mirrors the same head onto the left end too.
       const headW = width * 0.35;
       const headH = height * 0.5;
       const shaftH = height * 0.25;
+      const both = data.arrowHeads === 'both';
+      const startX = both ? headW : 0;
       const points = [
-        0, cy - shaftH,
+        // Left end: either a flat shaft edge, or (when both) a mirrored head
+        // traced tip-first so the outline runs the perimeter without crossing itself.
+        ...(both ? [0, cy, startX, cy - headH] : []),
+        startX, cy - shaftH,
         width - headW, cy - shaftH,
         width - headW, cy - headH,
         width, cy,
         width - headW, cy + headH,
         width - headW, cy + shaftH,
-        0, cy + shaftH,
+        startX, cy + shaftH,
+        ...(both ? [startX, cy + headH] : []),
       ];
       return (
         <Line
@@ -2489,6 +2944,7 @@ function ShapeElement({ element, commonProps: rawCommonProps, data }: { element:
           fill={fill}
           stroke={stroke}
           strokeWidth={strokeWidth}
+          dash={data.dash}
           lineJoin="round"
         />
       );
@@ -2500,6 +2956,7 @@ function ShapeElement({ element, commonProps: rawCommonProps, data }: { element:
           points={[0, height / 2, width, height / 2]}
           stroke={fill}
           strokeWidth={strokeWidth || 3}
+          dash={data.dash}
           lineCap="round"
         />
       );

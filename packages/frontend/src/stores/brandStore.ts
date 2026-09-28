@@ -38,7 +38,12 @@ interface BrandState {
   colors: BrandColor[];
   fonts: BrandFont[];
   images: BrandImage[];
-  activeTab: 'logos' | 'colors' | 'fonts' | 'templates' | 'images';
+  // Decorative design graphics (3D letters, birthday tags, etc.) — stored
+  // through the same generic /brand/assets endpoint as `images` (type is a
+  // free-form string server-side), just filtered to a different `type` value
+  // and kept in its own list/tab so the two don't mix in the UI.
+  graphics: BrandImage[];
+  activeTab: 'logos' | 'colors' | 'fonts' | 'templates' | 'images' | 'graphics';
   isLoading: boolean;
 
   setActiveTab: (tab: BrandState['activeTab']) => void;
@@ -57,6 +62,9 @@ interface BrandState {
 
   addImage: (image: Omit<BrandImage, 'id' | 'createdAt'>) => Promise<void>;
   removeImage: (id: string) => Promise<void>;
+
+  addGraphic: (graphic: Omit<BrandImage, 'id' | 'createdAt'>) => Promise<void>;
+  removeGraphic: (id: string) => Promise<void>;
 }
 
 export const useBrandStore = create<BrandState>((set, get) => ({
@@ -64,6 +72,7 @@ export const useBrandStore = create<BrandState>((set, get) => ({
   colors: [],
   fonts: [],
   images: [],
+  graphics: [],
   activeTab: 'logos',
   isLoading: false,
 
@@ -85,6 +94,13 @@ export const useBrandStore = create<BrandState>((set, get) => ({
         images: assetsRes.data.filter((a: any) => a.type === 'image').map((a: any) => ({
           id: a.id,
           name: a.name || 'Brand Image',
+          url: a.url,
+          folder: a.folder,
+          createdAt: a.createdAt,
+        })),
+        graphics: assetsRes.data.filter((a: any) => a.type === 'graphic').map((a: any) => ({
+          id: a.id,
+          name: a.name || 'Asset',
           url: a.url,
           folder: a.folder,
           createdAt: a.createdAt,
@@ -189,6 +205,26 @@ export const useBrandStore = create<BrandState>((set, get) => ({
       set((state) => ({ images: state.images.filter((i) => i.id !== id) }));
     } catch (err: any) {
       throw new Error(err.response?.data?.error || 'Failed to remove image');
+    }
+  },
+
+  addGraphic: async (graphic) => {
+    try {
+      const { data } = await api.post('/brand/assets', { ...graphic, type: 'graphic' });
+      set((state) => ({
+        graphics: [...state.graphics, { id: data.id, name: data.name || graphic.name, url: data.url, folder: data.folder, createdAt: data.createdAt }],
+      }));
+    } catch (err: any) {
+      throw new Error(err.response?.data?.error || 'Failed to add asset');
+    }
+  },
+
+  removeGraphic: async (id) => {
+    try {
+      await api.delete(`/brand/assets/${id}`);
+      set((state) => ({ graphics: state.graphics.filter((g) => g.id !== id) }));
+    } catch (err: any) {
+      throw new Error(err.response?.data?.error || 'Failed to remove asset');
     }
   },
 }));

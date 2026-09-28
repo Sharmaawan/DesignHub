@@ -44,6 +44,9 @@ export interface Page {
   // background color/gradient clears it (see setPageBackgroundColor), matching real
   // Canva's single-slot page background.
   backgroundImage?: PageBackgroundImage;
+  // Present only on pages built by "Make Editable". Loading a page never re-runs
+  // decomposition — this is just the record of what was done and from which source.
+  decomposition?: PageDecomposition;
   // Video timeline — undefined on every non-video page, preserving today's static-slide behavior.
   duration?: number;
   tracks?: Track[];
@@ -102,7 +105,54 @@ export interface CanvasElement {
   // the old text-only `data.animation` string, which is still read as a one-time
   // migration fallback wherever this is undefined (see readElementAnimation).
   animation?: ElementAnimation;
+  // Set only on elements produced by "Make Editable" (flat image -> layers). Absent on
+  // everything else, so all existing designs/templates are unaffected.
+  /** 0-1 confidence that this layer is a faithful, cleanly separated reconstruction. */
+  confidence?: number;
+  editable?: boolean;
+  /** Which detected region of which source image this layer came from — makes ids stable and re-decomposition detectable. */
+  source?: ElementSource;
+  // Progressive/non-destructive decomposition (see designDecomposition/DesignDecomposer.ts):
+  // only meaningful when `source` is set. A text layer starts `revealed: false` — its real
+  // pixels are still only visible through page.backgroundImage (the untouched original)
+  // underneath, and this element itself renders nothing yet — until the user actually edits
+  // it, at which point reconstructElementRegion() cleans just that region and this flips to
+  // true. Object layers (logos/photos/icons) never need this: their cutout image already
+  // occludes the original 1:1 the moment they're created, so they render immediately;
+  // `revealed` on an object instead just tracks whether ITS background hole has been
+  // cleaned yet (done lazily on first move/delete, not on creation).
+  revealed?: boolean;
+  /** Set when reconstructElementRegion() reported this element's region can't be reconstructed cleanly — the original pixels are left untouched and this element must stay flattened/non-editable rather than risk a visible patch. */
+  requiresFlattenedEditing?: boolean;
   data: TextData | ImageData | ShapeData | IconData | ChartData | TableData | VideoData | AudioData | DrawingData;
+}
+
+export interface ElementSource {
+  regionId: string;
+  sourceHash: string;
+  version: string;
+  role: 'text' | 'logo' | 'badge' | 'icon' | 'qr' | 'photo' | 'decorative';
+}
+
+export interface PageDecomposition {
+  version: string;
+  status: 'completed';
+  createdAt: string;
+  /** SHA-256 of the original uploaded file — the idempotency key. */
+  sourceHash: string;
+  /** The untouched original upload — page.backgroundImage starts out pointing at this exact file and is only ever progressively patched from here, never regenerated from scratch. */
+  originalUrl: string;
+  /** Regions that were deliberately left flattened in the background, and why. */
+  flattened: { kind: string; label: string; reason: string }[];
+  /**
+   * Every text region Stage 1 analysis found (accepted or not), kept around so
+   * a later on-demand reconstructElementRegion() call can pass the full
+   * neighbor list back to the server (generateTextMask needs every sibling
+   * region, not just the one being reconstructed, to model the local
+   * background correctly). Without this, editing text after a reload would
+   * have no way to re-derive it short of re-running OCR.
+   */
+  textRegions: { id: string; x: number; y: number; width: number; height: number; core?: { x: number; y: number; width: number; height: number } }[];
 }
 
 export interface TextData {
@@ -122,6 +172,10 @@ export interface TextData {
   shadow?: { color: string; blur: number; offsetX: number; offsetY: number };
   gradient?: { type: 'linear' | 'radial'; colors: string[]; angle: number };
   curvature?: number;
+  /** Background color drawn behind the text box, like a highlighter/marker stroke. */
+  highlightColor?: string;
+  /** Renders as an outline in `color` with a transparent fill instead of a solid fill. */
+  hollow?: boolean;
 }
 
 export interface ImageData {
@@ -154,6 +208,20 @@ export interface ShapeData {
   stroke: string;
   strokeWidth: number;
   cornerRadius: number;
+  /** Dash pattern for line/arrow shapes, e.g. [8,6] for dashed, [2,4] for dotted. Solid when absent. */
+  dash?: number[];
+  /** Arrowhead placement for 'arrow' shapes. Single head at the end when absent. */
+  arrowHeads?: 'end' | 'both';
+  /** Marks a circle/rectangle shape as a Frame — an empty photo slot until frameImage is set. */
+  isFrameSlot?: boolean;
+  /** The photo currently filling a frame slot, clipped to the shape's own geometry via fillPatternImage. */
+  frameImage?: {
+    src: string;
+    /** Cover-fit zoom multiplier; 1 = just covers the frame. */
+    scale?: number;
+    offsetX?: number;
+    offsetY?: number;
+  };
 }
 
 export interface IconData {

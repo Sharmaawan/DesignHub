@@ -1,6 +1,4 @@
 import { ReactNode } from 'react';
-import ContextToolbarNew from './ContextToolbarNew';
-import FloatingToolbar from './FloatingToolbar';
 
 interface CanvasWorkspaceProps {
   children: ReactNode;
@@ -17,6 +15,13 @@ interface CanvasWorkspaceProps {
  * ignoring zoom and pan — at any zoom other than 100% its box landed in the
  * wrong place (e.g. a stray line cutting across the canvas). Removed rather
  * than reimplementing the same zoom/pan math a second time.
+ *
+ * Per-element actions (copy, layer order, lock, hide, delete, align center,
+ * set as background) used to also show as a floating toolbar hovering above
+ * the current selection — but that duplicated (and, in ContextToolbarNew's
+ * case, mispositioned) the right-click context menu EditorCanvas already
+ * renders for exactly the same actions. Right-click is now the only way to
+ * reach them, so there's one menu instead of two overlapping ones.
  */
 export default function CanvasWorkspace({ children }: CanvasWorkspaceProps) {
   return (
@@ -25,12 +30,6 @@ export default function CanvasWorkspace({ children }: CanvasWorkspaceProps) {
       <div className="absolute inset-0 overflow-auto">
         {children}
       </div>
-
-      {/* Floating Contextual Toolbar */}
-      <FloatingToolbar />
-
-      {/* New Context Toolbar (better version) */}
-      <ContextToolbarNew />
 
       {/* Canvas edge guides (optional visual cue) */}
       <div className="absolute inset-0 pointer-events-none border-4 border-canva-purple/5 rounded-lg" />

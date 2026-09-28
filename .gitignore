@@ -5,3 +5,5 @@ models/
 .env
 *.log
 .DS_Store
+packages/backend/python-worker/*.pt
+packages/backend/python-worker/__pycache__/

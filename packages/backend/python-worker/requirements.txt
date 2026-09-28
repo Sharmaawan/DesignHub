@@ -1,0 +1,15 @@
+# Local segmentation worker — see server.py for why this exists.
+# On this dev machine these were already installed system-wide; this file
+# documents what's actually required for a fresh setup elsewhere.
+#
+#   pip install -r requirements.txt
+#
+# First run also downloads the FastSAM-s checkpoint (~23MB, one-time, from
+# ultralytics' GitHub release) into this directory — that download needs
+# network access once; every run after that is fully offline.
+flask>=3.0
+ultralytics>=8.4
+torch>=2.0
+torchvision>=0.15
+pillow>=10.0
+numpy>=1.24

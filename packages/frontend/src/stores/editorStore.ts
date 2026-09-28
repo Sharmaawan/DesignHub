@@ -9,6 +9,17 @@ interface HistoryEntry {
 
 interface EditorState {
   project: Project | null;
+  // Bumped every time setProject bulk-replaces `pages` wholesale (a fresh
+  // load or reload — including the redundant reload-loop autosave triggers
+  // via EditorPage's own effect, see its comment). useCollaboration.ts uses
+  // this to tell "this is a bulk reload of possibly-the-same data, just
+  // re-baseline my diff and don't broadcast anything" apart from "this is a
+  // genuine local edit, diff it and tell collaborators" — without it, every
+  // reload's fresh element object references look like N new elements to a
+  // reference-equality diff, and a second connected session (another tab, a
+  // collaborator, even a one-off verification session) would receive and
+  // append duplicates of everything already on the page.
+  loadGeneration: number;
   pages: Page[];
   currentPageIndex: number;
   selectedElementIds: string[];
@@ -35,6 +46,12 @@ interface EditorState {
   commentsOpen: boolean;
   versionsOpen: boolean;
   viewportCenter: { x: number; y: number };
+  // The canvas container's own on-screen pixel size (set by EditorCanvas's
+  // ResizeObserver) — kept in the store, not just local component state, so
+  // any zoom entry point (toolbar buttons, keyboard shortcuts, wheel) can
+  // anchor the zoom to the viewport's actual center instead of each
+  // duplicating that math (or, worse, not doing it at all).
+  viewportSize: { width: number; height: number };
   layersOpen: boolean;
   elementNames: Record<string, string>;
   activeTool: 'select' | 'pen' | 'highlighter' | 'eraser';
@@ -80,6 +97,14 @@ interface EditorState {
   unlockElement: (id: string) => void;
   hideElement: (id: string) => void;
   showElement: (id: string) => void;
+  // Canva-style align: a single id aligns to the page bounds; 2+ ids align to
+  // each other's shared bounding box (the selection), matching real Canva's
+  // "align" behavior for single vs. multi-selection.
+  alignElements: (ids: string[], edge: 'left' | 'centerH' | 'right' | 'top' | 'centerV' | 'bottom') => void;
+  // Even edge-to-edge spacing along an axis — needs 3+ elements (the first and
+  // last stay put, everything between is spaced evenly), matching Canva's
+  // "distribute" behavior.
+  distributeElements: (ids: string[], axis: 'horizontal' | 'vertical') => void;
   groupElements: (ids: string[]) => void;
   ungroupElements: (id: string) => void;
 
@@ -89,6 +114,7 @@ interface EditorState {
   zoomToFit: () => void;
   resetZoom: () => void;
   setPan: (x: number, y: number) => void;
+  setViewportSize: (width: number, height: number) => void;
 
   toggleGrid: () => void;
   toggleRulers: () => void;
@@ -115,6 +141,13 @@ interface EditorState {
   // see PageBackgroundImage for why this is a page property, not a CanvasElement.
   setElementAsPageBackground: (elementId: string, backgroundImage: PageBackgroundImage) => void;
   clearPageBackgroundImage: (pageIndex: number) => void;
+  // Swaps in a freshly-patched working-background URL after an on-demand
+  // reconstructElementRegion() call (see EditorCanvas.tsx) — a silent technical
+  // update, not a user action, so unlike setElementAsPageBackground it does not
+  // push a history entry (undo shouldn't visibly "unreveal" a cleaned region).
+  // Scoped by pageId so a stale in-flight reconstruction from a page the user
+  // has since navigated away from can't clobber a different page's background.
+  patchPageBackgroundImageSrc: (pageId: string, src: string) => void;
 
   importDocumentPages: (defs: Array<{
     name: string;
@@ -149,6 +182,7 @@ interface EditorState {
 
 export const useEditorStore = create<EditorState>((set, get) => ({
   project: null,
+  loadGeneration: 0,
   pages: [
     {
       id: generateId(),
@@ -185,6 +219,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   commentsOpen: false,
   versionsOpen: false,
   viewportCenter: { x: 960, y: 540 },
+  viewportSize: { width: 0, height: 0 },
   layersOpen: false,
   elementNames: {},
   activeTool: 'select',
@@ -198,6 +233,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setProject: (project) => {
     set({
       project,
+      loadGeneration: get().loadGeneration + 1,
       pages: project.pages.length > 0 ? project.pages : [
         {
           id: generateId(),
@@ -634,6 +670,74 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   hideElement: (id) => { get().updateElement(id, { visible: false }); get().pushHistory(); },
   showElement: (id) => { get().updateElement(id, { visible: true }); get().pushHistory(); },
 
+  alignElements: (ids, edge) => {
+    const { pages, currentPageIndex } = get();
+    const page = pages[currentPageIndex];
+    const targets = page.elements.filter((e) => ids.includes(e.id) && !e.locked);
+    if (targets.length === 0) return;
+    // One element aligns to the page; two or more align to their own shared
+    // bounding box, so aligning a multi-selection moves them relative to each
+    // other rather than snapping every one of them to the page edge.
+    const [minX, maxX, minY, maxY] = targets.length === 1
+      ? [0, page.width, 0, page.height]
+      : [
+          Math.min(...targets.map((e) => e.x)),
+          Math.max(...targets.map((e) => e.x + e.width)),
+          Math.min(...targets.map((e) => e.y)),
+          Math.max(...targets.map((e) => e.y + e.height)),
+        ];
+    const targetIds = new Set(targets.map((e) => e.id));
+    const newPages = [...pages];
+    newPages[currentPageIndex] = {
+      ...page,
+      elements: page.elements.map((e) => {
+        if (!targetIds.has(e.id)) return e;
+        switch (edge) {
+          case 'left': return { ...e, x: minX };
+          case 'centerH': return { ...e, x: (minX + maxX) / 2 - e.width / 2 };
+          case 'right': return { ...e, x: maxX - e.width };
+          case 'top': return { ...e, y: minY };
+          case 'centerV': return { ...e, y: (minY + maxY) / 2 - e.height / 2 };
+          case 'bottom': return { ...e, y: maxY - e.height };
+          default: return e;
+        }
+      }),
+    };
+    set({ pages: newPages });
+    get().pushHistory();
+  },
+
+  distributeElements: (ids, axis) => {
+    const { pages, currentPageIndex } = get();
+    const page = pages[currentPageIndex];
+    const targets = page.elements.filter((e) => ids.includes(e.id) && !e.locked);
+    if (targets.length < 3) return;
+    const sorted = [...targets].sort((a, b) => axis === 'horizontal' ? a.x - b.x : a.y - b.y);
+    const first = sorted[0], last = sorted[sorted.length - 1];
+    const size = (e: CanvasElement) => axis === 'horizontal' ? e.width : e.height;
+    const start = (e: CanvasElement) => axis === 'horizontal' ? e.x : e.y;
+    const totalSpan = (start(last) + size(last)) - start(first);
+    const totalSize = sorted.reduce((s, e) => s + size(e), 0);
+    const gap = (totalSpan - totalSize) / (sorted.length - 1);
+    const positions = new Map<string, number>();
+    let cursor = start(first);
+    for (const e of sorted) {
+      positions.set(e.id, cursor);
+      cursor += size(e) + gap;
+    }
+    const newPages = [...pages];
+    newPages[currentPageIndex] = {
+      ...page,
+      elements: page.elements.map((e) => {
+        if (!positions.has(e.id)) return e;
+        const pos = positions.get(e.id)!;
+        return axis === 'horizontal' ? { ...e, x: pos } : { ...e, y: pos };
+      }),
+    };
+    set({ pages: newPages });
+    get().pushHistory();
+  },
+
   groupElements: (ids) => {
     const { pages, currentPageIndex } = get();
     const page = pages[currentPageIndex];
@@ -665,12 +769,47 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     get().pushHistory();
   },
 
-  setZoom: (zoom) => set({ zoom: Math.max(0.1, Math.min(5, zoom)) }),
-  zoomIn: () => set((s) => ({ zoom: Math.min(5, s.zoom * 1.2) })),
-  zoomOut: () => set((s) => ({ zoom: Math.max(0.1, s.zoom / 1.2) })),
-  zoomToFit: () => set({ zoom: 0.5, panX: 0, panY: 0 }),
+  // Every zoom change is anchored to the viewport's current center — without
+  // this, changing zoom while panned drifts the design toward wherever
+  // panX/panY happens to point, and at a small enough zoom that can push
+  // the whole page (and whatever's selected on it) off-screen entirely.
+  // Verified directly: zooming out via the toolbar buttons after panning
+  // did exactly this. Falls back to a zoom-only change if the viewport
+  // hasn't been measured yet (viewportSize starts at 0,0 before
+  // EditorCanvas's ResizeObserver reports the container's real size).
+  setZoom: (zoom) => set((s) => {
+    const clamped = Math.max(0.1, Math.min(5, zoom));
+    const { width, height } = s.viewportSize;
+    if (width <= 0 || height <= 0) return { zoom: clamped };
+    const cx = width / 2, cy = height / 2;
+    const stageX = (cx - s.panX) / s.zoom, stageY = (cy - s.panY) / s.zoom;
+    return { zoom: clamped, panX: cx - stageX * clamped, panY: cy - stageY * clamped };
+  }),
+  zoomIn: () => get().setZoom(get().zoom * 1.2),
+  zoomOut: () => get().setZoom(get().zoom / 1.2),
+  // Recomputes zoom from the page's actual dimensions against the last-measured
+  // viewport size, mirroring the same formula EditorCanvas uses for its one-time
+  // initial fit — so the toolbar's "Fit" button produces the same result a fresh
+  // page load would, instead of the flat zoom=1/pan=(0,0) this used to do (which
+  // left the page anywhere from off-screen to cut off depending on prior pan).
+  zoomToFit: () => set((s) => {
+    const { width, height } = s.viewportSize;
+    const page = s.pages[s.currentPageIndex];
+    if (!page || width <= 0 || height <= 0) return {};
+    const scale = Math.min(
+      (width - 100) / page.width,
+      (height - 100) / page.height,
+      1
+    ) * 0.8;
+    return {
+      zoom: scale,
+      panX: (width - page.width * scale) / 2,
+      panY: (height - page.height * scale) / 2,
+    };
+  }),
   resetZoom: () => set({ zoom: 1, panX: 0, panY: 0 }),
   setPan: (x, y) => set({ panX: x, panY: y }),
+  setViewportSize: (width, height) => set({ viewportSize: { width, height } }),
 
   toggleGrid: () => set((s) => ({ showGrid: !s.showGrid })),
   toggleRulers: () => set((s) => ({ showRulers: !s.showRulers })),
@@ -947,6 +1086,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     newPages[pageIndex] = { ...newPages[pageIndex], backgroundImage: undefined };
     set({ pages: newPages });
     get().pushHistory();
+  },
+
+  patchPageBackgroundImageSrc: (pageId, src) => {
+    const { pages } = get();
+    const idx = pages.findIndex((p) => p.id === pageId);
+    if (idx === -1 || !pages[idx].backgroundImage) return;
+    const newPages = [...pages];
+    newPages[idx] = { ...newPages[idx], backgroundImage: { ...newPages[idx].backgroundImage!, src } };
+    set({ pages: newPages });
   },
 
   importDocumentPages: (defs) => {

@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { HiOutlineX, HiOutlineUpload, HiOutlinePhotograph } from 'react-icons/hi';
 import { uploadAPI, templateAPI, projectAPI, BACKEND_ORIGIN as BACKEND } from '../../utils/api';
 import { generateId } from '../../utils/cn';
-import { decomposeTemplateImage } from '../../utils/templateDecomposition';
+import { decomposeImage, DecompositionError, DecomposeSummary, ProgressEvent, STEP_LABELS } from '../../utils/designDecomposition/DesignDecomposer';
+import type { Page } from '../../types';
 import toast from 'react-hot-toast';
 
 interface UploadTemplateModalProps {
@@ -20,6 +21,62 @@ function loadImageSize(url: string): Promise<{ width: number; height: number }> 
     img.onerror = () => resolve({ width: 1080, height: 1080 });
     img.src = url;
   });
+}
+
+// Many downloadable "photo frame" templates (a decorative border/balloons/
+// text around a blank circle or rectangle) get uploaded as one flat image.
+// Without this, that blank spot is just part of the picture — a photo the
+// user adds afterward lands as a plain rectangle on top of the whole design,
+// covering the decoration instead of sitting inside the hole. When the
+// server finds a hole, this turns it into a real clickable Frame (see
+// isFrameSlot in ShapeElement, EditorCanvas.tsx). The flat image itself is
+// now always page.backgroundImage (a page-level layer, never an element —
+// see decomposeImage/reconstructDesign), not an element named "Background",
+// so there's no element to reorder here; only its src is swapped when the
+// hole wasn't real transparency (a flat black/white marker instead) and the
+// server returned a punched copy in `overlayUrl` to stop that marker color
+// from covering the Frame.
+async function applyFrameHoleDetection(page: Page, uploadedUrl: string): Promise<Page> {
+  try {
+    const { data } = await templateAPI.detectFrame(uploadedUrl);
+    const hole = data?.hole;
+    if (!hole) return page;
+    const frameSlot = {
+      id: generateId(), type: 'shape',
+      x: hole.x, y: hole.y, width: hole.width, height: hole.height,
+      rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 0, name: 'Photo Frame',
+      data: {
+        type: 'shape', shapeType: hole.shape, fill: '#F3F4F6', stroke: 'transparent', strokeWidth: 0,
+        cornerRadius: hole.shape === 'rectangle' ? Math.round(Math.min(hole.width, hole.height) * 0.06) : 0,
+        isFrameSlot: true,
+      },
+    } as any;
+    const overlayUrl: string | null = data?.overlayUrl || null;
+    return {
+      ...page,
+      elements: [frameSlot, ...page.elements],
+      backgroundImage: overlayUrl && page.backgroundImage
+        ? { ...page.backgroundImage, src: `${BACKEND}${overlayUrl}` }
+        : page.backgroundImage,
+    };
+  } catch (err) {
+    console.error('[UploadTemplate] frame-hole detection failed', err);
+    return page;
+  }
+}
+
+// decomposeImage throws DecompositionError('empty', ...) when the pixel-mask
+// pipeline finds no baked-in text/graphics reliable enough to extract (e.g. a
+// purely decorative/solid-color background template) — a legitimate design,
+// not a failure, so it degrades to a background-only page exactly the way
+// MakeEditableModal's explicit "Use as background" action already does,
+// instead of surfacing an error for what used to just work as an empty canvas.
+function backgroundOnlyPage(previewSrc: string, width: number, height: number): Page {
+  return {
+    id: generateId(), name: 'Page 1', width, height, backgroundColor: '#FFFFFF',
+    elements: [],
+    backgroundImage: { src: previewSrc, cropX: 0, cropY: 0, cropWidth: 100, cropHeight: 100 },
+  };
 }
 
 export default function UploadTemplateModal({ open, onClose, onCreated, categories }: UploadTemplateModalProps) {
@@ -56,63 +113,82 @@ export default function UploadTemplateModal({ open, onClose, onCreated, categori
     onClose();
   };
 
+  // Shared by both buttons below: uploads the file, runs the real pixel-mask
+  // decomposition + server-side background reconstruction (the same pipeline
+  // MakeEditableModal's "Make Editable" flow uses), and applies frame-hole
+  // detection. Previously this used decomposeTemplateImage — a client-only
+  // Tesseract pass that left OCR'd text invisible (opacity 0) directly on top
+  // of the untouched original image, only "revealing" it on first click via a
+  // crude same-size rectangle cropped from just above/below the text; any
+  // mismatch in the surrounding gradient/texture showed up as a visible
+  // rectangular patch. decomposeImage instead reconstructs the actual pixels
+  // behind each glyph server-side before the text is ever shown, so there's
+  // nothing left to "reveal" and no seam to mismatch.
+  const runDecomposition = async (loadingToastId: string): Promise<{ page: Page; summary: DecomposeSummary }> => {
+    const { data: saved } = await uploadAPI.upload(file!);
+    const previewSrc = `${BACKEND}${saved.url}`;
+    let page: Page;
+    let summary: DecomposeSummary;
+    try {
+      ({ page, summary } = await decomposeImage(file!, {
+        onProgress: (e: ProgressEvent) => toast.loading(STEP_LABELS[e.step], { id: loadingToastId }),
+      }));
+    } catch (err) {
+      if (err instanceof DecompositionError && err.code === 'empty') {
+        const { width, height } = await loadImageSize(previewSrc);
+        page = backgroundOnlyPage(previewSrc, width, height);
+        summary = { editableText: 0, extractedObjects: 0, flattened: [], notes: [] };
+      } else {
+        throw err;
+      }
+    }
+    page = await applyFrameHoleDetection(page, saved.url);
+    return { page, summary };
+  };
+
+  const summaryMessage = (page: Page, summary: DecomposeSummary, verb: 'Template uploaded' | 'Design ready') => {
+    const hasFrame = page.elements.some((e) => e.name === 'Photo Frame');
+    return hasFrame
+      ? `✨ ${verb}! Found a photo frame${summary.editableText > 0 ? ` and ${summary.editableText} text element(s)` : ''} ready to edit`
+      : summary.editableText > 0
+      ? `✨ ${verb}! ${summary.editableText} text element(s) ready to edit`
+      : `✨ ${verb}! Use Text tool to add text when editing`;
+  };
+
   const handleUpload = async () => {
     if (!file) { toast.error('Choose an image to upload'); return; }
     if (!name.trim()) { toast.error('Give your template a name'); return; }
 
     setUploading(true);
+    const loadingToastId = toast.loading('Uploading template...');
     try {
-      toast.loading('Uploading and analyzing template...');
-      const { data: saved } = await uploadAPI.upload(file);
-      const url = `${BACKEND}${saved.url}`;
-      const { width, height } = await loadImageSize(url);
+      const { page, summary } = await runDecomposition(loadingToastId);
 
-      toast.loading('Extracting text and creating elements...');
-      // Decompose template image into individual editable elements
-      const elements = await decomposeTemplateImage(url, width, height);
-
-      // DEBUG: Log the elements array
-      console.log('[Upload] Elements created:', elements.length);
-      console.log('[Upload] Elements:', elements.map(e => ({ type: e.type, name: e.name })));
-
-      const pageId = generateId();
       const templateData = {
         id: generateId(),
         name: name.trim(),
-        pages: [{
-          id: pageId,
-          name: 'Page 1',
-          width,
-          height,
-          backgroundColor: '#FFFFFF',
-          elements, // Use decomposed elements instead of single image
-        }],
+        pages: [page],
         ownerId: '1', collaborators: [], isFavorite: false, isTemplate: true,
         createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
       };
 
-      // DEBUG: Log templateData before sending
-      console.log('[Upload] TemplateData pages[0].elements:', templateData.pages[0].elements.length);
-
       await templateAPI.create({
         name: name.trim(),
         category,
-        thumbnail: url,
+        thumbnail: page.backgroundImage?.src || '',
         data: templateData,
         tags: [],
         isPremium: false,
       });
 
-      const textCount = Math.max(0, elements.length - 1);
-      const message = textCount > 0
-        ? `✨ Template uploaded! ${textCount} text element(s) ready to edit`
-        : `✨ Template uploaded! Use Text tool to add text when editing`;
-      toast.success(message);
+      toast.dismiss(loadingToastId);
+      toast.success(summaryMessage(page, summary, 'Template uploaded'));
       onCreated();
       handleClose();
     } catch (err: any) {
+      toast.dismiss(loadingToastId);
       console.error('[UploadTemplate] failed:', err);
-      const errorMsg = err.response?.data?.error || err.message || 'Failed to upload template';
+      const errorMsg = err instanceof DecompositionError ? err.message : (err.response?.data?.error || err.message || 'Failed to upload template');
       toast.error(errorMsg);
     } finally {
       setUploading(false);
@@ -124,57 +200,30 @@ export default function UploadTemplateModal({ open, onClose, onCreated, categori
     if (!name.trim()) { toast.error('Give your design a name'); return; }
 
     setUploading(true);
+    const loadingToastId = toast.loading('Uploading image...');
     try {
-      toast.loading('Uploading image...');
-      const { data: saved } = await uploadAPI.upload(file);
-      const url = `${BACKEND}${saved.url}`;
-      const { width, height } = await loadImageSize(url);
+      const { page, summary } = await runDecomposition(loadingToastId);
 
-      toast.loading('Processing image...');
-
-      // Try OCR decomposition to extract text elements
-      let elements = await decomposeTemplateImage(url, width, height);
-
-      console.log('[UploadAndEdit] Extracted elements:', elements.length);
-      console.log('[UploadAndEdit] Elements:', elements.map(e => ({ type: e.type, name: e.name })));
-
-      // If OCR only found the background (no text), add helpful message
-      if (elements.length === 1) {
-        console.log('[UploadAndEdit] OCR found no text - user can add text manually');
-        toast.dismiss();
-        toast.success('✨ Image loaded! Click Text tool (pencil) to add/edit text anywhere');
-      } else {
-        console.log('[UploadAndEdit] OCR extracted text - ready to edit');
-        toast.dismiss();
-        toast.success(`✨ Design ready! Found ${elements.length - 1} text element(s) to edit`);
-      }
-
-      const pageId = generateId();
       const projectData = {
         name: name.trim(),
         description: '',
         status: 'draft',
-        canvasData: [{
-          id: pageId,
-          name: 'Page 1',
-          width,
-          height,
-          backgroundColor: '#FFFFFF',
-          elements: elements, // Use OCR-extracted elements
-        }],
+        canvasData: [page],
       };
 
       // Create project via API
       const { data: newProject } = await projectAPI.create(projectData);
 
-      toast.success(`✓ Design created! Found ${elements.length - 1} text elements ready to edit`);
+      toast.dismiss(loadingToastId);
+      toast.success(summaryMessage(page, summary, 'Design ready'));
       handleClose();
 
       // Redirect to editor
       navigate(`/editor/${newProject.id}`);
     } catch (err: any) {
+      toast.dismiss(loadingToastId);
       console.error('[UploadAndEdit] failed:', err);
-      const errorMsg = err.response?.data?.error || err.message || 'Failed to create design';
+      const errorMsg = err instanceof DecompositionError ? err.message : (err.response?.data?.error || err.message || 'Failed to create design');
       toast.error(errorMsg);
     } finally {
       setUploading(false);

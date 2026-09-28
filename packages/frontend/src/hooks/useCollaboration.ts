@@ -26,6 +26,10 @@ export function useCollaboration(projectId: string | undefined) {
   const applyingRemoteRef = useRef(false);
   const prevElementsRef = useRef<Map<string, CanvasElement>>(new Map());
   const prevPageIndexRef = useRef<number>(-1);
+  // -1 guarantees the subscribe callback's very first invocation always looks
+  // like a generation change, so it re-baselines instead of diffing — see the
+  // loadGeneration handling below and its comment in editorStore.ts.
+  const prevLoadGenerationRef = useRef<number>(-1);
 
   useEffect(() => {
     if (!projectId || !user) return;
@@ -52,7 +56,17 @@ export function useCollaboration(projectId: string | undefined) {
       applyRemote(() => {
         const state = useEditorStore.getState();
         const idx = state.currentPageIndex;
-        const pages = state.pages.map((p, i) => (i === idx ? { ...p, elements: [...p.elements, element] } : p));
+        const pages = state.pages.map((p, i) => {
+          if (i !== idx) return p;
+          // Any full project reload (setProject) re-diffs every element on the
+          // page against an empty baseline and broadcasts each one as "added"
+          // — see the subscribe callback below. Without this check, a second
+          // connected session (another tab, a collaborator, even a one-off
+          // verification session opening the same project) would receive
+          // those and blindly append duplicates of everything already there.
+          if (p.elements.some((e) => e.id === element.id)) return p;
+          return { ...p, elements: [...p.elements, element] };
+        });
         useEditorStore.setState({ pages });
       });
     };
@@ -77,18 +91,25 @@ export function useCollaboration(projectId: string | undefined) {
     socket.on('element-deleted', onElementDeleted);
     socket.on('page-changed', onPageChanged);
 
-    // Seed the "last known" snapshot so the diff below doesn't mistake every
-    // pre-existing element on the page for a brand-new addition.
-    const initial = useEditorStore.getState();
-    prevElementsRef.current = new Map(initial.pages[initial.currentPageIndex]?.elements.map((e) => [e.id, e]) || []);
-    prevPageIndexRef.current = initial.currentPageIndex;
-
     // Diff-based emit: rather than threading an emit call through every one of
     // the many call sites that add/update/delete elements across the editor,
     // watch the store and derive what changed — additions, per-id updates,
     // deletions, and page switches — and broadcast just those.
     const unsubscribe = useEditorStore.subscribe((state) => {
       if (applyingRemoteRef.current) return;
+
+      // A bulk reload (setProject — the initial load, and every subsequent
+      // one; see its comment in editorStore.ts) hands back all-new element
+      // object references even when nothing actually changed. Diffing that
+      // by reference would read as "every element just got added/updated"
+      // and broadcast accordingly — re-baseline silently instead and only
+      // start diffing real incremental edits from here.
+      if (state.loadGeneration !== prevLoadGenerationRef.current) {
+        prevLoadGenerationRef.current = state.loadGeneration;
+        prevPageIndexRef.current = state.currentPageIndex;
+        prevElementsRef.current = new Map(state.pages[state.currentPageIndex]?.elements.map((e) => [e.id, e]) || []);
+        return;
+      }
 
       if (state.currentPageIndex !== prevPageIndexRef.current) {
         prevPageIndexRef.current = state.currentPageIndex;

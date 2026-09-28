@@ -69,6 +69,70 @@ export const templateAPI = {
   trash: () => api.get('/templates/trash'),
   restore: (id: string) => api.post(`/templates/${id}/restore`),
   deletePermanent: (id: string) => api.delete(`/templates/${id}/permanent`),
+  detectFrame: (url: string) => api.post<{ hole: { shape: 'circle' | 'rectangle'; x: number; y: number; width: number; height: number } | null; overlayUrl: string | null }>('/templates/detect-frame', { url }),
+};
+
+// Flat image -> editable layers. All AI/vision/inpainting happens on the backend;
+// the browser never sees a provider key.
+export interface DesignRect { x: number; y: number; width: number; height: number }
+export interface DesignTextRegion extends DesignRect { id: string; core?: DesignRect }
+export interface DesignCapability { available: boolean; provider?: string; reason?: string }
+export interface DesignAnalysis {
+  sourceHash: string;
+  version: string;
+  imageWidth: number;
+  imageHeight: number;
+  texts: { id: string; accepted: boolean; reason?: string; ink?: DesignRect; inkColor?: string; maskPng?: string }[];
+  objects: {
+    id: string; type: string; description: string; confidence: number;
+    x: number; y: number; width: number; height: number;
+    extracted: boolean; cutoutUrl?: string; cutoutRect?: DesignRect; reason?: string;
+  }[];
+  capabilities: { vision: DesignCapability; segmentation: DesignCapability; aiInpaint: DesignCapability };
+  cached: { vision: boolean };
+}
+export interface DesignReconstruction {
+  sourceHash: string;
+  version: string;
+  backgroundUrl: string;
+  method: 'none' | 'local-inpaint' | 'ai-inpaint+local-inpaint';
+  cached: boolean;
+  warnings: string[];
+  droppedObjectIds: string[];
+}
+export interface DesignDetectedRegion extends DesignRect { id: string; type: string; description: string; confidence: number }
+export interface DesignVisionResult {
+  regions: DesignDetectedRegion[];
+  status: DesignCapability;
+  cached: boolean;
+}
+export interface DesignRegionReconstruction {
+  ok: boolean;
+  reason?: string;
+  workingBackgroundUrl?: string;
+  version?: number;
+  inkColor?: string;
+}
+
+export const designAPI = {
+  // No text involved — safe to fire the moment the upload finishes, in parallel
+  // with client-side OCR, instead of waiting for OCR to finish first.
+  analyzeVision: (url: string, signal?: AbortSignal) =>
+    api.post<DesignVisionResult>('/design/analyze-vision', { url }, { timeout: 60000, signal }),
+  analyze: (url: string, textRegions: DesignTextRegion[], precomputedVision: DesignVisionResult | undefined, signal?: AbortSignal) =>
+    api.post<DesignAnalysis>('/design/analyze', { url, textRegions, precomputedVision }, { timeout: 120000, signal }),
+  // Legacy all-at-once reconstruction — no longer called by the normal Make
+  // Editable / Upload Template flow (see reconstructRegion below), kept for
+  // any future bulk "flatten everything" action.
+  reconstruct: (
+    url: string, textRegions: DesignTextRegion[], acceptedTextIds: string[], objectIds: string[], signal?: AbortSignal,
+  ) => api.post<DesignReconstruction>('/design/reconstruct', { url, textRegions, acceptedTextIds, objectIds }, { timeout: 180000, signal }),
+  // Progressive reconstruction — cleans exactly one element's region against
+  // the incrementally-patched working background. Called on demand (text:
+  // first edit; objects: first move/delete), never during import.
+  reconstructRegion: (
+    url: string, textRegions: DesignTextRegion[], elementId: string, kind: 'text' | 'object', signal?: AbortSignal,
+  ) => api.post<DesignRegionReconstruction>('/design/reconstruct-region', { url, textRegions, elementId, kind }, { timeout: 60000, signal }),
 };
 
 export const categoryAPI = {
