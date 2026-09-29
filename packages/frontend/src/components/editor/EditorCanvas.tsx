@@ -844,7 +844,15 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
       // once the first call's reveal finishes — open a second textarea
       // against still-black, pre-reveal data. Bail out; the in-flight call
       // will finish the job.
-      const isUnrevealedDecomposition = !!element.source && element.revealed === false;
+      // !== true (not === false): a decomposition-derived element saved before
+      // the `revealed` field existed has it as undefined, not false — treating
+      // that as "already revealed" (the old, stricter check) skipped
+      // reconstruction entirely for every pre-existing decomposed project,
+      // leaving the original baked-in text behind while the new Konva text
+      // rendered right on top of it. Confirmed directly: this is exactly what
+      // produced a permanent doubled-text render that never went away, on the
+      // very first edit of an older project's text.
+      const isUnrevealedDecomposition = !!element.source && element.revealed !== true;
       if (isUnrevealedDecomposition && revealingOcrTextIdsRef.current.has(element.id)) {
         return;
       }
@@ -1195,7 +1203,12 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
     // setting a text element to 0% opacity. The node still exists and is
     // still selectable/draggable while gated (Konva hit-tests regardless of
     // opacity), matching "selection must remain purely visual."
-    const isUnrevealedText = element.type === 'text' && !!element.source && element.revealed === false;
+    // !== true, not === false — see the matching comment on isUnrevealedDecomposition
+    // above: undefined (any project decomposed before this field existed) must be
+    // treated the same as false, or its redundant Konva-rendered copy stays
+    // visible right on top of the original baked-in text it was never cleaned
+    // out from under.
+    const isUnrevealedText = element.type === 'text' && !!element.source && element.revealed !== true;
     const commonProps = {
       id: element.id,
       x: element.x,
