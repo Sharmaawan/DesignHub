@@ -11,7 +11,7 @@ declare global {
         id: {
           initialize: (config: any) => void;
           renderButton: (element: HTMLElement, config: any) => void;
-          prompt: () => void;
+          prompt: (options?: { mode?: string }) => void;
         };
       };
     };
@@ -71,13 +71,17 @@ export default function GoogleSignIn({
         width,
         shape: 'rectangular',
       });
+
+      // Force the Google account chooser instead of silently reusing the
+      // browser's currently-signed-in Chrome/default Google account.
+      try { window.google.accounts.id.prompt({ mode: 'select_account' } as any); } catch {}
     };
 
     // Wait for the script to load
     const checkGoogle = setInterval(() => {
       if (window.google?.accounts?.id) {
         clearInterval(checkGoogle);
-        initializeGoogleSignIn();
+        if (GOOGLE_CLIENT_ID) initializeGoogleSignIn();
       }
     }, 100);
 

@@ -65,11 +65,15 @@ export default function TemplatesPage() {
     if (page) {
       const pages = [{
         id: `page-${Date.now()}`,
-        name: 'Page 1',
+        name: page.name || 'Page 1',
         elements: page.elements || [],
         backgroundColor: page.backgroundColor || '#FFFFFF',
         width: page.width || 1920,
         height: page.height || 1080,
+        // Preserve editable-template metadata so decomposition-derived layers still
+        // render/reveal correctly when the template is used from TemplatesPage.
+        ...(page.backgroundImage ? { backgroundImage: page.backgroundImage } : {}),
+        ...(page.decomposition ? { decomposition: page.decomposition } : {}),
       }];
       try {
         const { data } = await projectAPI.create({ name: template.name, canvasData: pages });

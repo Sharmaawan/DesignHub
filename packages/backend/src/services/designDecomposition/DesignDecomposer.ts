@@ -15,7 +15,7 @@ import { cachePath, readJsonCache, sha256, writeJsonCache } from './cache';
 
 const MAX_VISION_DIMENSION = 1536;
 const CLAIMING_TYPES = new Set<ObjectType>(['logo', 'badge', 'icon', 'qr']);
-const EXTRACTABLE_TYPES = new Set<ObjectType>(['logo', 'badge', 'icon', 'qr', 'photo', 'decorative']);
+const EXTRACTABLE_TYPES = new Set<ObjectType>(['logo', 'badge', 'icon', 'qr', 'photo', 'decorative', 'shape', 'panel']);
 const EXTRACT_CONFIDENCE = 0.75;
 const LOCAL_INPAINT_MAX_RING_RMS = 18;
 
@@ -182,6 +182,34 @@ export async function analyzeDesign(p: AnalyzeParams): Promise<AnalyzeResult> {
     if (rival) { objects.push({ ...base, reason: `Overlaps another detected graphic ("${rival.description || rival.type}") too closely to separate` }); continue; }
     const straddled = acceptedTextBoxes.find((b) => { const f = overlapArea(b, r) / area(b); return f > 0.2 && f < 0.7; });
     if (straddled) { objects.push({ ...base, reason: 'A text line straddles this region\'s edge — cannot separate cleanly' }); continue; }
+
+    // Solid-color blocks don't need semantic segmentation — the region id/bbox
+    // from local color-block detection *is* the mask. Producing the same
+    // cutout + seg-cache shape the real segmenter path produces lets the
+    // existing progressive background reconstruction patch them correctly.
+    if (r.type === 'shape' || r.type === 'panel') {
+      const stem = `${sourceHash.slice(0, 16)}-${r.id}`;
+      const width = Math.max(1, r.width), height = Math.max(1, r.height);
+      const mask = new Uint8Array(width * height);
+      for (let yy = 0; yy < height; yy++) {
+        for (let xx = 0; xx < width; xx++) {
+          const ax = r.x + xx, ay = r.y + yy;
+          if (acceptedTextBoxes.some((b) => ax >= b.x && ax <= b.x + b.width && ay >= b.y && ay <= b.y + b.height)) continue;
+          mask[yy * width + xx] = 1;
+        }
+      }
+      const maskFile = `seg-${stem}-${V}-mask.png`;
+      const maskPng = await sharp(Buffer.from(mask.map((v) => (v ? 255 : 0))), { raw: { width, height, channels: 1 } }).png().toBuffer();
+      fs.writeFileSync(cachePath(maskFile), maskPng);
+      const stored: StoredSegmentation = { regionId: r.id, bbox: r, needsAI: false, maskFile };
+      writeJsonCache(`seg-${stem}-${V}.json`, stored);
+
+      const cutoutName = `cutout-${stem}.png`;
+      const cutoutBuffer = await sharp(p.absolutePath).extract({ left: r.x, top: r.y, width, height }).png().toBuffer();
+      fs.writeFileSync(path.join('uploads', cutoutName), cutoutBuffer);
+      objects.push({ ...base, extracted: true, cutoutUrl: `/uploads/${cutoutName}`, cutoutRect: r });
+      continue;
+    }
 
     const seg = await segmenter.segment(p.absolutePath, r, img.width, img.height);
     if ('rejected' in seg) { objects.push({ ...base, reason: seg.rejected }); continue; }

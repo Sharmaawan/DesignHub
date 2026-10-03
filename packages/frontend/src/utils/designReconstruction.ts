@@ -390,9 +390,8 @@ function tightenTextBox(
 // --- Level 2: solid-color rectangular block detection ---
 
 interface DetectedRegion { x: number; y: number; width: number; height: number; color: string; area: number }
-
 // Runs on a downsampled copy for speed, then scales results back to full resolution.
-function detectColorBlocks(smallData: Uint8ClampedArray, sw: number, sh: number, scale: number, isExcluded: (x: number, y: number) => boolean): DetectedRegion[] {
+export function detectColorBlocks(smallData: Uint8ClampedArray, sw: number, sh: number, scale: number, isExcluded: (x: number, y: number) => boolean): DetectedRegion[] {
   const visited = new Uint8Array(sw * sh);
   const regions: DetectedRegion[] = [];
   const minArea = Math.max(60, sw * sh * 0.004);

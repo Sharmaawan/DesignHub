@@ -36,6 +36,8 @@ export function mapApiProjectToProject(p: any): Project {
         backgroundColor: pg.backgroundColor || '#FFFFFF',
         width: pg.width || 1920,
         height: pg.height || 1080,
+        ...(pg.backgroundImage ? { backgroundImage: pg.backgroundImage } : {}),
+        ...(pg.decomposition ? { decomposition: pg.decomposition } : {}),
       })) || [],
     ownerId: p.ownerId,
     collaborators: [],
