@@ -36,6 +36,8 @@ export interface DetectedRegion extends Rect {
   type: ObjectType;
   description: string;
   confidence: number;
+  /** Dominant fill for solid-color shape/panel candidates. */
+  color?: string;
 }
 
 export interface ObjectResult extends DetectedRegion {

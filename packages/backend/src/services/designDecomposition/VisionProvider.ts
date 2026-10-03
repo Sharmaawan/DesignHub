@@ -14,6 +14,7 @@ export interface RawRegion {
   description?: string;
   x?: number; y?: number; width?: number; height?: number;
   confidence?: number;
+  color?: string;
 }
 
 export interface VisionProvider {
@@ -84,7 +85,7 @@ export function validateRegions(raw: RawRegion[], imageWidth: number, imageHeigh
     if (px.width < 2 || px.height < 2) return;
     const area = (px.width * px.height) / (imageWidth * imageHeight);
     if (area < MIN_AREA_FRACTION || area > MAX_AREA_FRACTION) return;
-    out.push({ id: `obj-${i}`, type: r.type as ObjectType, description: String(r.description || '').slice(0, 200), ...px, confidence });
+    out.push({ id: `obj-${i}`, type: r.type as ObjectType, description: String(r.description || '').slice(0, 200), ...px, confidence, ...(typeof r.color === 'string' ? { color: r.color } : {}) });
   });
   // Drop near-duplicate detections, keeping the more confident one.
   out.sort((a, b) => b.confidence - a.confidence);

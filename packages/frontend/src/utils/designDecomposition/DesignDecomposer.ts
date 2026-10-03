@@ -1,6 +1,7 @@
 import { BACKEND_ORIGIN as BACKEND, designAPI, uploadAPI, DesignAnalysis, DesignTextRegion, DesignVisionResult } from '../api';
 import { detectTextLines, DetectedTextLine } from '../templateDecomposition';
-import type { CanvasElement, ImageData, Page, PageDecomposition, TextData } from '../../types';
+import type { CanvasElement, ImageData, Page, PageDecomposition, ShapeData, TextData } from '../../types';
+import { detectColorBlocks } from '../designReconstruction';
 import { fitTextToGlyphs } from './textFitting';
 import { validateDecomposedPage } from './validate';
 
@@ -111,7 +112,7 @@ export async function decomposeImage(
         cached: false,
       }));
 
-    const [lines, visionResult] = await Promise.all([textPromise, visionPromise]);
+    let [lines, visionResult] = await Promise.all([textPromise, visionPromise]);
     if (visionResult.status.available) {
       emit('objects', 'done', `${visionResult.regions.length} candidate graphic${visionResult.regions.length === 1 ? '' : 's'} found`);
     } else {
@@ -123,6 +124,49 @@ export async function decomposeImage(
     const ordered = [...lines].sort((a, b) => a.y - b.y || a.x - b.x);
     const regions: DesignTextRegion[] = [];
     const lineById = new Map<string, DetectedTextLine>();
+
+    // Local solid-color block detection — banners/panels/buttons/bars OCR won't
+    // find, and a client-side heuristic is enough now that the server can turn a
+    // detected block into a native editable `shape` element. Results are fed into
+    // the same precomputedVision handoff as AI detections.
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    let shapeRegions: { id: string; type: 'shape'; description: string; confidence: number; x: number; y: number; width: number; height: number; color: string }[] = [];
+    try {
+      if (ctx) {
+        const img = new window.Image();
+        img.src = fullOriginalUrl;
+        await new Promise<void>((resolve, reject) => { img.onload = () => resolve(); img.onerror = reject; });
+        canvas.width = width;
+        canvas.height = height;
+        ctx.drawImage(img, 0, 0);
+        const scale = Math.max(1, Math.ceil(Math.max(width, height) / 400));
+        const smallW = Math.max(1, Math.round(width / scale));
+        const smallH = Math.max(1, Math.round(height / scale));
+        const smallCanvas = document.createElement('canvas');
+        smallCanvas.width = smallW;
+        smallCanvas.height = smallH;
+        const smallCtx = smallCanvas.getContext('2d');
+        if (smallCtx) {
+          smallCtx.drawImage(img, 0, 0, smallW, smallH);
+          const smallData = smallCtx.getImageData(0, 0, smallW, smallH);
+          const isExcluded = (x: number, y: number) =>
+            ordered.some((line) => x >= line.x - 4 && x <= line.x + line.width + 4 && y >= line.y - 4 && y <= line.y + line.height + 4);
+          shapeRegions = detectColorBlocks(smallData.data, smallW, smallH, scale, isExcluded)
+            .filter((r) => r.area < width * height * 0.6)
+            .map((r, i) => ({
+              id: `s${i}`,
+              type: 'shape' as const,
+              description: 'Color block',
+              confidence: 0.9,
+              x: r.x, y: r.y, width: r.width, height: r.height,
+              color: r.color,
+            }));
+        }
+      }
+    } catch {
+      // Color-block detection is best-effort; failure should never block text decomposition.
+    }
     ordered.forEach((line, i) => {
       const id = `t${i}`;
       const label = line.text.trim().slice(0, 40);
@@ -136,6 +180,10 @@ export async function decomposeImage(
       });
       lineById.set(id, line);
     });
+
+    if (shapeRegions.length > 0) {
+      visionResult = { ...visionResult, regions: [...visionResult.regions, ...shapeRegions] };
+    }
 
     // 3. Backend: validated glyph masks, plus real segmentation for whichever
     // vision-detected candidates pass the separability gates. `visionResult`
@@ -200,6 +248,21 @@ export async function decomposeImage(
 
     for (const o of extracted) {
       const r = o.cutoutRect!;
+      if (o.type === 'shape' || o.type === 'panel') {
+        const data: ShapeData = {
+          type: 'shape', shapeType: 'rectangle', fill: (o as any).color || '#7B2FBE',
+          stroke: 'transparent', strokeWidth: 0, cornerRadius: 0,
+        };
+        elements.push({
+          id: `dh-${hash8}-${o.id}`, type: 'shape', x: r.x, y: r.y, width: r.width, height: r.height,
+          rotation: 0, opacity: 1, visible: true, locked: false, zIndex: z++,
+          name: o.description ? `Shape — ${o.description}` : 'Shape',
+          confidence: o.confidence, editable: true, revealed: false,
+          source: { regionId: o.id, sourceHash: analysis.sourceHash, version, role: 'shape' as any },
+          data,
+        });
+        continue;
+      }
       const data: ImageData = {
         type: 'image', src: `${BACKEND}${o.cutoutUrl}`, objectFit: 'fill', borderRadius: 0,
         brightness: 100, contrast: 100, saturation: 100, hue: 0, blur: 0, filters: [],
@@ -256,6 +319,7 @@ export async function decomposeImage(
       });
     });
 
+    if (shapeRegions.length > 0) notes.push(`${shapeRegions.length} shape${shapeRegions.length === 1 ? '' : 's'} detected`);
     const page: Page = {
       id: `dh-page-${hash8}`,
       name: 'Page 1',
@@ -278,7 +342,7 @@ export async function decomposeImage(
     if (problems.length) throw new DecompositionError('validation', `The generated design failed validation: ${problems.slice(0, 3).join('; ')}`);
     emit('layers', 'done');
 
-    return { page, summary: { editableText: acceptedTextIds.length, extractedObjects: elements.filter((e) => e.type === 'image').length, flattened, notes } };
+    return { page, summary: { editableText: acceptedTextIds.length, extractedObjects: elements.filter((e) => e.type === 'image' || e.type === 'shape').length, flattened, notes } };
   } catch (err) {
     if (err instanceof DecompositionError) throw err;
     if (opts.signal?.aborted) throw new DecompositionError('aborted', 'Cancelled');

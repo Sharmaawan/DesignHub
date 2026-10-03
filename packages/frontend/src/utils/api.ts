@@ -86,7 +86,7 @@ export interface DesignAnalysis {
   objects: {
     id: string; type: string; description: string; confidence: number;
     x: number; y: number; width: number; height: number;
-    extracted: boolean; cutoutUrl?: string; cutoutRect?: DesignRect; reason?: string;
+    extracted: boolean; cutoutUrl?: string; cutoutRect?: DesignRect; reason?: string; color?: string;
   }[];
   capabilities: { vision: DesignCapability; segmentation: DesignCapability; aiInpaint: DesignCapability };
   cached: { vision: boolean };
@@ -100,7 +100,7 @@ export interface DesignReconstruction {
   warnings: string[];
   droppedObjectIds: string[];
 }
-export interface DesignDetectedRegion extends DesignRect { id: string; type: string; description: string; confidence: number }
+export interface DesignDetectedRegion extends DesignRect { id: string; type: string; description: string; confidence: number; color?: string }
 export interface DesignVisionResult {
   regions: DesignDetectedRegion[];
   status: DesignCapability;

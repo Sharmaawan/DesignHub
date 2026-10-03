@@ -131,7 +131,7 @@ export interface ElementSource {
   regionId: string;
   sourceHash: string;
   version: string;
-  role: 'text' | 'logo' | 'badge' | 'icon' | 'qr' | 'photo' | 'decorative';
+  role: 'text' | 'logo' | 'badge' | 'icon' | 'qr' | 'photo' | 'decorative' | 'shape' | 'panel';
 }
 
 export interface PageDecomposition {

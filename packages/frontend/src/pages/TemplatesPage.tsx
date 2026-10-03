@@ -64,9 +64,12 @@ export default function TemplatesPage() {
   const handleUseTemplate = async (template: any) => {
     const page = template.data?.pages?.[0];
     if (page) {
+      // Use freshPageFromTemplate to regenerate all element IDs (prevents React
+      // key collisions across templates), AND preserve decomposition/backgroundImage
+      // metadata so Make Editable layers still reveal correctly.
       const pages = [freshPageFromTemplate({
         ...page,
-        name: 'Page 1',
+        name: page.name || 'Page 1',
       })];
       try {
         const { data } = await projectAPI.create({ name: template.name, canvasData: pages });
