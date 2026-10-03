@@ -8,10 +8,32 @@ import type { DesignRect } from '../api';
 // overlap the original glyph mask. The best candidate wins; a poor best score
 // means the text can't be matched reliably and the caller leaves it flattened.
 
-const SANS = ['Montserrat', 'Poppins', 'Inter', 'Roboto', 'Lato', 'Open Sans', 'Raleway', 'Work Sans'];
-const SERIF = ['Playfair Display', 'Merriweather', 'Lora', 'PT Serif'];
+// Expanded font list: added condensed/display/decorative options that are common
+// in Indian university and institutional design templates — the original 8-font
+// SANS set missed bold condensed and impact-style fonts that dominate that genre.
+const SANS = [
+  // Original set
+  'Montserrat', 'Poppins', 'Inter', 'Roboto', 'Lato', 'Open Sans', 'Raleway', 'Work Sans',
+  // Condensed / bold display (common in poster headings)
+  'Oswald', 'Barlow Condensed', 'Bebas Neue', 'Exo 2', 'Nunito Sans', 'Source Sans 3',
+  // Extended Indian-friendly set (used in university branding)
+  'Noto Sans', 'Plus Jakarta Sans', 'DM Sans', 'Outfit', 'Urbanist',
+  // Bold impact-style
+  'Anton', 'Black Han Sans', 'Archivo Black',
+];
+const SERIF = [
+  'Playfair Display', 'Merriweather', 'Lora', 'PT Serif',
+  // Additional serifs common in certificates and formal documents
+  'EB Garamond', 'Libre Baskerville', 'Crimson Text',
+];
 const WEIGHTS = [400, 500, 600, 700, 800];
 const PAD = 40; // room around the text so glyph overhang is never clipped when measuring
+
+export interface FontSuggestion {
+  fontFamily: string;
+  fontWeight: number;
+  score: number;
+}
 
 export interface FitResult {
   fontFamily: string;
@@ -24,6 +46,9 @@ export interface FitResult {
   height: number;
   /** 0-1 overlap of the rendered glyphs with the original glyph mask. */
   score: number;
+  /** Top-3 alternative font suggestions sorted by score descending — stored on the
+   *  element so the TextProperties panel can show a "closest match" hint to the user. */
+  suggestions: FontSuggestion[];
 }
 
 // Same weight/italic folding the editor's AnimatedTextElement uses, so what is
@@ -131,6 +156,8 @@ export async function fitTextToGlyphs(text: string, ink: DesignRect, maskPng: st
 
   const n = [...text].length;
   let best: FitResult | null = null;
+  // Collect all scored candidates to derive top-3 suggestions for the UI
+  const allScored: FontSuggestion[] = [];
 
   for (const family of [...SANS, ...SERIF]) {
     for (const weight of WEIGHTS) {
@@ -147,13 +174,16 @@ export async function fitTextToGlyphs(text: string, ink: DesignRect, maskPng: st
       if (!fitted) continue;
 
       // Sizing was driven by height and spacing by width, but spacing is clamped. If the
-      // font still can't reach the original's width, its proportions simply don't match
-      // (e.g. a condensed serif logotype vs. a wide sans) — and the overlap score below
-      // stretches the render onto the target box, which would hide exactly that mismatch.
+      // font still can't reach the original's width, its proportions might not match
+      // exactly (condensed/expanded fonts) — but we still want a best-effort result
+      // rather than silently skipping the text. Widened from 0.85-1.18 to 0.6-1.6 so
+      // bold condensed poster fonts and expanded display faces both get a chance to score.
       const widthRatio = fitted.w / tw;
-      if (widthRatio < 0.85 || widthRatio > 1.18) continue;
+      if (widthRatio < 0.6 || widthRatio > 1.6) continue;
 
       const score = overlapScore(target, tw, th, fitted);
+      allScored.push({ fontFamily: family, fontWeight: weight, score });
+
       if (!best || score > best.score) {
         best = {
           fontFamily: family, fontWeight: weight,
@@ -170,9 +200,20 @@ export async function fitTextToGlyphs(text: string, ink: DesignRect, maskPng: st
           width: Math.ceil(fitted.textWidth) + 16,
           height: Math.ceil(size * 1.2),
           score,
+          suggestions: [], // filled below
         };
       }
     }
   }
+
+  if (best) {
+    // Top-3 suggestions sorted by score (excluding the winner itself)
+    const suggestions = allScored
+      .filter((s) => !(s.fontFamily === best!.fontFamily && s.fontWeight === best!.fontWeight))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 3);
+    best.suggestions = suggestions;
+  }
+
   return best;
 }

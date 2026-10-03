@@ -9,6 +9,7 @@ import NotificationCenter from '../components/dashboard/NotificationCenter';
 import { HiOutlineSearch, HiOutlineBell, HiOutlineHeart, HiOutlineUpload, HiOutlineTrash } from 'react-icons/hi';
 import { useNotificationStore } from '../stores/notificationStore';
 import { projectAPI, templateAPI } from '../utils/api';
+import { freshPageFromTemplate } from '../utils/cn';
 import toast from 'react-hot-toast';
 
 const CATEGORIES = [
@@ -63,14 +64,10 @@ export default function TemplatesPage() {
   const handleUseTemplate = async (template: any) => {
     const page = template.data?.pages?.[0];
     if (page) {
-      const pages = [{
-        id: `page-${Date.now()}`,
+      const pages = [freshPageFromTemplate({
+        ...page,
         name: 'Page 1',
-        elements: page.elements || [],
-        backgroundColor: page.backgroundColor || '#FFFFFF',
-        width: page.width || 1920,
-        height: page.height || 1080,
-      }];
+      })];
       try {
         const { data } = await projectAPI.create({ name: template.name, canvasData: pages });
         navigate(`/editor/${data.id}`);

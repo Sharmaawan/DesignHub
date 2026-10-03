@@ -15,7 +15,7 @@ import TeamRequests from '../components/dashboard/TeamRequests';
 import WhatsNew from '../components/dashboard/WhatsNew';
 import RecommendedDesigns from '../components/dashboard/RecommendedDesigns';
 import NotificationCenter from '../components/dashboard/NotificationCenter';
-import { formatDate, CANVAS_PRESETS } from '../utils/cn';
+import { formatDate, CANVAS_PRESETS, freshPageFromTemplate } from '../utils/cn';
 import { projectAPI, templateAPI } from '../utils/api';
 import {
   HiOutlinePlus, HiOutlineTemplate, HiOutlineBell, HiOutlineHeart,
@@ -348,14 +348,7 @@ export default function DashboardPage({ initialSection }: { initialSection?: str
                           onClick={async () => {
                             const tmplPage = template.data?.pages?.[0];
                             if (tmplPage) {
-                              const pages = [{
-                                id: `page-${Date.now()}`,
-                                name: 'Page 1',
-                                elements: tmplPage.elements || [],
-                                backgroundColor: tmplPage.backgroundColor || '#FFFFFF',
-                                width: tmplPage.width || 1920,
-                                height: tmplPage.height || 1080,
-                              }];
+                              const pages = [freshPageFromTemplate({ ...tmplPage, name: 'Page 1' })];
                               try {
                                 const { data } = await projectAPI.create({ name: template.name, canvasData: pages });
                                 navigate(`/editor/${data.id}`);

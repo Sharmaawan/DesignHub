@@ -310,7 +310,13 @@ export async function reconstructDesign(p: ReconstructParams): Promise<Reconstru
 
   await sharp(work.data, { raw: { width: work.width, height: work.height, channels: 3 } }).png().toFile(outPath);
   const method: ReconstructResult['method'] = usedAI ? 'ai-inpaint+local-inpaint' : 'local-inpaint';
-  if (dropped.length === 0) writeJsonCache(`recon-${key}.json`, { method });
+  // Always write the cache JSON — even when some objects were dropped (AI
+  // failed or segmentation missing). Without it, a second call with the same
+  // parameters would miss the cache and redundantly re-run every local inpaint
+  // that already succeeded. The droppedObjectIds list in the result tells the
+  // caller which objects couldn't be reconstructed; that doesn't invalidate
+  // the partial result on disk.
+  writeJsonCache(`recon-${key}.json`, { method, droppedObjectIds: dropped });
   return { sourceHash, version: V, backgroundUrl: `/uploads/${outName}`, method, cached: false, warnings, droppedObjectIds: dropped };
 }
 

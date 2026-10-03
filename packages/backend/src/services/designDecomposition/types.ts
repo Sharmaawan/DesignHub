@@ -24,6 +24,7 @@ export interface TextRegionResult {
   /** Tight box around the actual glyph pixels, in original-image pixels. */
   ink?: Rect;
   inkColor?: string;
+  inkBackground?: string;
   /** PNG data URL (white = glyph pixel), cropped to `ink`, so the client can fit fonts against the real shape. */
   maskPng?: string;
 }

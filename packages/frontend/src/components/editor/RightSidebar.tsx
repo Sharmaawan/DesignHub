@@ -3,7 +3,7 @@ import { useEditorStore } from '../../stores/editorStore';
 import { CanvasElement, TextData, ImageData, ShapeData, TableData, ChartData, IconData, VideoData, AudioData } from '../../types';
 import { COLORS_PALETTE, FONT_FAMILIES, FONT_WEIGHT_MAP, FONT_WEIGHT_LABELS, GRADIENT_PRESETS } from '../../utils/cn';
 import { hsvToHex, hexToHsv, isPlainHexColor, getDocumentColors, getPagePhotoSources, extractPhotoColors } from '../../utils/colorTools';
-import { uploadAPI, backgroundRemovalAPI, BACKEND_ORIGIN as BACKEND } from '../../utils/api';
+import { uploadAPI, backgroundRemovalAPI, BACKEND_ORIGIN as BACKEND, designAPI } from '../../utils/api';
 import {
   HiOutlineTrash, HiOutlineDuplicate, HiOutlineLockClosed,
   HiOutlineLockOpen, HiOutlineEye, HiOutlineEyeOff,
@@ -20,11 +20,12 @@ export default function RightSidebar() {
     updateElement, removeElements, duplicateElements, bringForward, sendBackward,
     bringToFront, sendToBack, lockElement, unlockElement, hideElement, showElement,
     pushHistory, setPageBackgroundColor, updatePage, duplicatePage, removePage,
-    clearPageBackgroundImage,
+    clearPageBackgroundImage, patchPageBackgroundImageSrc,
     showGrid, showRulers, showGuides, snapEnabled, gridSize,
     toggleGrid, toggleRulers, toggleGuides, toggleSnap, setGridSize,
   } = useEditorStore();
   const [showColorSwatches, setShowColorSwatches] = useState(false);
+  const [isReconstructingAll, setIsReconstructingAll] = useState(false);
 
   const page = pages[currentPageIndex];
   const selectedElements = page?.elements.filter((e) => selectedElementIds.includes(e.id)) || [];
@@ -105,6 +106,59 @@ export default function RightSidebar() {
                       className="toolbar-btn text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 flex-shrink-0"
                     >
                       <HiOutlineTrash size={14} />
+                    </button>
+                  </div>
+                )}
+                {/* Flatten All — bulk reconstruct every unrevealed source element at once.
+                    Only shown for Make Editable pages that still have unrevealed text. */}
+                {page.decomposition && page.elements.some((e) => !!e.source && e.type === 'text' && e.revealed !== true) && (
+                  <div className="mb-3 p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
+                    <p className="text-xs text-amber-700 dark:text-amber-400 mb-2 leading-relaxed">
+                      This design has unrevealed text layers. Click below to clean all of them at once instead of one at a time.
+                    </p>
+                    <button
+                      disabled={isReconstructingAll}
+                      onClick={async () => {
+                        if (!page.decomposition) return;
+                        setIsReconstructingAll(true);
+                        try {
+                          const relativeUrl = page.decomposition.originalUrl.startsWith(BACKEND)
+                            ? page.decomposition.originalUrl.slice(BACKEND.length)
+                            : page.decomposition.originalUrl;
+                          const unrevealedTextIds = page.elements
+                            .filter((e) => !!e.source && e.type === 'text' && e.revealed !== true && e.source.regionId)
+                            .map((e) => e.source!.regionId);
+                          const { data: result } = await designAPI.reconstruct(
+                            relativeUrl,
+                            page.decomposition.textRegions,
+                            unrevealedTextIds,
+                            [],
+                          );
+                          if (result.backgroundUrl) {
+                            patchPageBackgroundImageSrc(page.id, `${BACKEND}${result.backgroundUrl}`);
+                          }
+                          // Mark all source text elements as revealed
+                          page.elements
+                            .filter((e) => !!e.source && e.type === 'text' && e.revealed !== true)
+                            .forEach((e) => updateElement(e.id, { revealed: true }));
+                          pushHistory();
+                          toast.success(`Reconstructed ${unrevealedTextIds.length} text layer${unrevealedTextIds.length === 1 ? '' : 's'}`);
+                          if (result.warnings?.length) {
+                            result.warnings.forEach((w: string) => toast(w, { icon: 'ℹ️', duration: 6000 }));
+                          }
+                        } catch (err: any) {
+                          toast.error(err?.response?.data?.error || err?.message || 'Reconstruction failed');
+                        } finally {
+                          setIsReconstructingAll(false);
+                        }
+                      }}
+                      className="w-full py-2 px-3 rounded-lg bg-amber-500 hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-semibold transition-colors flex items-center justify-center gap-2"
+                    >
+                      {isReconstructingAll ? (
+                        <><span className="animate-spin w-3 h-3 border-2 border-white border-t-transparent rounded-full inline-block" /> Cleaning backgrounds…</>
+                      ) : (
+                        'Clean all text backgrounds'
+                      )}
                     </button>
                   </div>
                 )}

@@ -1,4 +1,5 @@
-import { spawn, ChildProcess } from 'child_process';
+import { spawn, ChildProcess, execSync } from 'child_process';
+import fs from 'fs';
 import path from 'path';
 
 // Manages the local FastSAM worker (python-worker/server.py) as a child
@@ -11,13 +12,51 @@ const WORKER_DIR = path.join(process.cwd(), 'python-worker');
 const WORKER_SCRIPT = path.join(WORKER_DIR, 'server.py');
 const PORT = Number(process.env.LOCAL_SEGMENTATION_PORT || 8765);
 const BASE_URL = `http://127.0.0.1:${PORT}`;
-// Explicit path, not the bare `python` command — on Windows, `python` can
-// resolve to the Microsoft Store's App Execution Alias stub instead of a
-// real interpreter depending on the calling process's PATH resolution,
-// which differs between an interactive shell and a spawned child process.
-// Confirmed directly on this machine: `where python` surfaces the Store
-// alias ahead of the real C:\Python313\python.exe in some contexts.
-const PYTHON_BIN = process.env.LOCAL_SEGMENTATION_PYTHON || 'C:\\Python313\\python.exe';
+// Resolve Python interpreter at startup by checking candidates in order:
+// 1. LOCAL_SEGMENTATION_PYTHON env var (explicit override — always wins)
+// 2. Common Windows install paths (Python 3.13, 3.12, 3.11, 3.10)
+// 3. 'python3' then 'python' as a last resort (works on Linux/Mac; on
+//    Windows 'python' can resolve to the Microsoft Store stub — see comment
+//    in the old hardcoded version above for why we avoid bare 'python' first)
+import { execSync } from 'child_process';
+import fs from 'fs';
+
+function resolvePythonBin(): string {
+  if (process.env.LOCAL_SEGMENTATION_PYTHON) return process.env.LOCAL_SEGMENTATION_PYTHON;
+
+  const windowsCandidates = [
+    'C:\\Python313\\python.exe',
+    'C:\\Python312\\python.exe',
+    'C:\\Python311\\python.exe',
+    'C:\\Python310\\python.exe',
+    `${process.env.LOCALAPPDATA}\\Programs\\Python\\Python313\\python.exe`,
+    `${process.env.LOCALAPPDATA}\\Programs\\Python\\Python312\\python.exe`,
+    `${process.env.LOCALAPPDATA}\\Programs\\Python\\Python311\\python.exe`,
+  ].filter(Boolean);
+
+  for (const candidate of windowsCandidates) {
+    if (fs.existsSync(candidate as string)) {
+      console.log(`[segmentation-worker] Using Python at ${candidate}`);
+      return candidate as string;
+    }
+  }
+
+  // Try python3 / python via PATH (Linux, macOS, conda envs)
+  for (const cmd of ['python3', 'python']) {
+    try {
+      const out = execSync(`${cmd} --version`, { timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+      if (out.startsWith('Python 3')) {
+        console.log(`[segmentation-worker] Using '${cmd}' from PATH (${out})`);
+        return cmd;
+      }
+    } catch { /* not found in PATH */ }
+  }
+
+  console.warn('[segmentation-worker] Could not auto-detect Python 3. Set LOCAL_SEGMENTATION_PYTHON in .env');
+  return 'python3'; // final fallback — will surface a clear error on spawn
+}
+
+const PYTHON_BIN = resolvePythonBin();
 const READY_TIMEOUT_MS = 120_000; // first model load can take a while on a cold cache
 const HEALTH_POLL_MS = 500;
 

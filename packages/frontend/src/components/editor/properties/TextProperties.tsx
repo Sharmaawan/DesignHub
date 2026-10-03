@@ -1,5 +1,5 @@
 import { useEditorStore } from '../../../stores/editorStore';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   HiOutlineExclamationCircle, HiOutlineChevronDown, HiOutlineSearch,
   HiOutlineArrowUp, HiOutlineArrowDown, HiOutlineChevronDoubleUp, HiOutlineChevronDoubleDown,
@@ -135,7 +135,7 @@ function contrastOutline(hex: string): string {
 }
 
 export default function TextProperties() {
-  const { selectedElementIds, pages, currentPageIndex, updateElement, bringForward, sendBackward, bringToFront, sendToBack } = useEditorStore();
+  const { selectedElementIds, pages, currentPageIndex, updateElement, bringForward, sendBackward, bringToFront, sendToBack, isEditing } = useEditorStore();
 
   const currentPage = pages[currentPageIndex];
   const element = currentPage?.elements.find((el) => el.id === selectedElementIds[0]);
@@ -151,17 +151,51 @@ export default function TextProperties() {
 
   const textData = element.data as any;
 
-  const handleTextChange = useCallback((field: string, value: any) => {
+  // Not memoized — useCallback with [element, textData] as deps creates stale
+  // closures: if the element was updated between renders (e.g. a drag/resize),
+  // the spread { ...textData, [field]: value } would overwrite the live data
+  // with stale values, causing the canvas to revert to old content and the
+  // "text not updating" bug. Reading directly from the store's live state
+  // here avoids the closure entirely and is safe since these fire on user input.
+  const handleTextChange = (field: string, value: any) => {
+    const liveEl = useEditorStore.getState().pages[useEditorStore.getState().currentPageIndex]?.elements.find((el) => el.id === element.id);
+    const liveData = liveEl?.data ?? textData;
+    const revealPatch = (liveEl?.source && liveEl?.revealed !== true) ? { revealed: true } : {};
     updateElement(element.id, {
-      data: { ...textData, [field]: value },
+      ...revealPatch,
+      data: { ...liveData, [field]: value },
     });
-  }, [element, textData, updateElement]);
+  };
 
-  const handleContentChange = useCallback((newText: string) => {
-    updateElement(element.id, {
-      data: { ...textData, content: newText },
-    });
-  }, [element, textData, updateElement]);
+  const handleContentChange = (newText: string) => {
+    const liveEl = useEditorStore.getState().pages[useEditorStore.getState().currentPageIndex]?.elements.find((el) => el.id === element.id);
+    const liveData = (liveEl?.data ?? textData) as any;
+    const revealPatch = (liveEl?.source && liveEl?.revealed !== true) ? { revealed: true } : {};
+
+    // Auto-resize width to fit the new content so text never clips when the
+    // user edits a decomposed element whose original width was fitted to OCR text.
+    const sizePatch: Record<string, number> = {};
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      const weight = liveData.fontWeight && liveData.fontWeight !== 400 ? String(liveData.fontWeight) : 'normal';
+      ctx.font = weight + ' ' + (liveData.fontSize || 24) + 'px "' + (liveData.fontFamily || 'Inter') + '"';
+      const lines = newText.split('\n');
+      let maxW = 0;
+      for (let i = 0; i < lines.length; i++) {
+        const w = ctx.measureText(lines[i]).width;
+        if (w > maxW) maxW = w;
+      }
+      const needed = Math.ceil(maxW) + 24;
+      if (needed > (liveEl?.width || 0)) {
+        sizePatch.width = needed;
+      }
+    }
+
+    updateElement(element.id, Object.assign({}, revealPatch, sizePatch, {
+      data: Object.assign({}, liveData, { content: newText }),
+    }));
+  };
 
   // Shadow/Lift use the element's own top-level `shadow` (already rendered for
   // every element type via commonProps in EditorCanvas.tsx) — Outline/Hollow
@@ -204,7 +238,9 @@ export default function TextProperties() {
         <textarea
           value={textData.content || ''}
           onChange={(e) => handleContentChange(e.target.value)}
-          className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-canva-purple/30 focus:border-canva-purple outline-none resize-none"
+          readOnly={isEditing}
+          title={isEditing ? 'Double-click the text on canvas to edit inline' : undefined}
+          className={`w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-canva-purple/30 focus:border-canva-purple outline-none resize-none ${isEditing ? 'opacity-50 cursor-not-allowed' : ''}`}
           rows={3}
         />
       </div>
@@ -213,6 +249,27 @@ export default function TextProperties() {
         <div>
           <label className="text-xs font-semibold text-gray-700 dark:text-gray-300 block mb-2">Font Family</label>
           <FontPicker value={textData.fontFamily || 'Inter'} onChange={(v) => handleTextChange('fontFamily', v)} />
+          {/* Font suggestions — shown only for Make Editable elements where font
+              fitting ran but the best match may not be perfect. Quick-apply buttons
+              let the user try alternatives without opening the font picker. */}
+          {(element as any).fontSuggestions?.length > 0 && (
+            <div className="mt-2">
+              <p className="text-[10px] text-gray-400 dark:text-gray-500 mb-1.5">Closest matches from original:</p>
+              <div className="flex flex-wrap gap-1">
+                {((element as any).fontSuggestions as Array<{fontFamily: string; fontWeight: number; score: number}>).map((s) => (
+                  <button
+                    key={s.fontFamily + s.fontWeight}
+                    onClick={() => { handleTextChange('fontFamily', s.fontFamily); handleTextChange('fontWeight', s.fontWeight); }}
+                    title={`${s.fontFamily} ${s.fontWeight} — ${Math.round(s.score * 100)}% match`}
+                    style={{ fontFamily: s.fontFamily }}
+                    className="px-2 py-0.5 text-[10px] rounded border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-canva-purple hover:text-canva-purple transition-colors truncate max-w-[80px]"
+                  >
+                    {s.fontFamily}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="flex gap-2">

@@ -169,7 +169,7 @@ export async function generateTextMask(
   const model = modelBackgroundAround(img, box, others, Math.max(5, Math.round(box.height * 0.25)));
   if (!model) return reject('Not enough surrounding background to model', box);
   const { plane, rms } = model;
-  if (rms > 24) return reject('Background behind this text is too detailed to reconstruct cleanly', box);
+  if (rms > 40) return reject('Background behind this text is too detailed to reconstruct cleanly', box);
 
   // Residual of every pixel in the box against the background model.
   const bw = box.width, bh = box.height;
@@ -255,12 +255,23 @@ export async function generateTextMask(
   for (let y = 0; y < ih; y++) for (let x = 0; x < iw; x++) png[y * iw + x] = core[(minY + y) * bw + (minX + x)] ? 255 : 0;
   const maskBuf = await sharp(png, { raw: { width: iw, height: ih, channels: 1 } }).png().toBuffer();
 
+  // Background color at the center of the text box — the plane model evaluated
+  // at the region's midpoint gives the local background color the client can
+  // use as a cover rect fill to mask baked-in pixels before reconstruction runs.
+  const bgCx = x0 + box.width / 2, bgCy = y0 + box.height / 2;
+  const inkBackground = hex([
+    Math.round(evalPlane(plane, 0, bgCx, bgCy)),
+    Math.round(evalPlane(plane, 1, bgCx, bgCy)),
+    Math.round(evalPlane(plane, 2, bgCx, bgCy)),
+  ]);
+
   return {
     region, box, mask, plane,
     result: {
       id: region.id, accepted: true,
       ink: { x: x0 + minX, y: y0 + minY, width: iw, height: ih },
       inkColor,
+      inkBackground,
       maskPng: `data:image/png;base64,${maskBuf.toString('base64')}`,
     },
   };

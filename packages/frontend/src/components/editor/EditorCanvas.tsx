@@ -233,7 +233,6 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
   const sortedElements = [...page.elements]
     .sort((a, b) => a.zIndex - b.zIndex)
     .filter((e) => e.visible);
-
   // Icons always resize proportionally (corner handles only) — dragging a side handle
   // without this would squash one axis, which the contain-fit icon renderer then shows
   // as the whole icon shrinking to fit the smaller dimension (looks like it "disappeared").
@@ -863,7 +862,11 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
       // opening the textarea (not after closing it) so the edit box shows the
       // real ink color from its first frame, instead of flashing a guessed
       // placeholder color and only fixing it once the user clicks away.
-      let liveElement = element;
+      // Always read the freshest element state from the store — the `element`
+      // prop from the React render may be stale if the properties panel just
+      // updated the content and the component hasn't re-rendered yet.
+      const freshEl = useEditorStore.getState().pages[useEditorStore.getState().currentPageIndex]?.elements.find((e) => e.id === element.id);
+      let liveElement = freshEl || element;
       if (isUnrevealedDecomposition) {
         await reconstructAndRevealText(element);
         const s = useEditorStore.getState();
@@ -996,10 +999,14 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
         // textarea, or a leftover duplicate session guarded against above)
         // must never overwrite real content with a copy of itself, and
         // definitely never with something stale.
-        const changed = textarea.value !== data.content;
+        // Read the live store value — not the stale `data` snapshot from
+        // when the textarea was opened — so a panel edit that happened before
+        // this textarea was created isn't silently dropped by the changed check.
+        const liveData = (useEditorStore.getState().pages[useEditorStore.getState().currentPageIndex]?.elements.find((e) => e.id === liveElement.id)?.data as TextData | undefined) || data;
+        const changed = textarea.value !== liveData.content;
         if (changed) {
           updateElement(liveElement.id, {
-            data: { ...data, content: textarea.value } as TextData,
+            data: { ...liveData, content: textarea.value } as TextData,
           });
         }
         // Any OCR reveal (color sampling + background patch) already
@@ -1016,10 +1023,10 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
 
       textarea.addEventListener('blur', finishEdit);
       textarea.addEventListener('keydown', (ke) => {
-        if (ke.key === 'Enter' && !ke.shiftKey) {
-          ke.preventDefault();
-          finishEdit();
-        }
+        // Escape cancels/commits the edit — clicking outside (blur) is the
+        // primary commit path. Enter must NOT commit here: it's a real newline
+        // in a multi-line text element, and swallowing it would silently drop
+        // every line the user types after the first one.
         if (ke.key === 'Escape') finishEdit();
       });
     }
@@ -1259,8 +1266,37 @@ export default function EditorCanvas({ page, zoomOverride, panOverride, hideChro
       }
       case 'text': {
         const data = element.data as TextData;
+        // For decomposed elements that are revealed but the background hasn't
+        // been patched yet (reconstruction didn't run — e.g. panel-only edit),
+        // paint a cover rect to mask the baked-in original pixels underneath.
+        // Once reconstruction runs, backgroundImage.src changes to a patched
+        // URL different from decomposition.originalUrl, so this stops firing.
+        const needsCoverRect =
+          !!element.source &&
+          element.revealed === true &&
+          !!page.backgroundImage &&
+          !!page.decomposition &&
+          page.backgroundImage.src === page.decomposition.originalUrl;
         return (
           <Fragment key={element.id}>
+            {needsCoverRect && (
+              <Rect
+                // Use the tight ink bounding box (exact glyph pixel bounds) rather
+                // than element.x/y/width/height (the typographic container, which is
+                // shifted and larger). inkX/Y/Width/Height are stored at decomposition
+                // time from MaskGenerator's tight pixel bounds. Add generous padding
+                // so antialiasing fringe pixels around glyphs are also covered.
+                // For existing projects without ink coords, fall back to element bounds.
+                x={(element as any).inkX !== undefined ? (element as any).inkX - 4 : element.x}
+                y={(element as any).inkY !== undefined ? (element as any).inkY - 4 : element.y}
+                width={(element as any).inkWidth !== undefined ? (element as any).inkWidth + 8 : element.width}
+                height={(element as any).inkHeight !== undefined ? (element as any).inkHeight + 8 : element.height}
+                rotation={element.rotation}
+                fill={(element as any).inkBackground || page.backgroundColor || '#FFFFFF'}
+                opacity={1}
+                listening={false}
+              />
+            )}
             {/* A highlight box has to be a real sibling shape behind the text,
                 not baked into AnimatedTextElement's own node — that component's
                 id is what handleElementDblClick's stageRef.findOne(id) looks up

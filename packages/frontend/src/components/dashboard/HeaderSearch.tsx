@@ -4,6 +4,7 @@ import { HiOutlineSearch, HiOutlineClock, HiOutlineTemplate, HiOutlineX } from '
 import { SearchSuggestion } from '../../types';
 import { useProjectStore } from '../../stores/projectStore';
 import { projectAPI } from '../../utils/api';
+import { freshPageFromTemplate } from '../../utils/cn';
 import toast from 'react-hot-toast';
 
 // Compact header search — same search source and click-through behavior as
@@ -59,11 +60,7 @@ export default function HeaderSearch() {
     try {
       const { data } = await projectAPI.create({
         name: template!.name,
-        canvasData: [{
-          id: `page-${Date.now()}`, name: 'Page 1',
-          elements: page.elements || [], backgroundColor: page.backgroundColor || '#FFFFFF',
-          width: page.width || 1920, height: page.height || 1080,
-        }],
+        canvasData: [freshPageFromTemplate({ ...page, name: 'Page 1' })],
       });
       navigate(`/editor/${data.id}`);
     } catch {

@@ -2,6 +2,27 @@ import Tesseract from 'tesseract.js';
 import { generateId } from './cn';
 import { CanvasElement } from '../types';
 
+// Singleton Tesseract worker — creating a new worker per call pays the full
+// WASM engine + trained-data load cost every time (~1-3s on a cold cache).
+// This module-level promise keeps one worker alive and ready for reuse across
+// all calls in the same browser session. It is created lazily on first use and
+// recreated automatically if it ever terminates unexpectedly.
+let _workerPromise: Promise<Tesseract.Worker> | null = null;
+
+async function getSharedWorker(): Promise<Tesseract.Worker> {
+  if (!_workerPromise) {
+    _workerPromise = (async () => {
+      const w = await Tesseract.createWorker('eng', 1);
+      await w.setParameters({ tessedit_pageseg_mode: '11' as any });
+      return w;
+    })().catch((err) => {
+      _workerPromise = null; // reset so next call retries
+      throw err;
+    });
+  }
+  return _workerPromise;
+}
+
 /**
  * Decompose flattened template image into individual editable text elements
  * using Tesseract.js OCR. Creates REAL native DesignHub elements.
@@ -139,7 +160,8 @@ export async function detectTextLines(
   imageWidth: number,
   imageHeight: number
 ): Promise<DetectedTextLine[]> {
-  let worker: Tesseract.Worker | null = null;
+  // Use the shared singleton worker — no create/terminate overhead on every call.
+  const worker = await getSharedWorker();
 
   try {
     // Fetch the image
@@ -148,8 +170,15 @@ export async function detectTextLines(
     const blob = await response.blob();
     if (!blob.size) throw new Error('Empty blob');
 
-    // Create worker
-    worker = await Tesseract.createWorker('eng', 1);
+    // Upscale if the image is small — Tesseract accuracy drops sharply below
+    // ~150 DPI effective resolution. Most uploaded design images are already
+    // large enough, but anything under 1500px on the long side gets scaled up.
+    // The scale factor is tracked so bounding boxes can be mapped back to the
+    // original image coordinates after OCR.
+    const TARGET_MIN_DIM = 1500;
+    const ocrScale = Math.max(1, TARGET_MIN_DIM / Math.max(imageWidth, imageHeight));
+    const ocrBlob = ocrScale > 1.05 ? await upscaleBlob(blob, imageWidth, imageHeight, ocrScale) : blob;
+    console.log(`[OCR] image ${imageWidth}×${imageHeight}, ocrScale=${ocrScale.toFixed(2)}`);
 
     // Try the RAW image FIRST. Verified directly against a real uploaded poster
     // (gradient sky background, stylized dark-green heading font): the raw,
@@ -159,12 +188,29 @@ export async function detectTextLines(
     // before Tesseract ever got a clean look at it — the threshold passes were
     // making detection *worse*, not better. They're kept as a fallback for
     // genuinely low-contrast images, but only run if the raw pass finds nothing.
-    let { data } = await worker.recognize(blob);
+    let { data } = await worker.recognize(ocrBlob);
     console.log('[OCR Pass 1 - raw] Words detected:', data?.words?.length || 0);
+
+    // Detect dark-background images early — if the image median brightness is
+    // below 100 it's likely a dark-background design (navy, black, dark brown)
+    // with light/white/yellow text. Tesseract's default Otsu binarizer expects
+    // dark-ink-on-light and inverts the result on dark images, producing
+    // garbage. Run a dedicated dark-background pass BEFORE the generic fallbacks
+    // when the image is detected as dark.
+    const isDarkBackground = await detectDarkBackground(ocrBlob);
+    if (isDarkBackground && (!data?.words || data.words.length < 5)) {
+      console.log('[OCR] Dark background detected — trying dark-optimized preprocessing...');
+      const darkBlob = await enhanceImageForOCRDark(ocrBlob);
+      const darkResult = await worker.recognize(darkBlob);
+      if ((darkResult.data?.words?.length || 0) > (data?.words?.length || 0)) {
+        data = darkResult.data;
+        console.log('[OCR Pass 1b - dark-optimized] Words detected:', data?.words?.length || 0);
+      }
+    }
 
     if (!data?.words || data.words.length === 0) {
       console.log('[OCR] Raw pass found no text - trying contrast-enhanced preprocessing...');
-      const processedBlob = await enhanceImageForOCR(blob);
+      const processedBlob = await enhanceImageForOCR(ocrBlob);
       const result = await worker.recognize(processedBlob);
       data = result.data;
       console.log('[OCR Pass 2 - enhanced] Words detected:', data?.words?.length || 0);
@@ -172,7 +218,7 @@ export async function detectTextLines(
 
     if (!data?.words || data.words.length === 0) {
       console.log('[OCR] Enhanced pass found no text - trying extreme threshold preprocessing...');
-      const processedBlob = await enhanceImageForOCRExtreme(blob);
+      const processedBlob = await enhanceImageForOCRExtreme(ocrBlob);
       const result = await worker.recognize(processedBlob);
       data = result.data;
       console.log('[OCR Pass 3 - extreme] Words detected:', data?.words?.length || 0);
@@ -180,7 +226,7 @@ export async function detectTextLines(
 
     if (!data?.words || data.words.length === 0) {
       console.log('[OCR] Extreme pass found no text - trying inverted/ultra preprocessing...');
-      const processedBlob = await enhanceImageForOCRUltra(blob);
+      const processedBlob = await enhanceImageForOCRUltra(ocrBlob);
       const result = await worker.recognize(processedBlob);
       data = result.data;
       console.log('[OCR Pass 4 - ultra] Words detected:', data?.words?.length || 0);
@@ -207,14 +253,20 @@ export async function detectTextLines(
       .filter((w: any) => w.text && w.text.trim().length > 0)
       .map((w: any) => ({
         text: w.text.trim(),
-        x: w.bbox.x0,
-        y: w.bbox.y0,
-        width: w.bbox.x1 - w.bbox.x0,
-        height: w.bbox.y1 - w.bbox.y0,
+        // Scale bounding boxes back from OCR-space to original image space.
+        x: Math.round(w.bbox.x0 / ocrScale),
+        y: Math.round(w.bbox.y0 / ocrScale),
+        width: Math.round((w.bbox.x1 - w.bbox.x0) / ocrScale),
+        height: Math.round((w.bbox.y1 - w.bbox.y0) / ocrScale),
         conf: w.confidence,
       }))
       .filter((r: any) => r.width > 1 && r.height > 1)
-      .filter((r: any) => r.conf >= 55 || r.height >= minHeadingHeight);
+      // Accept any word that passes a modest confidence bar OR is large enough
+      // to be a heading (large stylized fonts routinely score below 55 on
+      // colorful poster backgrounds despite being perfectly legible).
+      // Lowered from 55 → 35 to match the MIN_OCR_CONFIDENCE reduction; the
+      // MAX_SYMBOL_RATIO gate in DesignDecomposer.ts handles icon/symbol noise.
+      .filter((r: any) => r.conf >= 35 || r.height >= minHeadingHeight);
 
     console.log('[OCR] Filtered regions:', regions.length);
 
@@ -260,12 +312,65 @@ export async function detectTextLines(
         return core.length >= 3 && /^([A-Z][a-z]*|[A-Z]+|[a-z]+)$/.test(core);
       }));
 
-    return lines as DetectedTextLine[];
+    const deduped = dedupeOverlappingLines(lines) as DetectedTextLine[];
+
+    // Per-region re-OCR pass for low-confidence lines.
+    // For any merged line below confidence 75, crop that region from the
+    // original image, upscale it to a fixed height of 80px (Tesseract sweet
+    // spot for single-line text), and re-run OCR with PSM 7 (single text line).
+    // This catches stylized words like "Aunty"-type misreads where the full-image
+    // pass had noisy background context contaminating the recognition.
+    const REOCR_CONF_THRESHOLD = 75;
+    const REOCR_TARGET_HEIGHT = 80;
+    const finalLines: DetectedTextLine[] = [];
+    for (const line of deduped) {
+      if (line.conf >= REOCR_CONF_THRESHOLD) {
+        finalLines.push(line);
+        continue;
+      }
+      try {
+        const pad = 6;
+        const cx = Math.max(0, line.x - pad), cy = Math.max(0, line.y - pad);
+        const cw = Math.min(imageWidth - cx, line.width + pad * 2);
+        const ch = Math.min(imageHeight - cy, line.height + pad * 2);
+        if (cw < 4 || ch < 4) { finalLines.push(line); continue; }
+        const regionScale = Math.max(1, REOCR_TARGET_HEIGHT / ch);
+        const cropBlob = await cropAndUpscaleBlob(blob, cx, cy, cw, ch, regionScale);
+        await worker.setParameters({ tessedit_pageseg_mode: '7' as any }); // single text line
+        const { data: reData } = await worker.recognize(cropBlob);
+        await worker.setParameters({ tessedit_pageseg_mode: '11' as any }); // restore
+        if (reData?.text?.trim()) {
+          const reText = reData.text.trim().replace(/\n/g, ' ').replace(/\s+/g, ' ');
+          const reConf = reData.words?.length
+            ? reData.words.reduce((s: number, w: any) => s + (w.confidence ?? 0) * (w.bbox.x1 - w.bbox.x0), 0) /
+              Math.max(1, reData.words.reduce((s: number, w: any) => s + (w.bbox.x1 - w.bbox.x0), 0))
+            : line.conf;
+          console.log(`[OCR re-OCR] "${line.text}" (${Math.round(line.conf)}%) → "${reText}" (${Math.round(reConf)}%)`);
+          // Only accept the re-OCR result if it looks like real words (same filter as main pass)
+          const looksReal = reText.split(/[\s-]+/).some((w: string) => {
+            const core = w.replace(/[^A-Za-z]/g, '');
+            return core.length >= 3 && /^([A-Z][a-z]*|[A-Z]+|[a-z]+)$/.test(core);
+          });
+          if (looksReal && reConf > line.conf) {
+            finalLines.push({ ...line, text: reText, conf: reConf });
+            continue;
+          }
+        }
+      } catch (e) {
+        console.warn('[OCR re-OCR] failed for line', line.text, e);
+      }
+      finalLines.push(line);
+    }
+
+    return finalLines;
   } catch (err) {
     console.error('[OCR]', err);
     throw err;
   } finally {
-    if (worker) await worker.terminate().catch(() => {});
+    // Do NOT terminate — the shared worker is reused across calls.
+    // If something went badly wrong (e.g. WASM crash), reset the promise
+    // so the next call gets a fresh worker.
+    // Normal errors (image fetch failed, no text found) leave the worker healthy.
   }
 }
 
@@ -342,6 +447,37 @@ function groupWords(words: any[]): any[] {
   return lines.map(mergeLine);
 }
 
+// Tesseract can detect the same visual glyphs as two DIFFERENT lines with
+// nearly identical, overlapping bounding boxes — one accurate read, one
+// garbled misread ("INSTITUTION" alongside a nonsense "hgvh" at almost the
+// same box, verified directly against a real uploaded template). Both can
+// independently pass every filter above (a garbled read like "hgvh" is still
+// shaped like a valid all-lowercase word), so without this, decomposition
+// creates two separate, overlapping editable TextElements for what a person
+// sees as one piece of text — each gets its own region "reconstructed" and
+// revealed, producing a permanent doubled/ghosted render with no single
+// element a user could select to fix. For any two lines whose boxes overlap
+// by a large fraction of the smaller one's area, keep only the
+// higher-confidence line and drop the rest as duplicates of it.
+function dedupeOverlappingLines(lines: any[]): any[] {
+  const byConfDesc = [...lines].sort((a, b) => b.conf - a.conf);
+  const kept: any[] = [];
+  for (const line of byConfDesc) {
+    const overlapsKept = kept.some((k) => {
+      const ox = Math.max(0, Math.min(line.x + line.width, k.x + k.width) - Math.max(line.x, k.x));
+      const oy = Math.max(0, Math.min(line.y + line.height, k.y + k.height) - Math.max(line.y, k.y));
+      const overlapArea = ox * oy;
+      const minArea = Math.min(line.width * line.height, k.width * k.height);
+      return minArea > 0 && overlapArea / minArea >= 0.6;
+    });
+    if (!overlapsKept) kept.push(line);
+  }
+  // Restore original (top-to-bottom, left-to-right) order rather than the
+  // confidence order used only to decide which duplicate wins.
+  const keptSet = new Set(kept);
+  return lines.filter((l) => keptSet.has(l));
+}
+
 function mergeLine(words: any[]): any {
   const byX = [...words].sort((a, b) => a.x - b.x);
   const minX = Math.min(...words.map((w) => w.x));
@@ -366,6 +502,140 @@ function mergeLine(words: any[]): any {
     // Width-weighted, so a long confident word outweighs a stray one-character misread.
     conf: words.reduce((sum, w) => sum + (w.conf ?? 0) * w.width, 0) / Math.max(1, words.reduce((sum, w) => sum + w.width, 0)),
   };
+}
+
+// Upscale a blob by `scale` factor using a canvas — used to give Tesseract
+// higher effective DPI on small images.
+async function upscaleBlob(blob: Blob, origW: number, origH: number, scale: number): Promise<Blob> {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(origW * scale);
+        canvas.height = Math.round(origH * scale);
+        const ctx = canvas.getContext('2d');
+        if (!ctx) { resolve(blob); return; }
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob((b) => resolve(b || blob), 'image/png');
+      };
+      img.src = e.target?.result as string;
+    };
+    reader.readAsDataURL(blob);
+  });
+}
+
+// Crop a region from a blob and upscale it — used for per-line re-OCR.
+async function cropAndUpscaleBlob(blob: Blob, x: number, y: number, w: number, h: number, scale: number): Promise<Blob> {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(w * scale);
+        canvas.height = Math.round(h * scale);
+        const ctx = canvas.getContext('2d');
+        if (!ctx) { resolve(blob); return; }
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, x, y, w, h, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob((b) => resolve(b || blob), 'image/png');
+      };
+      img.src = e.target?.result as string;
+    };
+    reader.readAsDataURL(blob);
+  });
+}
+
+// Detect if an image is predominantly dark (median pixel brightness < 100).
+// Used to decide whether to run the dark-background OCR pass early.
+async function detectDarkBackground(blob: Blob): Promise<boolean> {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        // Sample at reduced resolution for speed — 64×64 is plenty for brightness estimation
+        const canvas = document.createElement('canvas');
+        const SAMPLE = 64;
+        canvas.width = SAMPLE;
+        canvas.height = SAMPLE;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) { resolve(false); return; }
+        ctx.drawImage(img, 0, 0, SAMPLE, SAMPLE);
+        const { data } = ctx.getImageData(0, 0, SAMPLE, SAMPLE);
+        let sum = 0;
+        const n = SAMPLE * SAMPLE;
+        for (let i = 0; i < data.length; i += 4) {
+          sum += (data[i] * 299 + data[i + 1] * 587 + data[i + 2] * 114) / 1000;
+        }
+        resolve(sum / n < 100);
+      };
+      img.src = e.target?.result as string;
+    };
+    reader.readAsDataURL(blob);
+  });
+}
+
+// Dedicated preprocessing for dark-background images (navy, black, dark brown).
+// Strategy: invert the image so light text becomes dark, then apply per-channel
+// histogram stretching (not a fixed contrast multiplier) to maximize the spread
+// between text and background, then threshold. This works far better than the
+// generic passes for dark designs with white/yellow/cyan text.
+async function enhanceImageForOCRDark(blob: Blob): Promise<Blob> {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) { resolve(blob); return; }
+
+        ctx.drawImage(img, 0, 0);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const d = imageData.data;
+        const n = d.length / 4;
+
+        // Step 1: compute per-channel min/max for histogram stretching
+        let rMin = 255, rMax = 0, gMin = 255, gMax = 0, bMin = 255, bMax = 0;
+        for (let i = 0; i < d.length; i += 4) {
+          if (d[i]   < rMin) rMin = d[i];   if (d[i]   > rMax) rMax = d[i];
+          if (d[i+1] < gMin) gMin = d[i+1]; if (d[i+1] > gMax) gMax = d[i+1];
+          if (d[i+2] < bMin) bMin = d[i+2]; if (d[i+2] > bMax) bMax = d[i+2];
+        }
+        const rRange = Math.max(1, rMax - rMin);
+        const gRange = Math.max(1, gMax - gMin);
+        const bRange = Math.max(1, bMax - bMin);
+
+        // Step 2: stretch + invert + convert to grayscale + threshold
+        for (let i = 0; i < d.length; i += 4) {
+          // Histogram stretch each channel
+          const r = ((d[i]   - rMin) / rRange) * 255;
+          const g = ((d[i+1] - gMin) / gRange) * 255;
+          const b = ((d[i+2] - bMin) / bRange) * 255;
+          // Luminance
+          const lum = (r * 299 + g * 587 + b * 114) / 1000;
+          // Invert so light text → dark ink (Tesseract's expected orientation)
+          const inv = 255 - lum;
+          // Threshold: anything above 80 is ink (generous — inverted light text is bright)
+          const out = inv > 80 ? 0 : 255;
+          d[i] = d[i+1] = d[i+2] = out;
+        }
+
+        ctx.putImageData(imageData, 0, 0);
+        canvas.toBlob((b) => resolve(b || blob), 'image/png');
+      };
+      img.src = e.target?.result as string;
+    };
+    reader.readAsDataURL(blob);
+  });
 }
 
 // Enhance image for better OCR: standard preprocessing

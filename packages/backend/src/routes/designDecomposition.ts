@@ -52,7 +52,9 @@ router.post('/analyze-vision', authMiddleware, async (req: AuthRequest, res: Res
     res.json(result);
   } catch (error: any) {
     console.error('[design/analyze-vision] failed', error);
-    res.status(400).json({ error: error?.message || 'Failed to analyze design' });
+    // 400 for bad input (invalid URL, missing field), 500 for internal failures
+    const isInputError = error?.message?.startsWith('url must be') || error?.message?.startsWith('textRegions');
+    res.status(isInputError ? 400 : 500).json({ error: error?.message || 'Failed to analyze design' });
   }
 });
 
@@ -75,7 +77,8 @@ router.post('/analyze', authMiddleware, async (req: AuthRequest, res: Response) 
     res.json(result);
   } catch (error: any) {
     console.error('[design/analyze] failed', error);
-    res.status(400).json({ error: error?.message || 'Failed to analyze design' });
+    const isInputError = error?.message?.startsWith('url must be') || error?.message?.startsWith('textRegions') || error?.message?.startsWith('Too many') || error?.message?.startsWith('Malformed');
+    res.status(isInputError ? 400 : 500).json({ error: error?.message || 'Failed to analyze design' });
   }
 });
 
@@ -97,7 +100,8 @@ router.post('/reconstruct', authMiddleware, async (req: AuthRequest, res: Respon
     res.json(result);
   } catch (error: any) {
     console.error('[design/reconstruct] failed', error);
-    res.status(400).json({ error: error?.message || 'Failed to reconstruct background' });
+    const isInputError = error?.message?.startsWith('url must be') || error?.message?.startsWith('textRegions') || error?.message?.startsWith('Too many') || error?.message?.startsWith('Malformed');
+    res.status(isInputError ? 400 : 500).json({ error: error?.message || 'Failed to reconstruct background' });
   }
 });
 
@@ -110,8 +114,8 @@ router.post('/reconstruct-region', authMiddleware, async (req: AuthRequest, res:
     const absolutePath = resolveUploadPath(req.body?.url);
     const elementId = req.body?.elementId;
     const kind = req.body?.kind;
-    if (typeof elementId !== 'string' || !elementId) throw new Error('elementId is required');
-    if (kind !== 'text' && kind !== 'object') throw new Error("kind must be 'text' or 'object'");
+    if (typeof elementId !== 'string' || !elementId) throw Object.assign(new Error('elementId is required'), { isInput: true });
+    if (kind !== 'text' && kind !== 'object') throw Object.assign(new Error("kind must be 'text' or 'object'"), { isInput: true });
     const result = await reconstructElementRegion({
       absolutePath,
       allTextRegions: parseRegions(req.body?.textRegions),
@@ -121,7 +125,8 @@ router.post('/reconstruct-region', authMiddleware, async (req: AuthRequest, res:
     res.json(result);
   } catch (error: any) {
     console.error('[design/reconstruct-region] failed', error);
-    res.status(400).json({ error: error?.message || 'Failed to reconstruct region' });
+    const isInputError = error?.isInput || error?.message?.startsWith('url must be') || error?.message?.startsWith('textRegions') || error?.message?.startsWith('Too many') || error?.message?.startsWith('Malformed');
+    res.status(isInputError ? 400 : 500).json({ error: error?.message || 'Failed to reconstruct region' });
   }
 });
 

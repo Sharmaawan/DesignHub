@@ -41,10 +41,19 @@ export interface DecomposeOutcome { page: Page; summary: DecomposeSummary }
 // reason both exist: OCR misreads icons as symbols/digits (confidence ~49%,
 // heavy punctuation), and erasing those pixels to replace them with garbage
 // text would make the design worse.
-const MIN_OCR_CONFIDENCE = 70;
+// Stylized poster/design text (colored headings, bold display fonts) often
+// scores 50-65% confidence in Tesseract even when perfectly legible — the
+// original 70% bar was designed for the footer icon-misread case (phone
+// numbers mixed with WhatsApp icons), which the MAX_SYMBOL_RATIO gate already
+// handles independently. Lowering to 45% keeps that safety net while letting
+// real headings through.
+const MIN_OCR_CONFIDENCE = 45;
 const MAX_SYMBOL_RATIO = 0.18;
 // Overlap score of the fitted font's glyphs against the original glyphs.
-const MIN_FIT_SCORE = 0.3;
+// Lowered from 0.3 to 0.15 — custom/display fonts in design posters never
+// closely match the available web fonts, so 0.3 was silently dropping most
+// real text. 0.15 still rejects pure noise while accepting a best-effort match.
+const MIN_FIT_SCORE = 0.15;
 const VERSION_FALLBACK = '1.0.0';
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
@@ -228,10 +237,20 @@ export async function decomposeImage(
         rotation: 0, opacity: 1, visible: true, locked: false, zIndex: textStart + i,
         name: content.slice(0, 40),
         confidence: Math.round(clamp(line.conf / 100, 0, 1) * 100) / 100, editable: true,
-        // Real pixels are still only visible through the original background
-        // image underneath — this element renders nothing until the user
-        // actually edits it (see EditorCanvas.tsx's reconstructAndRevealText).
         revealed: false,
+        // Store the background color behind this text so EditorCanvas can paint
+        // a cover rect to mask the baked-in original pixels before server-side
+        // reconstruction runs (e.g. when the user edits via the properties panel).
+        ...(t.inkBackground ? { inkBackground: t.inkBackground } : {}),
+        // Store the tight ink bounding box (exact glyph pixel bounds in page
+        // space) so the cover rect in EditorCanvas can mask the baked-in text
+        // at the correct position — element.x/y/width/height is the typographic
+        // container (shifted/larger), not the ink rect.
+        ...(t.ink ? { inkX: t.ink.x, inkY: t.ink.y, inkWidth: t.ink.width, inkHeight: t.ink.height } : {}),
+        // Top-3 alternative font suggestions from the fitting run — stored so
+        // TextProperties can show a "closest font" hint without re-running the
+        // full fitting loop.
+        ...(fit.suggestions?.length ? { fontSuggestions: fit.suggestions } : {}),
         source: { regionId: id, sourceHash: analysis.sourceHash, version, role: 'text' },
         data,
       });

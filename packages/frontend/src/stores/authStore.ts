@@ -63,9 +63,17 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
   },
 
-  // Legacy social login (fallback)
+  // Legacy social login — Google is handled via loginWithGoogleCredential + the
+  // GoogleSignIn component (which renders the real Google Identity Services button).
+  // This function is kept for any other provider not yet implemented.
   loginWithSocial: (provider: string) => {
-    toast(`Sign in with ${provider} coming soon`, { icon: '🔗' });
+    if (provider.toLowerCase() === 'google') {
+      // Google is implemented via the GoogleSignIn component on the login/register
+      // pages — this path should not be reached in normal usage.
+      toast.error('Use the "Sign in with Google" button on the login page.');
+    } else {
+      toast(`Sign in with ${provider} is not yet available`, { icon: 'ℹ️' });
+    }
   },
 
   logout: () => {

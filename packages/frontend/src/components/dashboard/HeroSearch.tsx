@@ -4,6 +4,7 @@ import { HiOutlineSearch, HiOutlineClock, HiOutlineTrendingUp, HiOutlineTemplate
 import { SearchSuggestion } from '../../types';
 import { useProjectStore } from '../../stores/projectStore';
 import { projectAPI } from '../../utils/api';
+import { freshPageFromTemplate } from '../../utils/cn';
 import toast from 'react-hot-toast';
 
 const POPULAR_SEARCHES = [
@@ -129,11 +130,7 @@ export default function HeroSearch() {
     try {
       const { data } = await projectAPI.create({
         name: template!.name,
-        canvasData: [{
-          id: `page-${Date.now()}`, name: 'Page 1',
-          elements: page.elements || [], backgroundColor: page.backgroundColor || '#FFFFFF',
-          width: page.width || 1920, height: page.height || 1080,
-        }],
+        canvasData: [freshPageFromTemplate({ ...page, name: 'Page 1' })],
       });
       navigate(`/editor/${data.id}`);
     } catch {

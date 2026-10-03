@@ -178,3 +178,23 @@ export const GRADIENT_PRESETS = [
   'linear-gradient(135deg, #89f7fe 0%, #66a6ff 100%)',
   'linear-gradient(135deg, #fddb92 0%, #d1fdff 100%)',
 ];
+
+/**
+ * Deep-clones a template page and replaces every element ID with a fresh
+ * unique ID. Template elements are seeded with short deterministic IDs
+ * (el-1, el-2 …) that repeat across templates — without this, a multi-page
+ * project built from several templates ends up with duplicate React keys,
+ * causing Konva to render the wrong element at the wrong position (the
+ * visible "overlapping text" bug).
+ */
+export function freshPageFromTemplate(templatePage: any): any {
+  const elements = (templatePage.elements || []).map((el: any) => ({
+    ...el,
+    id: generateId(),
+  }));
+  return {
+    ...templatePage,
+    id: generateId(),
+    elements,
+  };
+}

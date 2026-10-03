@@ -102,12 +102,49 @@ export function designDeltaToScreenDelta(delta: Point, viewport: Viewport): Poin
 }
 
 /**
- * Calculate the screen-space bounding box for a design element
+ * Calculate the screen-space bounding box for a design element.
+ * When the element has a non-zero rotation, the axis-aligned bounding box is
+ * computed from the four rotated corners so overlays (selection handles, alignment
+ * guides, screen-space hit tests) line up with what the user actually sees.
  */
 export function getElementScreenRect(element: { x: number; y: number; width: number; height: number; rotation?: number }, viewport: Viewport): Rect {
-  // TODO: This is simplified and doesn't account for rotation.
-  // Rotation requires computing the actual bounding box of the rotated rect.
-  return designRectToScreen(element, viewport);
+  const rotation = element.rotation ?? 0;
+
+  // Fast path: no rotation — simple scale + translate
+  if (rotation === 0) return designRectToScreen(element, viewport);
+
+  // Rotate all four corners around the element's own centre, then take the
+  // axis-aligned bounding box of the rotated corners in screen space.
+  const rad = (rotation * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+
+  // Element centre in design space
+  const cx = element.x + element.width / 2;
+  const cy = element.y + element.height / 2;
+  const hw = element.width / 2;
+  const hh = element.height / 2;
+
+  // Four corners relative to centre, rotated
+  const corners = [
+    [-hw, -hh],
+    [ hw, -hh],
+    [ hw,  hh],
+    [-hw,  hh],
+  ].map(([dx, dy]) => ({
+    x: cx + dx * cos - dy * sin,
+    y: cy + dx * sin + dy * cos,
+  }));
+
+  const xs = corners.map((c) => c.x);
+  const ys = corners.map((c) => c.y);
+  const minX = Math.min(...xs);
+  const minY = Math.min(...ys);
+  const maxX = Math.max(...xs);
+  const maxY = Math.max(...ys);
+
+  // Convert the design-space AABB to screen space
+  return designRectToScreen({ x: minX, y: minY, width: maxX - minX, height: maxY - minY }, viewport);
 }
 
 /**
