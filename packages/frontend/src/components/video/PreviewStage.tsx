@@ -13,7 +13,7 @@ function fmt(t: number) {
 }
 
 function activeClip(track: VideoTrack, t: number): VideoClip | undefined {
-  return track.clips.find((c) => t >= c.start && t < c.start + c.duration)
+  return track.clips.find((c) => !c.hidden && t >= c.start && t < c.start + c.duration)
 }
 
 /**
@@ -226,6 +226,9 @@ export function PreviewStage() {
               fontStyle: c.italic ? 'italic' : 'normal',
               textAlign: c.textAlign ?? 'center',
               opacity: c.opacity ?? 1,
+              backgroundColor: c.highlightColor && c.highlightColor !== 'transparent' ? c.highlightColor : 'transparent',
+              letterSpacing: c.letterSpacing ? `${c.letterSpacing * scale}px` : undefined,
+              lineHeight: c.lineHeight ?? 'normal',
             } as const
             if (isEditing) {
               return (
@@ -255,6 +258,7 @@ export function PreviewStage() {
                 onPointerDown={(e) => {
                   e.stopPropagation()
                   select([c.id])
+                  if (c.locked) return
                   setTextDrag({ id: c.id, startClientX: e.clientX, startClientY: e.clientY, startX: live.x, startY: live.y })
                   e.currentTarget.setPointerCapture(e.pointerId)
                 }}
@@ -272,7 +276,7 @@ export function PreviewStage() {
                   setTextDrag(null)
                   setTextDragPos(null)
                 }}
-                onDoubleClick={(e) => { e.stopPropagation(); setEditingTextId(c.id) }}
+                onDoubleClick={(e) => { e.stopPropagation(); if (!c.locked) setEditingTextId(c.id) }}
               >
                 {c.text}
               </div>

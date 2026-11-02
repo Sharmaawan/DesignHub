@@ -77,7 +77,10 @@ export function SelectionLayer({ stage, guides, zoom, pageW, pageH, marquee }: P
     updateElements([...patches.keys()], (el) => patches.get(el.id) ?? {})
   }
 
-  const accent = useToken('--brand', '#FF5A36')
+  // Fallback must match the real --brand purple (styles/tokens.css) — an orange fallback here was
+  // briefly visible (wrong-colored selection outline) whenever this read raced the stylesheet/theme
+  // applying --brand to the document, e.g. on first paint before editor.css/tokens.css take effect.
+  const accent = useToken('--brand', '#5b4fe5')
   const sw = 1.5 / zoom
   return (
     <Layer>

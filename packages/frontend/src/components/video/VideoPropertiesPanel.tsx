@@ -36,9 +36,16 @@ export function VideoPropertiesPanel() {
   const kindLabel = clip.kind === 'text' ? 'Text' : clip.kind === 'audio' ? 'Audio clip' : clip.kind === 'image' ? 'Image clip' : 'Video clip'
 
   return (
-    <div className="video-panel video-props">
+    <div className={`video-panel video-props ${clip.locked ? 'is-locked' : ''}`}>
       <Section title="Clip">
-        <h3 className="video-props__kind">{kindLabel}</h3>
+        <h3 className="video-props__kind">
+          {kindLabel}
+          {clip.locked && (
+            <span className="video-props__locked-badge">
+              <Icon name="lock" size={12} /> Locked
+            </span>
+          )}
+        </h3>
         {clip.kind !== 'text' && clip.assetUrl && (
           <p className="field__hint" style={{ wordBreak: 'break-all' }}>{clip.assetUrl.split('/').pop()}</p>
         )}
@@ -74,6 +81,28 @@ export function VideoPropertiesPanel() {
             <IconButton icon="alignCenterH" label="Align centre" active={(clip.textAlign ?? 'center') === 'center'} onClick={() => updateClip(clip.id, { textAlign: 'center' })} />
             <IconButton icon="alignRight" label="Align right" active={(clip.textAlign ?? 'center') === 'right'} onClick={() => updateClip(clip.id, { textAlign: 'right' })} />
           </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <div className="field">
+              <label className="field__label" htmlFor="text-highlight">Highlight</label>
+              <div style={{ display: 'flex', gap: 4 }}>
+                <input
+                  id="text-highlight"
+                  type="color"
+                  value={clip.highlightColor && clip.highlightColor !== 'transparent' ? clip.highlightColor : '#000000'}
+                  onChange={(e) => updateClip(clip.id, { highlightColor: e.target.value })}
+                  style={{ width: '100%', height: 32, padding: 2 }}
+                />
+                <IconButton
+                  icon="close"
+                  label="Remove highlight"
+                  active={!clip.highlightColor || clip.highlightColor === 'transparent'}
+                  onClick={() => updateClip(clip.id, { highlightColor: 'transparent' })}
+                />
+              </div>
+            </div>
+            <NumField label="Letter spacing" ariaLabel="Letter spacing (px)" value={clip.letterSpacing ?? 0} min={-10} max={100} onChange={(v) => updateClip(clip.id, { letterSpacing: v })} />
+          </div>
+          <NumField label="Line height" ariaLabel="Line height (multiple of font size)" value={clip.lineHeight ?? 1.2} min={0.5} max={3} step={0.05} onChange={(v) => updateClip(clip.id, { lineHeight: v })} />
           <div className="field video-props__volume">
             <label className="field__label" htmlFor="text-opacity" style={{ width: 54, flex: 'none' }}>Opacity</label>
             <input id="text-opacity" type="range" min={0} max={1} step={0.05} value={clip.opacity ?? 1} onChange={(e) => updateClip(clip.id, { opacity: Number(e.target.value) })} />

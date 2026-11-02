@@ -1,4 +1,4 @@
-import { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import type { VideoClip } from '@/models/video'
 import { useVideoEditorStore } from '@/stores/videoEditorStore'
 import { useVideoEditorUiStore } from '@/stores/videoEditorUiStore'
@@ -14,6 +14,87 @@ function fmt(t: number) {
   return `${m}:${s}`
 }
 
+interface TrimValues {
+  start: number
+  duration: number
+  trimIn: number
+}
+
+interface TrimSession {
+  id: string
+  kind: VideoClip['kind']
+  sourceDuration?: number
+  original: TrimValues
+  draft: TrimValues
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100
+}
+
+/** Precision trim toolbar for a clip in trim mode: numeric Trim In / Trim Out / Duration fields, a
+ * mini bar previewing the selected segment against the full source, and Reset/Cancel/Apply. All edits
+ * write to `onDraft` (live-previewed via store.previewClip by the caller) and only commit on Apply. */
+function TrimToolbar({ session, onDraft, onReset, onCancel, onApply }: {
+  session: TrimSession
+  onDraft: (next: TrimValues) => void
+  onReset: () => void
+  onCancel: () => void
+  onApply: () => void
+}) {
+  const { draft, sourceDuration } = session
+  const trimOut = draft.trimIn + draft.duration
+  const maxOut = sourceDuration ?? trimOut + 100000
+
+  function setTrimIn(raw: string) {
+    const v = Number(raw)
+    if (!Number.isFinite(v)) return
+    const clamped = Math.max(0, Math.min(v, trimOut - MIN_DURATION))
+    const delta = clamped - draft.trimIn
+    onDraft({ start: Math.max(0, round2(draft.start + delta)), duration: round2(draft.duration - delta), trimIn: round2(clamped) })
+  }
+
+  function setTrimOut(raw: string) {
+    const v = Number(raw)
+    if (!Number.isFinite(v)) return
+    const clamped = Math.max(draft.trimIn + MIN_DURATION, Math.min(v, maxOut))
+    onDraft({ ...draft, duration: round2(clamped - draft.trimIn) })
+  }
+
+  const barPct = (v: number) => (sourceDuration ? Math.min(100, Math.max(0, (v / sourceDuration) * 100)) : 0)
+
+  return (
+    <div className="video-trim-toolbar">
+      <span className="video-trim-toolbar__title">
+        <Icon name="scissors" size={14} /> Precision trim
+      </span>
+      <label className="video-trim-toolbar__field">
+        Trim in
+        <input type="number" step="0.1" min={0} value={draft.trimIn} onChange={(e) => setTrimIn(e.target.value)} />
+      </label>
+      <label className="video-trim-toolbar__field">
+        Trim out
+        <input type="number" step="0.1" min={0} value={round2(trimOut)} onChange={(e) => setTrimOut(e.target.value)} />
+      </label>
+      <span className="video-trim-toolbar__readout">
+        Duration <strong>{draft.duration.toFixed(1)}s</strong>
+      </span>
+      <span className="video-trim-toolbar__readout">
+        Source <strong>{sourceDuration != null ? `${sourceDuration.toFixed(1)}s` : '—'}</strong>
+      </span>
+      {sourceDuration != null && (
+        <div className="video-trim-toolbar__bar" title="Selected segment of the source media">
+          <div className="video-trim-toolbar__bar-segment" style={{ left: `${barPct(draft.trimIn)}%`, width: `${barPct(trimOut) - barPct(draft.trimIn)}%` }} />
+        </div>
+      )}
+      <span style={{ flex: 1 }} />
+      <Button size="sm" variant="ghost" onClick={onReset}>Reset</Button>
+      <Button size="sm" variant="ghost" onClick={onCancel}>Cancel (Esc)</Button>
+      <Button size="sm" variant="primary" onClick={onApply}>Apply (Enter)</Button>
+    </div>
+  )
+}
+
 export function Timeline() {
   const tracks = useVideoEditorStore((s) => s.tracks)
   const selection = useVideoEditorStore((s) => s.selection)
@@ -23,6 +104,7 @@ export function Timeline() {
   const moveClip = useVideoEditorStore((s) => s.moveClip)
   const addClip = useVideoEditorStore((s) => s.addClip)
   const updateClip = useVideoEditorStore((s) => s.updateClip)
+  const previewClip = useVideoEditorStore((s) => s.previewClip)
   const removeClip = useVideoEditorStore((s) => s.removeClip)
   const splitClipAt = useVideoEditorStore((s) => s.splitClipAt)
   const duplicateClip = useVideoEditorStore((s) => s.duplicateClip)
@@ -46,8 +128,90 @@ export function Timeline() {
   const [resizing, setResizing] = useState(false)
   const resizeStart = useRef<{ y: number; height: number } | null>(null)
 
+  // Double-click precision-trim mode: a local draft (start/duration/trimIn) for exactly one clip, live
+  // mirrored into the store via previewClip() (no history entry) so the preview canvas and playback stay
+  // in sync while dragging, and only committed as one real, undoable change on Apply.
+  const [trim, setTrim] = useState<TrimSession | null>(null)
+  const trimHandleDrag = useRef<{ side: 'in' | 'out'; startX: number; base: TrimValues } | null>(null)
+
   const totalWidth = Math.max(600, (duration + 10) * pps)
   const selectedClip = selection.length === 1 ? tracks.flatMap((t) => t.clips).find((c) => c.id === selection[0]) : undefined
+
+  function enterTrimMode(clip: VideoClip) {
+    if ((clip.kind !== 'video' && clip.kind !== 'audio') || clip.locked) return
+    // Switching clips mid-trim: discard the previous clip's uncommitted draft (restore its real values
+    // via previewClip) before opening a session for the new one — Video 1's edits must never leak into
+    // Video 2 just because the user double-clicked away without hitting Apply/Cancel.
+    if (trim && trim.id !== clip.id) previewClip(trim.id, trim.original)
+    select([clip.id])
+    const original: TrimValues = { start: clip.start, duration: clip.duration, trimIn: clip.trimIn }
+    setTrim({ id: clip.id, kind: clip.kind, sourceDuration: clip.sourceDuration, original, draft: original })
+  }
+
+  function setTrimDraft(next: TrimValues) {
+    if (!trim) return
+    previewClip(trim.id, next)
+    setTrim({ ...trim, draft: next })
+  }
+
+  function cancelTrim() {
+    if (trim) previewClip(trim.id, trim.original)
+    setTrim(null)
+    trimHandleDrag.current = null
+  }
+
+  function resetTrim() {
+    if (!trim) return
+    previewClip(trim.id, trim.original)
+    setTrim({ ...trim, draft: trim.original })
+  }
+
+  function applyTrim() {
+    if (!trim) return
+    updateClip(trim.id, trim.draft)
+    ensurePlayheadWithin(trim.draft.start, trim.draft.duration)
+    setTrim(null)
+    trimHandleDrag.current = null
+  }
+
+  useEffect(() => {
+    if (!trim) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') cancelTrim()
+      else if (e.key === 'Enter') applyTrim()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trim])
+
+  function startTrimHandleDrag(e: ReactPointerEvent<HTMLElement>, side: 'in' | 'out') {
+    if (!trim) return
+    e.stopPropagation()
+    e.preventDefault()
+    trimHandleDrag.current = { side, startX: e.clientX, base: trim.draft }
+    e.currentTarget.setPointerCapture(e.pointerId)
+  }
+
+  function onTrimHandleMove(e: ReactPointerEvent<HTMLElement>) {
+    const hd = trimHandleDrag.current
+    if (!hd || !trim) return
+    const dx = (e.clientX - hd.startX) / pps
+    if (hd.side === 'in') {
+      const maxShrink = hd.base.duration - MIN_DURATION
+      const minClamp = Math.max(-hd.base.start, -hd.base.trimIn)
+      const clamped = Math.max(minClamp, Math.min(maxShrink, dx))
+      setTrimDraft({ start: round2(hd.base.start + clamped), duration: round2(hd.base.duration - clamped), trimIn: round2(hd.base.trimIn + clamped) })
+    } else {
+      const maxDuration = trim.sourceDuration != null ? Math.max(MIN_DURATION, trim.sourceDuration - hd.base.trimIn) : Infinity
+      const duration = Math.min(maxDuration, Math.max(MIN_DURATION, hd.base.duration + dx))
+      setTrimDraft({ ...hd.base, duration: round2(duration) })
+    }
+  }
+
+  function endTrimHandleDrag() {
+    trimHandleDrag.current = null
+  }
 
   // Fit the timeline to its actual content (toolbar + ruler + however many track rows exist) instead of
   // reserving a fixed slice of the viewport — a fixed vh-based height starves the preview's vertical
@@ -127,6 +291,7 @@ export function Timeline() {
     e.stopPropagation()
     e.preventDefault()
     select([clip.id])
+    if (clip.locked) return
     ensurePlayheadWithin(clip.start, clip.duration)
     setDrag({ id: clip.id, mode, startX: e.clientX, clip })
     setDragPreview({ start: clip.start, duration: clip.duration, trimIn: clip.trimIn })
@@ -197,6 +362,9 @@ export function Timeline() {
         <Button size="sm" icon="plus" onClick={() => setActiveTrack(addTrack('audio'))}>Audio track</Button>
         <Button size="sm" icon="plus" onClick={addTextClip}>Text track</Button>
       </div>
+      {trim && (
+        <TrimToolbar session={trim} onDraft={setTrimDraft} onReset={resetTrim} onCancel={cancelTrim} onApply={applyTrim} />
+      )}
       <div className="video-timeline__rail" ref={railRef}>
         <div className="video-timeline__ruler" style={{ width: totalWidth }} onPointerDown={seekFromClick}>
           {Array.from({ length: Math.ceil(totalWidth / pps) + 1 }, (_, i) => (
@@ -214,18 +382,20 @@ export function Timeline() {
                   they were. */}
               <div className="video-track__lane" style={{ width: totalWidth }}>
                 {track.clips.map((clip) => {
-                  const live = drag?.id === clip.id && dragPreview ? dragPreview : clip
+                  const inTrimMode = trim?.id === clip.id
+                  const live = inTrimMode ? trim.draft : drag?.id === clip.id && dragPreview ? dragPreview : clip
                   const widthPx = Math.max(10, live.duration * pps)
                   return (
                     <button
                       key={clip.id}
                       type="button"
-                      className={`video-clip video-clip--${clip.kind} ${selection.includes(clip.id) ? 'is-selected' : ''}`}
+                      className={`video-clip video-clip--${clip.kind} ${selection.includes(clip.id) ? 'is-selected' : ''} ${clip.hidden ? 'is-hidden-layer' : ''} ${clip.locked ? 'is-locked-layer' : ''} ${inTrimMode ? 'is-trimming' : ''}`}
                       style={{ left: live.start * pps, width: widthPx }}
-                      onPointerDown={(e) => startDrag(e, clip, 'move')}
-                      onPointerMove={onDragMove}
-                      onPointerUp={endDrag}
-                      onPointerCancel={endDrag}
+                      onPointerDown={(e) => { if (!inTrimMode) startDrag(e, clip, 'move') }}
+                      onPointerMove={inTrimMode ? undefined : onDragMove}
+                      onPointerUp={inTrimMode ? undefined : endDrag}
+                      onPointerCancel={inTrimMode ? undefined : endDrag}
+                      onDoubleClick={(e) => { e.stopPropagation(); enterTrimMode(clip) }}
                     >
                       {clip.kind === 'video' && clip.assetUrl && (
                         <VideoThumbnails assetUrl={clip.assetUrl} trimIn={live.trimIn} duration={live.duration} widthPx={widthPx} />
@@ -233,9 +403,21 @@ export function Timeline() {
                       {clip.kind === 'audio' && clip.assetUrl && (
                         <AudioWaveform assetUrl={clip.assetUrl} trimIn={live.trimIn} duration={live.duration} sourceDuration={clip.sourceDuration} />
                       )}
-                      <span className="video-clip__handle video-clip__handle--left" onPointerDown={(e) => startDrag(e, clip, 'trim-left')} onPointerMove={onDragMove} onPointerUp={endDrag} onPointerCancel={endDrag} />
+                      <span
+                        className="video-clip__handle video-clip__handle--left"
+                        onPointerDown={(e) => (inTrimMode ? startTrimHandleDrag(e, 'in') : startDrag(e, clip, 'trim-left'))}
+                        onPointerMove={inTrimMode ? onTrimHandleMove : onDragMove}
+                        onPointerUp={inTrimMode ? endTrimHandleDrag : endDrag}
+                        onPointerCancel={inTrimMode ? endTrimHandleDrag : endDrag}
+                      />
                       <span className="video-clip__label">{clip.kind === 'text' ? (clip.text || 'Text') : clip.assetUrl?.split('/').pop()}</span>
-                      <span className="video-clip__handle video-clip__handle--right" onPointerDown={(e) => startDrag(e, clip, 'trim-right')} onPointerMove={onDragMove} onPointerUp={endDrag} onPointerCancel={endDrag} />
+                      <span
+                        className="video-clip__handle video-clip__handle--right"
+                        onPointerDown={(e) => (inTrimMode ? startTrimHandleDrag(e, 'out') : startDrag(e, clip, 'trim-right'))}
+                        onPointerMove={inTrimMode ? onTrimHandleMove : onDragMove}
+                        onPointerUp={inTrimMode ? endTrimHandleDrag : endDrag}
+                        onPointerCancel={inTrimMode ? endTrimHandleDrag : endDrag}
+                      />
                     </button>
                   )
                 })}

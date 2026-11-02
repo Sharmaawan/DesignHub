@@ -14,11 +14,27 @@ export function ImageBody({ data: d }: Props) {
   const f = d.filters
   const hasFilters = !!f && (f.brightness !== 0 || f.contrast !== 0 || f.saturation !== 0 || f.blur > 0 || f.grayscale)
 
+  // Konva's cache() rasterizes the node to an offscreen canvas — that's the expensive part, and it only
+  // needs redoing when the underlying pixels change (image swapped, cropped, resized, or filters turned
+  // on/off). It does NOT need redoing when an already-on filter's VALUE changes (dragging the brightness
+  // slider, say) — Konva reapplies the active filters to the existing cached bitmap on every draw using
+  // whatever the current filter values are. The previous code re-ran the full cache() on every slider
+  // tick regardless, which is why adjusting filters on a real (non-tiny) photo — especially with several
+  // images selected at once — could feel like it wasn't responding: each tick was paying for a full
+  // re-rasterization of every selected image before anything visibly updated.
+  useEffect(() => {
+    const node = ref.current
+    if (!node || !img) return
+    if (hasFilters) node.cache({ pixelRatio: Math.min(2, window.devicePixelRatio || 1) })
+    else node.clearCache()
+    node.getLayer()?.batchDraw()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [img, hasFilters, d.width, d.height, d.crop?.x, d.crop?.y, d.crop?.width, d.crop?.height])
+
   useEffect(() => {
     const node = ref.current
     if (!node || !img) return
     if (!hasFilters || !f) {
-      node.clearCache()
       node.filters([])
     } else {
       const list: (typeof Konva.Filters.Brighten)[] = []
@@ -27,7 +43,6 @@ export function ImageBody({ data: d }: Props) {
       if (f.saturation !== 0) list.push(Konva.Filters.HSL)
       if (f.blur > 0) list.push(Konva.Filters.Blur)
       if (f.grayscale) list.push(Konva.Filters.Grayscale)
-      node.cache({ pixelRatio: Math.min(2, window.devicePixelRatio || 1) })
       node.filters(list)
       node.brightness(f.brightness / 100)
       node.contrast(f.contrast)
@@ -35,7 +50,8 @@ export function ImageBody({ data: d }: Props) {
       node.blurRadius(f.blur)
     }
     node.getLayer()?.batchDraw()
-  }, [img, hasFilters, f?.brightness, f?.contrast, f?.saturation, f?.blur, f?.grayscale, d.width, d.height, d.crop?.x, d.crop?.y, d.crop?.width, d.crop?.height]) // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [img, hasFilters, f?.brightness, f?.contrast, f?.saturation, f?.blur, f?.grayscale])
 
   const radius = d.cornerRadius ?? 0
   const clip = radius > 0 ? (ctx: Konva.Context) => roundRect(ctx, d.width, d.height, radius) : undefined

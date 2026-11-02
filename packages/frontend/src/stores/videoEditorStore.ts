@@ -36,11 +36,20 @@ interface VideoEditorState {
   removeTrack: (id: string) => void
   addClip: (trackId: string, clip: Omit<VideoClip, 'id'>) => string
   updateClip: (id: string, patch: Partial<VideoClip>) => void
+  /** Same shape as updateClip, but writes straight to state with no undo-stack entry and no `dirty` flag —
+   * for live visual feedback while a drag/trim is in progress (e.g. precision-trim mode). The caller is
+   * responsible for a single real updateClip() once the interaction commits (Apply), or restoring the
+   * original values via another previewPatch() call on Cancel/Escape. */
+  previewClip: (id: string, patch: Partial<VideoClip>) => void
   moveClip: (id: string, start: number, trackId?: string) => void
   splitClipAt: (id: string, time: number) => void
   duplicateClip: (id: string) => void
   toggleMute: (id: string) => void
   removeClip: (id: string) => void
+  /** Re-stacks the track that owns `id` relative to other tracks of the same kind, without touching any
+   * clip's start/duration — this is what "Layers" reordering, bring-to-front, send-to-back map to, since
+   * visual stacking in this editor is a track-order property (see PreviewStage/videoExport), not a per-clip one. */
+  reorderLayer: (id: string, to: 'front' | 'back' | 'forward' | 'backward' | number) => void
   undo: () => void
   redo: () => void
   duration: () => number
@@ -135,13 +144,25 @@ export const useVideoEditorStore = create<VideoEditorState>((set, get) => {
       return id
     },
 
-    updateClip: (id, patch) => withHistory((tracks) => tracks.map((t) => ({ ...t, clips: t.clips.map((c) => (c.id === id ? { ...c, ...patch } : c)) }))),
+    // A locked clip only accepts a patch that changes its own `locked` flag (i.e. unlocking it) — every
+    // other field (position, size, trim, style, text...) is a no-op while locked, per the Layers "Lock" contract.
+    updateClip: (id, patch) => {
+      const clip = get().tracks.flatMap((t) => t.clips).find((c) => c.id === id)
+      if (clip?.locked && !('locked' in patch)) return
+      withHistory((tracks) => tracks.map((t) => ({ ...t, clips: t.clips.map((c) => (c.id === id ? { ...c, ...patch } : c)) })))
+    },
+
+    previewClip: (id, patch) => {
+      const clip = get().tracks.flatMap((t) => t.clips).find((c) => c.id === id)
+      if (clip?.locked && !('locked' in patch)) return
+      set((s) => ({ tracks: s.tracks.map((t) => ({ ...t, clips: t.clips.map((c) => (c.id === id ? { ...c, ...patch } : c)) })) }))
+    },
 
     moveClip: (id, start, trackId) => {
       const s = get()
       const sourceTrack = s.tracks.find((t) => t.clips.some((c) => c.id === id))
       const clip = sourceTrack?.clips.find((c) => c.id === id)
-      if (!sourceTrack || !clip) return
+      if (!sourceTrack || !clip || clip.locked) return
       const destId = trackId ?? sourceTrack.id
       const moved: VideoClip = { ...clip, start: Math.max(0, start) }
       withHistory((tracks) => tracks.map((t) => {
@@ -154,7 +175,7 @@ export const useVideoEditorStore = create<VideoEditorState>((set, get) => {
     splitClipAt: (id, time) => withHistory((tracks) => tracks.map((t) => ({
       ...t,
       clips: t.clips.flatMap((c) => {
-        if (c.id !== id || time <= c.start || time >= c.start + c.duration) return [c]
+        if (c.id !== id || c.locked || time <= c.start || time >= c.start + c.duration) return [c]
         const firstDuration = time - c.start
         const secondDuration = c.duration - firstDuration
         const first: VideoClip = { ...c, duration: firstDuration }
@@ -170,7 +191,7 @@ export const useVideoEditorStore = create<VideoEditorState>((set, get) => {
       const s = get()
       const track = s.tracks.find((t) => t.clips.some((c) => c.id === id))
       const clip = track?.clips.find((c) => c.id === id)
-      if (!track || !clip) return
+      if (!track || !clip || clip.locked) return
       const end = trackEnd(track)
       const copy: VideoClip = { ...clip, id: uid(), start: Math.max(end, clip.start + clip.duration) }
       withHistory((tracks) => tracks.map((t) => (t.id === track.id ? { ...t, clips: [...t.clips, copy] } : t)))
@@ -183,8 +204,32 @@ export const useVideoEditorStore = create<VideoEditorState>((set, get) => {
     }))),
 
     removeClip: (id) => {
+      const clip = get().tracks.flatMap((t) => t.clips).find((c) => c.id === id)
+      if (clip?.locked) return
       withHistory((tracks) => tracks.map((t) => ({ ...t, clips: t.clips.filter((c) => c.id !== id) })))
       set((s) => ({ selection: s.selection.filter((sid) => sid !== id) }))
+    },
+
+    reorderLayer: (id, to) => {
+      const s = get()
+      const track = s.tracks.find((t) => t.clips.some((c) => c.id === id))
+      if (!track) return
+      const sameKind = s.tracks.filter((t) => t.kind === track.kind)
+      const idx = sameKind.indexOf(track)
+      let targetIdx = idx
+      if (typeof to === 'number') targetIdx = Math.max(0, Math.min(sameKind.length - 1, to))
+      else if (to === 'front') targetIdx = sameKind.length - 1
+      else if (to === 'back') targetIdx = 0
+      else if (to === 'forward') targetIdx = Math.min(sameKind.length - 1, idx + 1)
+      else targetIdx = Math.max(0, idx - 1)
+      if (targetIdx === idx) return
+      const reorderedKind = [...sameKind]
+      reorderedKind.splice(idx, 1)
+      reorderedKind.splice(targetIdx, 0, track)
+      // Splice the reordered same-kind tracks back into their original slots within the full tracks
+      // array, so other-kind tracks (e.g. audio sitting between two video tracks) keep their position.
+      let cursor = 0
+      withHistory((tracks) => tracks.map((t) => (t.kind === track.kind ? reorderedKind[cursor++]! : t)))
     },
 
     undo: () => {

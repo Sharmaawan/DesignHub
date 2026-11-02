@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { videoProjectApi } from '@/services/api/videoProjectApi'
 import { useVideoEditorStore } from '@/stores/videoEditorStore'
@@ -9,6 +9,7 @@ import { MediaBin } from '@/components/video/MediaBin'
 import { PreviewStage } from '@/components/video/PreviewStage'
 import { Timeline } from '@/components/video/Timeline'
 import { VideoPropertiesPanel } from '@/components/video/VideoPropertiesPanel'
+import { VideoLayersPanel } from '@/components/video/VideoLayersPanel'
 import './video.css'
 
 export default function VideoEditorActivity() {
@@ -20,6 +21,7 @@ export default function VideoEditorActivity() {
   const load = useVideoEditorStore((s) => s.load)
   const dirty = useVideoEditorStore((s) => s.dirty)
   const save = useVideoEditorStore((s) => s.save)
+  const [rightTab, setRightTab] = useState<'properties' | 'layers'>('properties')
 
   useEffect(() => {
     if (!Number.isSafeInteger(id) || id <= 0) {
@@ -63,7 +65,27 @@ export default function VideoEditorActivity() {
           <PreviewStage />
         </div>
         <aside className="video-editor__right">
-          <VideoPropertiesPanel />
+          <div className="video-right-toggle" role="tablist" aria-label="Right sidebar">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={rightTab === 'properties'}
+              className={`video-right-toggle__btn ${rightTab === 'properties' ? 'is-active' : ''}`}
+              onClick={() => setRightTab('properties')}
+            >
+              Properties
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={rightTab === 'layers'}
+              className={`video-right-toggle__btn ${rightTab === 'layers' ? 'is-active' : ''}`}
+              onClick={() => setRightTab('layers')}
+            >
+              Layers
+            </button>
+          </div>
+          {rightTab === 'properties' ? <VideoPropertiesPanel /> : <VideoLayersPanel />}
         </aside>
       </div>
       <Timeline />

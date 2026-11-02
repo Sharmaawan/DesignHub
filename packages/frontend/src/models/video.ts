@@ -10,8 +10,14 @@ export interface VideoClip {
   /** Full duration of the source media, in seconds (ignored for text). Bounds how far trimIn/duration can go. */
   sourceDuration?: number
   assetUrl?: string
+  /** User-assigned layer name (Layers panel "Rename"). Falls back to the asset filename/text when unset. */
+  name?: string
   volume: number
   muted?: boolean
+  /** Per-layer visibility — distinct from the track-level `hidden` flag; excluded from preview and export. */
+  hidden?: boolean
+  /** Per-layer lock — blocks move/trim/resize/style edits in the timeline, canvas and inspector. */
+  locked?: boolean
   text?: string
   fontSize?: number
   fontFamily?: string
@@ -19,6 +25,12 @@ export interface VideoClip {
   bold?: boolean
   italic?: boolean
   textAlign?: 'left' | 'center' | 'right'
+  /** Background/highlight colour drawn behind the text. Omit or 'transparent' for none. */
+  highlightColor?: string
+  /** Extra space between letters, in px at the clip's fontSize. */
+  letterSpacing?: number
+  /** Line height as a multiple of fontSize (e.g. 1.2). */
+  lineHeight?: number
   /** 0–1, fraction of the project canvas opacity. */
   opacity?: number
   /** 0–1, fraction of the canvas width/height — the text's center point. Defaults to bottom-center. */

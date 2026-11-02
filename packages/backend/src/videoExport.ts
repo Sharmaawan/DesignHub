@@ -17,6 +17,8 @@ export interface ExportClip {
   assetUrl?: string
   volume: number
   muted?: boolean
+  hidden?: boolean
+  locked?: boolean
   text?: string
   fontSize?: number
   fontFamily?: string
@@ -24,6 +26,9 @@ export interface ExportClip {
   bold?: boolean
   italic?: boolean
   textAlign?: 'left' | 'center' | 'right'
+  highlightColor?: string
+  letterSpacing?: number
+  lineHeight?: number
   opacity?: number
   x?: number
   y?: number
@@ -192,7 +197,7 @@ async function renderVideoProject(
 
   // Bottom layer: the first video track, concatenated across its full duration (gaps filled with black).
   const baseTrack = videoTracks[0]
-  const baseSegments = baseTrack ? segmentsForTrack(baseTrack.clips, duration) : [{ start: 0, end: duration, clip: null }]
+  const baseSegments = baseTrack ? segmentsForTrack(baseTrack.clips.filter((c) => !c.hidden), duration) : [{ start: 0, end: duration, clip: null }]
   const baseLabels: string[] = []
   for (const seg of baseSegments) {
     const segDuration = Math.max(0.05, seg.end - seg.start)
@@ -225,6 +230,7 @@ async function renderVideoProject(
   for (let trackIdx = 1; trackIdx < videoTracks.length; trackIdx++) {
     const track = videoTracks[trackIdx]!
     for (const clip of track.clips) {
+      if (clip.hidden) continue
       const segDuration = Math.max(0.05, clip.duration)
       const label = `v${inputIndex}`
       if (clip.kind === 'image') {
@@ -251,7 +257,7 @@ async function renderVideoProject(
   for (const track of input.tracks) {
     if (track.kind !== 'audio' || track.muted) continue
     for (const clip of track.clips) {
-      if (clip.volume <= 0 || clip.muted || !clip.assetUrl) continue
+      if (clip.hidden || clip.volume <= 0 || clip.muted || !clip.assetUrl) continue
       args.push('-ss', clip.trimIn.toFixed(3), '-t', clip.duration.toFixed(3), '-i', resolveAssetPath(clip.assetUrl))
       const alabel = `a${inputIndex}`
       const delayMs = Math.round(clip.start * 1000)
@@ -266,7 +272,7 @@ async function renderVideoProject(
   for (const track of input.tracks) {
     if (track.kind !== 'text' || track.hidden) continue
     for (const clip of track.clips) {
-      if (!clip.text?.trim()) continue
+      if (clip.hidden || !clip.text?.trim()) continue
       const next = `txt${textIndex++}`
       const fontFile = resolveFontFile(clip.fontFamily, !!clip.bold, !!clip.italic)
       // ffmpeg's filtergraph parser treats backslash as its own escape character, so a raw Windows path
@@ -285,8 +291,16 @@ async function renderVideoProject(
       // an honest approximation of bold rather than silently ignoring it — italic has no such fallback.
       const boldFallback = clip.bold && !fontFile?.toLowerCase().includes('bd') && !fontFile?.toLowerCase().includes('bold')
       const boldArg = boldFallback ? `:borderw=2:bordercolor=${colorHex}@${opacity.toFixed(2)}` : ''
+      const fontSize = Math.round(clip.fontSize ?? 48)
+      const highlightArg =
+        clip.highlightColor && clip.highlightColor !== 'transparent'
+          ? `:box=1:boxcolor=${clip.highlightColor.replace('#', '0x')}@${opacity.toFixed(2)}:boxborderw=6`
+          : ''
+      // drawtext has no letter-spacing knob; line_spacing is its closest analogue to our lineHeight
+      // multiplier, applied as extra pixels inserted between wrapped/explicit lines.
+      const lineSpacingArg = clip.lineHeight != null ? `:line_spacing=${Math.round((clip.lineHeight - 1) * fontSize)}` : ''
       filters.push(
-        `[${videoOut}]drawtext=${fontArg}text='${escapeDrawtext(clip.text)}':fontsize=${Math.round(clip.fontSize ?? 48)}:fontcolor=${colorHex}@${opacity.toFixed(2)}${boldArg}:x=(w*${cx.toFixed(4)})-text_w/2:y=(h*${cy.toFixed(4)})-text_h/2:enable='between(t,${clip.start},${clip.start + clip.duration})'[${next}]`,
+        `[${videoOut}]drawtext=${fontArg}text='${escapeDrawtext(clip.text)}':fontsize=${fontSize}:fontcolor=${colorHex}@${opacity.toFixed(2)}${boldArg}${highlightArg}${lineSpacingArg}:x=(w*${cx.toFixed(4)})-text_w/2:y=(h*${cy.toFixed(4)})-text_h/2:enable='between(t,${clip.start},${clip.start + clip.duration})'[${next}]`,
       )
       videoOut = next
     }

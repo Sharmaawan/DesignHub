@@ -102,6 +102,10 @@ export async function insertAsset(payload: AssetPayload, point?: { x: number; y:
         const hosted = payload.width && payload.height && isOurs(payload.url) ? { url: payload.url, width: payload.width, height: payload.height } : await hostImage(payload.url, payload.name)
         if (frameId) {
           updateElements([frameId], { src: hosted.url, imageScale: 1, imageOffsetX: 0, imageOffsetY: 0 })
+          // updateElements (unlike insertElements) has no selection side effect, so without this the
+          // frame's image/crop/filter controls never appear after an AI-generated picture fills it —
+          // the inspector panel stays on whatever was selected before, or nothing.
+          store().select([frameId], { exact: true })
           return
         }
         insertElements([createImage(o, hosted.url, hosted.width, hosted.height, maxImage)])
