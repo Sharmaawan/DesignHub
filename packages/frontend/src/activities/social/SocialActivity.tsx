@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { socialApi } from '@/services/api/socialApi'
 import { approvalApi, type ApprovalState, type WaitingItem } from '@/services/api/approvalApi'
@@ -63,7 +63,16 @@ export default function SocialActivity() {
     void loadDesignApprovals()
   }, [])
 
+  // useSearchParams() returns a new URLSearchParams instance on every render (not just on navigation), so
+  // an effect keyed on `params` can re-fire — asynchronously, before setParams({}, {replace:true}) below
+  // has actually cleared the URL — while the connect/error/ticket values are unchanged. That duplicated
+  // the "connected"/error toasts and re-requested the same ticket a second time (surfacing as a spurious
+  // "expired" toast on an otherwise-valid ticket). Guard with the raw query string so each one is handled once.
+  const handledQuery = useRef<string | null>(null)
   useEffect(() => {
+    const query = params.toString()
+    if (!query || handledQuery.current === query) return
+    handledQuery.current = query
     const connected = params.get('connected')
     const err = params.get('error')
     const ticket = params.get('ticket')
@@ -78,7 +87,7 @@ export default function SocialActivity() {
         })
         .catch((error) => toast.error(errorMessage(error)))
     }
-    if (connected || err || ticket) setParams({}, { replace: true })
+    setParams({}, { replace: true })
   }, [params, setParams])
 
   async function connect(platform: string) {

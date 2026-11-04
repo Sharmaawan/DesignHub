@@ -1,5 +1,5 @@
 import 'dotenv/config'
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto'
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { lookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
 import { mkdir, unlink } from 'node:fs/promises'
@@ -594,7 +594,14 @@ app.post('/api/auth/google', async (req, res) => {
 app.use('/api', (req, res, next) => {
   if (req.method === 'GET' && (
     req.path.startsWith('/files/') || req.path.startsWith('/public/shares/') || req.path.startsWith('/social/callback/')
+    || req.path === '/social/data-deletion/status'
   )) {
+    next()
+    return
+  }
+  // Facebook's data-deletion callback is a server-to-server POST with no DesignHub session — it
+  // authenticates itself via the signed_request's HMAC signature (checked inside the handler), not a bearer token.
+  if (req.method === 'POST' && req.path === '/social/data-deletion/facebook') {
     next()
     return
   }
@@ -1733,6 +1740,58 @@ async function saveFacebookPage(executor: Pick<PoolConnection, 'execute'>, userI
   return Number(result.insertId)
 }
 
+/** Verifies and decodes a Facebook "signed_request" (base64url(HMAC-SHA256 signature) + '.' +
+ * base64url(JSON payload)), per https://developers.facebook.com/docs/reference/login/signed-request/.
+ * Returns null if the format or signature doesn't check out, so the caller can reject the request. */
+function parseFacebookSignedRequest(signedRequest: string, appSecret: string): { user_id?: string } | null {
+  const parts = signedRequest.split('.')
+  if (parts.length !== 2) return null
+  const [encodedSig, encodedPayload] = parts as [string, string]
+  const toBuffer = (b64url: string) => Buffer.from(b64url.replace(/-/g, '+').replace(/_/g, '/'), 'base64')
+  const expectedSig = createHmac('sha256', appSecret).update(encodedPayload).digest()
+  const actualSig = toBuffer(encodedSig)
+  if (actualSig.length !== expectedSig.length || !timingSafeEqual(actualSig, expectedSig)) return null
+  try {
+    return JSON.parse(toBuffer(encodedPayload).toString('utf8'))
+  } catch {
+    return null
+  }
+}
+
+// Facebook's "Data Deletion Callback URL" (Settings > Basic > User data deletion, or the equivalent App
+// Review field) — Facebook POSTs here automatically whenever a user removes this app from their Facebook
+// settings, and expects back { url, confirmation_code } pointing at a page the user can check for status.
+// This is required before Facebook will let any non-admin/tester account log in through the app.
+app.post('/api/social/data-deletion/facebook', async (req, res) => {
+  const { clientSecret } = socialCredentials('facebook')
+  const signedRequest = String(req.body?.signed_request ?? '')
+  const payload = clientSecret ? parseFacebookSignedRequest(signedRequest, clientSecret) : null
+  if (!payload?.user_id) {
+    res.status(400).json({ error: 'Invalid signed_request.' })
+    return
+  }
+  await run(`DELETE FROM social_accounts WHERE platform = 'facebook' AND facebook_login_id = ?`, [payload.user_id])
+  const confirmationCode = randomBytes(8).toString('hex')
+  res.json({
+    url: `${publicUrl}/api/social/data-deletion/status?code=${confirmationCode}`,
+    confirmation_code: confirmationCode,
+  })
+})
+
+// The status page Facebook's response above points users at. Deletion already happened synchronously in
+// the POST handler, so this is purely informational — it isn't a lookup against stored confirmation codes.
+app.get('/api/social/data-deletion/status', (req, res) => {
+  const code = String(req.query.code ?? '')
+  res.type('html').send(
+    `<!doctype html><html><head><meta charset="utf-8"><title>Data deletion status</title></head>` +
+      `<body style="font-family:sans-serif;max-width:480px;margin:48px auto;line-height:1.5">` +
+      `<h1>Data deletion complete</h1>` +
+      `<p>Your DesignHub data connected via Facebook/Instagram Login has been deleted.</p>` +
+      (code ? `<p>Confirmation code: <code>${code.replace(/[^a-f0-9]/gi, '')}</code></p>` : '') +
+      `</body></html>`,
+  )
+})
+
 app.get('/api/social/callback/:platform', async (req, res) => {
   const platform = String(req.params.platform)
   const base = new URL('/social', frontendUrl)
@@ -1753,9 +1812,13 @@ app.get('/api/social/callback/:platform', async (req, res) => {
     if (platform === 'facebook' && account.pages && account.pages.length > 1) {
       const ticket = randomBytes(32).toString('base64url')
       await run('DELETE FROM oauth_pending_accounts WHERE expires_at <= CURRENT_TIMESTAMP')
+      // 30 minutes, not 10: by this point the user already finished Facebook's own multi-screen consent
+      // (login, permissions, any Business Verification interstitial) and this window is only for them to
+      // view and submit the Page picker in our UI — a short window here caused real users to land back
+      // with a ticket that read as already "expired" if that upstream Facebook flow took a few minutes.
       await run(
         `INSERT INTO oauth_pending_accounts (ticket, user_id, platform, page_data, expires_at)
-         VALUES (?, ?, ?, ?, DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 10 MINUTE))`,
+         VALUES (?, ?, ?, ?, DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 30 MINUTE))`,
         [ticket, state.userId, platform, encryptSecret(JSON.stringify(account.pages))],
       )
       base.searchParams.set('ticket', ticket)
