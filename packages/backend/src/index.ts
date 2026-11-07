@@ -3188,9 +3188,14 @@ app.use((error: unknown, _req: Request, res: ExpressResponse, _next: NextFunctio
     res.status(err.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({ message: err.message })
     return
   }
+  // `status` set explicitly means this is one of our own deliberately-thrown errors (e.g. "The AI provider
+  // could not be reached", "That base URL could not be reached") — its message is safe and useful to show
+  // the user even at a 5xx, unlike a genuine unhandled exception (DB failure, TypeError, etc.), which has
+  // no `status` and must stay generic so internals never leak to the client.
+  const hadExplicitStatus = err.status != null
   const status = err.status ?? 500
   if (status >= 500) console.error(err)
-  res.status(status).json({ message: status >= 500 ? 'An unexpected server error occurred.' : err.message })
+  res.status(status).json({ message: status >= 500 && !hadExplicitStatus ? 'An unexpected server error occurred.' : err.message })
 })
 
 interface SocketState {
